@@ -9,7 +9,9 @@ coding agents via MCP.
 Junrei provides **logic-derived quantitative data only** — the evaluation and
 improvement loop belongs to humans and to agents consuming the data over MCP.
 
-See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
+See [docs/concept.md](docs/concept.md) (mission, signal model, information
+architecture), [docs/design.md](docs/design.md) (technical design), and
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Development
 
