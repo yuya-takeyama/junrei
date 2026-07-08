@@ -1,28 +1,45 @@
 import { useEffect, useState } from "react";
+import { SessionDetail } from "./SessionDetail.js";
+import { SessionList } from "./SessionList.js";
 
-type Health = { status: string; name: string };
+type Route = { view: "list" } | { view: "session"; project: string; id: string };
+
+function parseRoute(hash: string): Route {
+  const match = /^#\/session\/([^/]+)\/([^/]+)$/.exec(hash);
+  if (match?.[1] !== undefined && match[2] !== undefined) {
+    return {
+      view: "session",
+      project: decodeURIComponent(match[1]),
+      id: decodeURIComponent(match[2]),
+    };
+  }
+  return { view: "list" };
+}
 
 export function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((res) => res.json() as Promise<Health>)
-      .then(setHealth)
-      .catch((e: unknown) => setError(String(e)));
+    const onHashChange = () => setRoute(parseRoute(window.location.hash));
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-      <h1>Junrei</h1>
-      <p>Agent Statistics Analyzer — prototype scaffold.</p>
-      {health !== null && (
-        <p>
-          Server: <code>{health.name}</code> is <strong>{health.status}</strong>
-        </p>
+    <div className="layout">
+      <header className="app-header">
+        <h1>
+          <a href="#/" style={{ color: "inherit" }}>
+            Junrei
+          </a>
+        </h1>
+        <span className="tagline">Agent Statistics Analyzer — quantitative session metrics</span>
+      </header>
+      {route.view === "list" ? (
+        <SessionList />
+      ) : (
+        <SessionDetail project={route.project} id={route.id} />
       )}
-      {error !== null && <p style={{ color: "crimson" }}>Server unreachable: {error}</p>}
-    </main>
+    </div>
   );
 }
