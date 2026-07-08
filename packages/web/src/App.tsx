@@ -1,20 +1,7 @@
 import { useEffect, useState } from "react";
-import { SessionDetail } from "./SessionDetail.js";
+import { parseRoute, type Route } from "./router.js";
 import { SessionList } from "./SessionList.js";
-
-type Route = { view: "list" } | { view: "session"; project: string; id: string };
-
-function parseRoute(hash: string): Route {
-  const match = /^#\/session\/([^/]+)\/([^/]+)$/.exec(hash);
-  if (match?.[1] !== undefined && match[2] !== undefined) {
-    return {
-      view: "session",
-      project: decodeURIComponent(match[1]),
-      id: decodeURIComponent(match[2]),
-    };
-  }
-  return { view: "list" };
-}
+import { SessionShell } from "./SessionShell.js";
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
@@ -26,19 +13,11 @@ export function App() {
   }, []);
 
   return (
-    <div className="layout">
-      <header className="app-header">
-        <h1>
-          <a href="#/" style={{ color: "inherit" }}>
-            Junrei
-          </a>
-        </h1>
-        <span className="tagline">Agent Statistics Analyzer — quantitative session metrics</span>
-      </header>
+    <div className="app">
       {route.view === "list" ? (
         <SessionList />
       ) : (
-        <SessionDetail project={route.project} id={route.id} />
+        <SessionShell project={route.project} id={route.id} lens={route.lens} />
       )}
     </div>
   );

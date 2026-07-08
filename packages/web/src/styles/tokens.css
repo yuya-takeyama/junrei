@@ -1,0 +1,71 @@
+/*
+ * Design tokens — "Flight recorder" theme (see design-spec/00-tokens.md).
+ * Dark (t-b) is primary; light (t-bl) swaps color values only — fonts and
+ * radius are identical between themes.
+ *
+ * Theme resolution order (highest specificity wins, independent of source
+ * order below):
+ *   1. :root[data-theme="dark"|"light"] — explicit user choice.
+ *   2. :root:not([data-theme]) inside `prefers-color-scheme: light` — no
+ *      explicit choice, system prefers light.
+ *   3. :root — default (dark), when nothing above matches.
+ */
+
+:root {
+  /* dark (default) */
+  --bg: #191411;
+  --pan: #211a14;
+  --bd: #382d20;
+  --tx: #ede4d6;
+  --mut: #988976;
+  --amb: #f0a63c;
+  --err: #e07a63;
+  --f: #b58ce0;
+  --s: #7aa8e0;
+  --h: #66c2a6;
+
+  --ui: "Fira Sans", system-ui, -apple-system, sans-serif;
+  --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --rad: 2px;
+}
+
+:root[data-theme="dark"] {
+  --bg: #191411;
+  --pan: #211a14;
+  --bd: #382d20;
+  --tx: #ede4d6;
+  --mut: #988976;
+  --amb: #f0a63c;
+  --err: #e07a63;
+  --f: #b58ce0;
+  --s: #7aa8e0;
+  --h: #66c2a6;
+}
+
+:root[data-theme="light"] {
+  --bg: #faf6ee;
+  --pan: #f1eadc;
+  --bd: #d9cdb4;
+  --tx: #2c251b;
+  --mut: #8b7d67;
+  --amb: #a86e14;
+  --err: #b0402c;
+  --f: #7a56b8;
+  --s: #3470bd;
+  --h: #178a70;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #faf6ee;
+    --pan: #f1eadc;
+    --bd: #d9cdb4;
+    --tx: #2c251b;
+    --mut: #8b7d67;
+    --amb: #a86e14;
+    --err: #b0402c;
+    --f: #7a56b8;
+    --s: #3470bd;
+    --h: #178a70;
+  }
+}

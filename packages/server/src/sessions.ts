@@ -4,7 +4,14 @@ import {
   resolveProjectsDirs,
   type SessionAnalysis,
   type SessionFileRef,
+  type SubagentNode,
 } from "@junrei/core";
+
+/** Per-model output-token totals (main session + all subagents, recursively). */
+export interface ModelMixEntry {
+  model: string;
+  outputTokens: number;
+}
 
 export interface SessionListItem {
   sessionId: string;
@@ -26,6 +33,31 @@ export interface SessionListItem {
   toolCallCount: number;
   toolErrorCount: number;
   sizeBytes: number;
+  /** Output-token share per model, main session + all subagents (for the L0 model-mix bar). */
+  modelMix: ModelMixEntry[];
+}
+
+/**
+ * Aggregate output tokens per model across the main transcript and every
+ * subagent (recursively), so the session-list "model mix" bar reflects the
+ * whole session, not just the top-level model.
+ */
+export function computeModelMix(analysis: SessionAnalysis): ModelMixEntry[] {
+  const totals = new Map<string, number>();
+  const addUsage = (byModel: readonly { model: string; outputTokens: number }[]) => {
+    for (const m of byModel) {
+      totals.set(m.model, (totals.get(m.model) ?? 0) + m.outputTokens);
+    }
+  };
+  addUsage(analysis.usage.byModel);
+  const visit = (nodes: readonly SubagentNode[]) => {
+    for (const node of nodes) {
+      addUsage(node.usage.byModel);
+      visit(node.children);
+    }
+  };
+  visit(analysis.subagents);
+  return [...totals].map(([model, outputTokens]) => ({ model, outputTokens }));
 }
 
 interface CacheEntry {
@@ -66,6 +98,7 @@ function toListItem(analysis: SessionAnalysis, ref: SessionFileRef): SessionList
     toolCallCount,
     toolErrorCount,
     sizeBytes: ref.sizeBytes,
+    modelMix: computeModelMix(analysis),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(analysis.title !== undefined && { title: analysis.title }),
     ...(analysis.firstUserPrompt !== undefined && { firstUserPrompt: analysis.firstUserPrompt }),
