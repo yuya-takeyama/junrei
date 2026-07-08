@@ -12,10 +12,13 @@
   },
   "dependencies": {
     "@junrei/core": "workspace:*",
+    "@junrei/server": "workspace:*",
+    "hono": "^4.11.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@types/node": "^25.9.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",

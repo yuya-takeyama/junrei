@@ -25,11 +25,15 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 
 ### M2 — Server + Web UI
 
-- ⬜ Hono server: sessions API, dynamic port (`JUNREI_PORT` → default → ephemeral)
-- ⬜ Session list: project, title, time, turns, models, cost
-- ⬜ Session detail: context growth chart, compactions, tool stats,
-  subagent tree, repetition/error findings, exploration profile
-- ⬜ Browser-verified via Claude Code preview loop
+- ✅ Hono server: sessions API (list + detail, mtime-keyed cache), typed
+  end-to-end via Hono RPC
+- ✅ Session list: project, title, time, turns, tools/errors, agents,
+  compactions, tokens, cost
+- ✅ Session detail: stat tiles (cost incl. subagent share, cache hit rate),
+  context growth chart with compaction markers, tool stats with error
+  categories, repetition findings, exploration profile, subagent tree,
+  cost by model, first prompt
+- ✅ Browser-verified via Claude Code preview loop (real sessions, dark mode)
 
 ### M3 — MCP
 
