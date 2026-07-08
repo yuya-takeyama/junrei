@@ -116,21 +116,33 @@ describe("analyzeSession", () => {
     expect(analysis.totalUsage.costUsd).toBeGreaterThan(analysis.usage.total.costUsd);
   });
 
-  it("reconstructs background task lifecycles from launches and notifications", async () => {
+  it("reconstructs task executions (foreground and background)", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
-    expect(analysis.backgroundTasks).toHaveLength(2);
+    // 2 foreground Bash + 1 background Bash + 1 async Agent.
+    expect(analysis.taskExecutions).toHaveLength(4);
 
-    const agentTask = analysis.backgroundTasks.find((t) => t.kind === "agent");
+    const agentTask = analysis.taskExecutions.find((t) => t.kind === "agent");
     expect(agentTask?.taskId).toBe("aaaa111122223333f");
+    expect(agentTask?.background).toBe(true);
     expect(agentTask?.name).toBe("Explore codebase");
     expect(agentTask?.status).toBe("completed");
-    expect(agentTask?.durationMs).toBe(28_000);
+    // Launch tool-call timestamp (01:02:05) → notification (01:02:58).
+    expect(agentTask?.durationMs).toBe(53_000);
 
-    const bashTask = analysis.backgroundTasks.find((t) => t.kind === "bash");
-    expect(bashTask?.taskId).toBe("bgtask01");
-    expect(bashTask?.name).toBe("Build in background");
-    expect(bashTask?.status).toBe("completed");
-    expect(bashTask?.durationMs).toBe(13_000);
+    const bgBash = analysis.taskExecutions.find((t) => t.kind === "bash" && t.background);
+    expect(bgBash?.taskId).toBe("bgtask01");
+    expect(bgBash?.name).toBe("Build in background");
+    expect(bgBash?.status).toBe("completed");
+    // tool_use (01:02:40) → notification (01:02:55).
+    expect(bgBash?.durationMs).toBe(15_000);
+
+    const foregroundBashes = analysis.taskExecutions.filter(
+      (t) => t.kind === "bash" && !t.background,
+    );
+    expect(foregroundBashes).toHaveLength(2);
+    expect(foregroundBashes[0]?.name).toBe("pnpm test");
+    expect(foregroundBashes[0]?.status).toBe("failed");
+    expect(foregroundBashes[0]?.durationMs).toBe(2_000);
   });
 });
 

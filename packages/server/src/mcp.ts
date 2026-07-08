@@ -26,11 +26,18 @@ function notFound(project: string, sessionId: string) {
 
 /** Compact summary: the full analysis minus bulky series (fetch those via dedicated tools). */
 function toSummary(analysis: SessionAnalysis) {
-  const { contextTimeline, subagents, toolStats, repetitions, ...rest } = analysis;
+  const { contextTimeline, subagents, toolStats, repetitions, taskExecutions, ...rest } = analysis;
+  const byKind: Record<string, number> = {};
+  const byStatus: Record<string, number> = {};
+  for (const task of taskExecutions) {
+    byKind[task.kind] = (byKind[task.kind] ?? 0) + 1;
+    byStatus[task.status] = (byStatus[task.status] ?? 0) + 1;
+  }
   return {
     ...rest,
     toolStats,
     repetitionCount: repetitions.length,
+    taskExecutions: { total: taskExecutions.length, byKind, byStatus },
     contextTimeline: {
       points: contextTimeline.length,
       peakContextTokens: Math.max(0, ...contextTimeline.map((p) => p.contextTokens)),
@@ -131,6 +138,23 @@ export function createMcpServer(): McpServer {
             subagentCount: analysis.subagentCount,
             subagents: analysis.subagents,
           });
+    },
+  );
+
+  server.registerTool(
+    "get_task_executions",
+    {
+      description:
+        "All task executions of a session, as Claude Code's Background-tasks panel counts " +
+        "them: every Bash command and Agent run (foreground and background) plus preview " +
+        "servers — with start time, duration, and outcome (completed/failed/stopped/unresolved).",
+      inputSchema: sessionRef,
+    },
+    async ({ project, sessionId }) => {
+      const analysis = await getSession(project, sessionId);
+      return analysis === undefined
+        ? notFound(project, sessionId)
+        : jsonResult({ taskExecutions: analysis.taskExecutions });
     },
   );
 
