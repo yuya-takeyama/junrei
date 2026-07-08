@@ -9,19 +9,19 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 - ✅ Research: Claude Code session log format, ccusage cost logic, agent
   observability metric landscape
 - ✅ Scope interview & decisions (see [design.md](./design.md))
-- 🚧 Repo scaffold: pnpm monorepo (core/server/web), TypeScript strict, Biome,
-  Vitest, aqua-managed tooling, CI (typecheck + lint + test + build)
+- ✅ Repo scaffold: pnpm monorepo (core/server/web), TypeScript strict, Biome,
+  Vitest, aqua-managed tooling, CI (typecheck + lint + test + build) (#1)
 
 ### M1 — Core engine
 
-- ⬜ Session discovery (`~/.claude/projects`, `CLAUDE_CONFIG_DIR` support)
-- ⬜ Streaming JSONL parser with tolerant schema (unknown types → warnings)
-- ⬜ Token accounting (dedupe by `message.id`) + cost engine (LiteLLM pricing
+- ✅ Session discovery (`~/.claude/projects`, `CLAUDE_CONFIG_DIR` support)
+- ✅ Streaming JSONL parser with tolerant schema (unknown types → warnings)
+- ✅ Token accounting (dedupe by `message.id`) + cost engine (LiteLLM pricing
   snapshot, tiered >200k, cache 5m/1h)
-- ⬜ Metrics: context growth, compaction, tool histogram/success, subagent tree
-- ⬜ Differentiators: repetition detection, error classification, exploration
+- ✅ Metrics: context growth, compaction, tool histogram/success, subagent tree
+- ✅ Differentiators: repetition detection, error classification, exploration
   profile
-- ⬜ Unit tests against fixture logs + real local sessions
+- ✅ Unit tests against fixture logs; smoke-tested against real local sessions
 
 ### M2 — Server + Web UI
 

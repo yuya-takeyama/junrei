@@ -1,0 +1,6 @@
+{
+  "agentType": "Explore",
+  "description": "Explore codebase",
+  "toolUseId": "toolu_agent1",
+  "spawnDepth": 1
+}
