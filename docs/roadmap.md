@@ -45,9 +45,20 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 - ✅ Verified over Streamable HTTP (initialize / tools/list / tools/call
   against real sessions)
 
+### M3.5 — Background tasks (user request)
+
+- ✅ Background task lifecycle: bash (`run_in_background`), async subagents,
+  preview servers — joined with `<task-notification>` records (incl. queued
+  variants) for duration and outcome; UI card + included in MCP summary
+- ✅ Fix: task notifications no longer counted as user turns
+- ✅ Fix: tool results appearing before their tool_use (parallel batches) are
+  now linked (found by independent verifier agent — Edit error undercount)
+
 ### M4 — Polish
 
-- ⬜ End-to-end verification against real sessions (incl. this project's own)
+- ✅ Independent verification by fresh-context agent against raw logs:
+  20/21 checks passed; cost model reproduced to the exact digit (5m/1h cache
+  rates, per-model). The 1 failure became the out-of-order linkage fix above.
 - ⬜ Docs refreshed; README quick start
 
 ## Later (post-v1)

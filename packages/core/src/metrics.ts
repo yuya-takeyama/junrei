@@ -1,5 +1,5 @@
 import { estimateCostUsd } from "./pricing/pricing.js";
-import type { SessionData, ToolCall } from "./session-data.js";
+import type { SessionData, TaskNotificationEvent, ToolCall } from "./session-data.js";
 
 // ---------------------------------------------------------------------------
 // Tokens & cost
@@ -284,6 +284,117 @@ export function computeRepetitions(data: SessionData): RepetitionFinding[] {
   }
 
   return findings.sort((a, b) => b.count - a.count);
+}
+
+// ---------------------------------------------------------------------------
+// Background tasks
+// ---------------------------------------------------------------------------
+
+export interface BackgroundTaskInfo {
+  kind: "bash" | "agent" | "preview-server";
+  taskId: string;
+  name: string;
+  status: "completed" | "failed" | "stopped" | "unresolved";
+  startedAt?: string | undefined;
+  completedAt?: string | undefined;
+  durationMs?: number | undefined;
+  /** Line of the launching record (provenance). */
+  startLine: number;
+  completionLine?: number | undefined;
+}
+
+const PREVIEW_START_TOOL = "mcp__Claude_Preview__preview_start";
+const PREVIEW_STOP_TOOL = "mcp__Claude_Preview__preview_stop";
+
+/**
+ * Reconstruct the lifecycle of background work: Bash commands launched with
+ * run_in_background, async subagents, and preview dev servers. Launches are
+ * joined with harness task-notifications (by task id) to recover completion
+ * time and outcome. "unresolved" means no completion notice exists in the
+ * log — e.g. the task outlived the session.
+ */
+export function computeBackgroundTasks(data: SessionData): BackgroundTaskInfo[] {
+  const tasks: BackgroundTaskInfo[] = [];
+
+  // Last notification per task id wins (agents can notify more than once).
+  const notificationsByTask = new Map<string, TaskNotificationEvent>();
+  for (const notification of data.taskNotifications) {
+    notificationsByTask.set(notification.taskId, notification);
+  }
+
+  for (const launch of data.backgroundLaunches) {
+    const notification = notificationsByTask.get(launch.taskId);
+    let status: BackgroundTaskInfo["status"] = "unresolved";
+    if (notification !== undefined) {
+      if (notification.exitCode !== undefined) {
+        status = notification.exitCode === 0 ? "completed" : "failed";
+      } else if (notification.status === "completed") {
+        status = "completed";
+      } else if (notification.status === "failed") {
+        status = "failed";
+      } else {
+        status = "completed";
+      }
+    }
+    tasks.push({
+      kind: launch.kind,
+      taskId: launch.taskId,
+      name: launch.name,
+      status,
+      startLine: launch.line,
+      startedAt: launch.timestamp,
+      completedAt: notification?.timestamp,
+      completionLine: notification?.line,
+      durationMs: spanMs(launch.timestamp, notification?.timestamp),
+    });
+  }
+
+  // Preview servers: start/stop tool-call pairs joined by serverId.
+  const stopsByServerId = new Map<string, ToolCall>();
+  for (const call of data.toolCalls) {
+    if (call.name !== PREVIEW_STOP_TOOL) continue;
+    const input =
+      typeof call.input === "object" && call.input !== null
+        ? (call.input as Record<string, unknown>)
+        : undefined;
+    const serverId = typeof input?.serverId === "string" ? input.serverId : undefined;
+    if (serverId !== undefined) stopsByServerId.set(serverId, call);
+  }
+  for (const call of data.toolCalls) {
+    if (call.name !== PREVIEW_START_TOOL) continue;
+    const input =
+      typeof call.input === "object" && call.input !== null
+        ? (call.input as Record<string, unknown>)
+        : undefined;
+    const name = typeof input?.name === "string" ? input.name : "preview server";
+    const serverId = parseServerId(call.result?.text);
+    const stop = serverId !== undefined ? stopsByServerId.get(serverId) : undefined;
+    tasks.push({
+      kind: "preview-server",
+      taskId: serverId ?? `preview:${String(call.line)}`,
+      name,
+      status: stop !== undefined ? "stopped" : "unresolved",
+      startLine: call.line,
+      startedAt: call.timestamp,
+      completedAt: stop?.timestamp,
+      completionLine: stop?.line,
+      durationMs: spanMs(call.timestamp, stop?.timestamp),
+    });
+  }
+
+  return tasks.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+}
+
+function parseServerId(resultText: string | undefined): string | undefined {
+  if (resultText === undefined) return undefined;
+  const match = /"serverId":\s*"([^"]+)"/.exec(resultText);
+  return match?.[1];
+}
+
+function spanMs(start: string | undefined, end: string | undefined): number | undefined {
+  if (start === undefined || end === undefined) return undefined;
+  const delta = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(delta) && delta >= 0 ? delta : undefined;
 }
 
 // ---------------------------------------------------------------------------

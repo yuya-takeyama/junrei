@@ -11,8 +11,10 @@ import type {
   RecordBase,
   SessionRecord,
   SystemRecord,
+  TaskNotificationInfo,
   TokenUsage,
   ToolResultInfo,
+  ToolUseDetail,
   Transcript,
   UserRecord,
 } from "./types.js";
@@ -81,6 +83,36 @@ function normalizeRecord(raw: Record<string, unknown>, line: number): SessionRec
       if (title !== undefined) return { line, type: "custom-title", title };
       return { line, type };
     }
+    case "queue-operation": {
+      // Queued-while-busy task notifications arrive via enqueue content.
+      const notification = parseTaskNotification(str(raw.content) ?? "");
+      if (notification !== undefined) {
+        const timestamp = str(raw.timestamp);
+        return {
+          line,
+          type: "queue-operation",
+          taskNotification: notification,
+          ...(timestamp !== undefined && { timestamp }),
+        };
+      }
+      return { line, type };
+    }
+    case "attachment": {
+      const attachment = isObject(raw.attachment) ? raw.attachment : {};
+      if (attachment.type === "queued_command") {
+        const notification = parseTaskNotification(str(attachment.prompt) ?? "");
+        if (notification !== undefined) {
+          const timestamp = str(raw.timestamp) ?? str(attachment.timestamp);
+          return {
+            line,
+            type: "attachment",
+            taskNotification: notification,
+            ...(timestamp !== undefined && { timestamp }),
+          };
+        }
+      }
+      return { line, type };
+    }
     default:
       return { line, type };
   }
@@ -144,9 +176,43 @@ function normalizeUser(raw: Record<string, unknown>, line: number): UserRecord {
   if (bool(raw.isCompactSummary) === true) record.isCompactSummary = true;
   if (!hasToolResult) {
     const text = extractText(content);
-    if (text !== "") record.promptText = text;
+    const notification = parseTaskNotification(text);
+    if (notification !== undefined) {
+      // Harness-injected completion notice — a background-task event, not a prompt.
+      record.taskNotification = notification;
+    } else if (text !== "") {
+      record.promptText = text;
+    }
   }
+  const detail = extractToolUseDetail(raw.toolUseResult);
+  if (detail !== undefined) record.toolUseDetail = detail;
   return record;
+}
+
+function parseTaskNotification(text: string): TaskNotificationInfo | undefined {
+  if (!text.includes("<task-notification>")) return undefined;
+  const taskId = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];
+  if (taskId === undefined) return undefined;
+  const info: TaskNotificationInfo = { taskId };
+  const status = /<status>([^<]+)<\/status>/.exec(text)?.[1];
+  if (status !== undefined) info.status = status;
+  const exitCode = /exit code (\d+)/i.exec(text)?.[1];
+  if (exitCode !== undefined) info.exitCode = Number.parseInt(exitCode, 10);
+  return info;
+}
+
+function extractToolUseDetail(raw: unknown): ToolUseDetail | undefined {
+  if (!isObject(raw)) return undefined;
+  const detail: ToolUseDetail = {};
+  const backgroundTaskId = str(raw.backgroundTaskId);
+  if (backgroundTaskId !== undefined) detail.backgroundTaskId = backgroundTaskId;
+  if (raw.status === "async_launched") {
+    const agentId = str(raw.agentId);
+    if (agentId !== undefined) detail.asyncAgentId = agentId;
+    const description = str(raw.description);
+    if (description !== undefined) detail.asyncAgentDescription = description;
+  }
+  return Object.keys(detail).length > 0 ? detail : undefined;
 }
 
 function normalizeUsage(raw: unknown): TokenUsage | undefined {

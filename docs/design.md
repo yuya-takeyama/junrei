@@ -58,6 +58,17 @@ plus per-session sidecar dirs (`<sessionUuid>/subagents/agent-*.jsonl` + `.meta.
 - **Exploration profile**: Read:Edit ratio, turns-to-first-edit, distinct files
   read vs. edited.
 
+**Added during v1 (user request):**
+
+- **Background task lifecycle**: Bash commands launched with
+  `run_in_background` (`toolUseResult.backgroundTaskId`), async subagents
+  (`toolUseResult.status == "async_launched"`), and preview dev servers
+  (`preview_start`/`preview_stop` tool calls) are joined with harness
+  `<task-notification>` records (by task id) to reconstruct start/end time,
+  duration, and outcome. Notifications that arrived while the agent was
+  mid-turn are recorded as `queue-operation` / `attachment(queued_command)`
+  records and are handled too.
+
 **Explicitly out of v1:** LLM-as-judge scoring, Codex support, live OTel ingestion,
 cross-session aggregate dashboards, interruption/outcome proxies.
 
@@ -115,6 +126,10 @@ OS-assigned ephemeral port when taken. The server always prints the resolved URL
   their usage is NOT included in the parent file. Cost must sum both.
 - `input_tokens`/`output_tokens` in logs can be streaming lower bounds; cache
   fields are reliable. Costs are estimates and labeled as such.
+- Tool results can appear BEFORE their `tool_use` record in file order
+  (parallel batches interleave) — linkage must be two-pass.
+- `<task-notification>` user records are harness events, not human prompts —
+  they must be excluded from user-turn counts.
 
 ## MCP interface (v1)
 

@@ -56,6 +56,26 @@ export interface UserRecord extends RecordBase {
   isMeta?: boolean;
   isCompactSummary?: boolean;
   toolResults: ToolResultInfo[];
+  /** Present when this record is a background-task completion notification, not a human prompt. */
+  taskNotification?: TaskNotificationInfo;
+  /** Structured detail extracted from the top-level toolUseResult, when relevant. */
+  toolUseDetail?: ToolUseDetail;
+}
+
+export interface TaskNotificationInfo {
+  taskId: string;
+  /** e.g. "completed" (from <status>), or derived from the summary text. */
+  status?: string;
+  /** Exit code parsed from the summary, when present. */
+  exitCode?: number;
+}
+
+export interface ToolUseDetail {
+  /** Bash launched with run_in_background — id used in later task notifications. */
+  backgroundTaskId?: string;
+  /** Agent tool: async launch info. */
+  asyncAgentId?: string;
+  asyncAgentDescription?: string;
 }
 
 export interface ToolResultInfo {
@@ -101,12 +121,30 @@ export interface TitleRecord {
   title: string;
 }
 
+/**
+ * Task notifications that arrived while the agent was mid-turn are queued and
+ * recorded as queue-operation / attachment(queued_command) records instead of
+ * user records — this carrier surfaces them for background-task tracking.
+ */
+export interface NotificationCarrierRecord {
+  line: number;
+  type: "queue-operation" | "attachment";
+  timestamp?: string;
+  taskNotification: TaskNotificationInfo;
+}
+
 export interface OtherRecord {
   line: number;
   type: string;
 }
 
-export type SessionRecord = UserRecord | AssistantRecord | SystemRecord | TitleRecord | OtherRecord;
+export type SessionRecord =
+  | UserRecord
+  | AssistantRecord
+  | SystemRecord
+  | TitleRecord
+  | NotificationCarrierRecord
+  | OtherRecord;
 
 export interface ParseWarning {
   line: number;

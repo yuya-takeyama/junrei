@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type {
+  BackgroundTaskInfo,
   ContextPoint,
   ExplorationProfile,
   RepetitionFinding,
@@ -9,6 +10,7 @@ import type {
   UsageSummary,
 } from "./metrics.js";
 import {
+  computeBackgroundTasks,
   computeContextTimeline,
   computeExploration,
   computeRepetitions,
@@ -62,6 +64,7 @@ export interface SessionAnalysis {
   toolStats: ToolStat[];
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
+  backgroundTasks: BackgroundTaskInfo[];
   subagents: SubagentNode[];
   subagentCount: number;
   firstUserPrompt?: string;
@@ -120,6 +123,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
     toolStats: computeToolStats(data),
     repetitions: computeRepetitions(data),
     exploration: computeExploration(data),
+    backgroundTasks: computeBackgroundTasks(data),
     subagents,
     subagentCount,
     parseWarningCount: data.warningCount,
