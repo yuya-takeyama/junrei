@@ -14,9 +14,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/mcp": "^0.3.0",
     "@hono/node-server": "^1.19.7",
     "@junrei/core": "workspace:*",
-    "hono": "^4.11.9"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4.11.9",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
