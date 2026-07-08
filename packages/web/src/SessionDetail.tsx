@@ -171,6 +171,50 @@ export function SessionDetail({ project, id }: Props) {
         </div>
       )}
 
+      {session.backgroundTasks.length > 0 && (
+        <div className="card">
+          <h2>Background tasks ({session.backgroundTasks.length})</h2>
+          <table className="mini-table">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Name</th>
+                <th>Started</th>
+                <th className="num">Duration</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {session.backgroundTasks.map((t) => (
+                <tr key={`${t.taskId}-${String(t.startLine)}`}>
+                  <td>
+                    <span className="badge">{t.kind}</span>
+                  </td>
+                  <td>{t.name}</td>
+                  <td className="muted">
+                    {t.startedAt !== undefined ? formatDateTime(t.startedAt) : "—"}
+                  </td>
+                  <td className="num muted">
+                    {t.durationMs !== undefined ? formatDuration(t.durationMs) : "—"}
+                  </td>
+                  <td>
+                    {t.status === "failed" ? (
+                      <span className="error-count">failed</span>
+                    ) : (
+                      <span className={t.status === "unresolved" ? "muted" : ""}>{t.status}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted" style={{ fontSize: "0.75rem", marginBottom: 0 }}>
+            "unresolved" means no completion notice exists in the log (e.g. the task outlived the
+            session).
+          </p>
+        </div>
+      )}
+
       {session.subagents.length > 0 && (
         <div className="card">
           <h2>Subagent tree ({session.subagentCount})</h2>

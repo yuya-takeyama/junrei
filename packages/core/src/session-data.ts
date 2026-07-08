@@ -44,6 +44,25 @@ export interface CompactionEvent {
   postTokens?: number;
 }
 
+/** A task launched into the background: Bash (run_in_background) or async Agent. */
+export interface BackgroundLaunch {
+  kind: "bash" | "agent";
+  taskId: string;
+  name: string;
+  toolUseId?: string;
+  line: number;
+  timestamp?: string;
+}
+
+/** Harness-injected completion notice for a background task. */
+export interface TaskNotificationEvent {
+  taskId: string;
+  status?: string;
+  exitCode?: number;
+  line: number;
+  timestamp?: string;
+}
+
 /** Structured view of one transcript, ready for metric computation. */
 export interface SessionData {
   records: SessionRecord[];
@@ -51,6 +70,8 @@ export interface SessionData {
   toolCalls: ToolCall[];
   userPrompts: UserPrompt[];
   compactions: CompactionEvent[];
+  backgroundLaunches: BackgroundLaunch[];
+  taskNotifications: TaskNotificationEvent[];
   apiErrorCount: number;
   title?: string;
   cwd?: string;
@@ -65,8 +86,14 @@ export function buildSessionData(transcript: Transcript): SessionData {
   const apiMessagesById = new Map<string, ApiMessage>();
   const toolCalls: ToolCall[] = [];
   const toolCallsById = new Map<string, ToolCall>();
+  // Results can appear BEFORE their tool_use record in file order (parallel
+  // batches interleave); unmatched results are parked here and linked after
+  // the full pass.
+  const pendingResults = new Map<string, NonNullable<ToolCall["result"]>>();
   const userPrompts: UserPrompt[] = [];
   const compactions: CompactionEvent[] = [];
+  const backgroundLaunches: BackgroundLaunch[] = [];
+  const taskNotifications: TaskNotificationEvent[] = [];
   let apiErrorCount = 0;
   let aiTitle: string | undefined;
   let customTitle: string | undefined;
@@ -93,7 +120,14 @@ export function buildSessionData(transcript: Transcript): SessionData {
         break;
       case "user":
         if ("toolResults" in record) {
-          collectUser(record, userPrompts, toolCallsById);
+          collectUser(
+            record,
+            userPrompts,
+            toolCallsById,
+            pendingResults,
+            backgroundLaunches,
+            taskNotifications,
+          );
         }
         break;
       case "system":
@@ -111,6 +145,22 @@ export function buildSessionData(transcript: Transcript): SessionData {
           apiErrorCount += 1;
         }
         break;
+      case "queue-operation":
+      case "attachment":
+        if ("taskNotification" in record) {
+          taskNotifications.push({
+            taskId: record.taskNotification.taskId,
+            line: record.line,
+            ...(record.taskNotification.status !== undefined && {
+              status: record.taskNotification.status,
+            }),
+            ...(record.taskNotification.exitCode !== undefined && {
+              exitCode: record.taskNotification.exitCode,
+            }),
+            ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+          });
+        }
+        break;
       case "ai-title":
         if ("title" in record) aiTitle = record.title;
         break;
@@ -122,6 +172,14 @@ export function buildSessionData(transcript: Transcript): SessionData {
     }
   }
 
+  // Second pass: link results that arrived before their tool_use record.
+  for (const [toolUseId, result] of pendingResults) {
+    const call = toolCallsById.get(toolUseId);
+    if (call !== undefined && call.result === undefined) {
+      call.result = result;
+    }
+  }
+
   const title = customTitle ?? aiTitle;
   return {
     records: transcript.records,
@@ -129,6 +187,8 @@ export function buildSessionData(transcript: Transcript): SessionData {
     toolCalls,
     userPrompts,
     compactions,
+    backgroundLaunches,
+    taskNotifications,
     apiErrorCount,
     ...(title !== undefined && { title }),
     ...(cwd !== undefined && { cwd }),
@@ -176,17 +236,39 @@ function collectUser(
   record: UserRecord,
   userPrompts: UserPrompt[],
   toolCallsById: Map<string, ToolCall>,
+  pendingResults: Map<string, NonNullable<ToolCall["result"]>>,
+  backgroundLaunches: BackgroundLaunch[],
+  taskNotifications: TaskNotificationEvent[],
 ): void {
   for (const result of record.toolResults) {
+    const resolved = {
+      isError: result.isError,
+      text: result.text,
+      line: record.line,
+      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+    };
     const call = toolCallsById.get(result.toolUseId);
-    if (call !== undefined && call.result === undefined) {
-      call.result = {
-        isError: result.isError,
-        text: result.text,
-        line: record.line,
-        ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
-      };
+    if (call !== undefined) {
+      if (call.result === undefined) call.result = resolved;
+    } else if (!pendingResults.has(result.toolUseId)) {
+      pendingResults.set(result.toolUseId, resolved);
     }
+  }
+  if (record.taskNotification !== undefined) {
+    taskNotifications.push({
+      taskId: record.taskNotification.taskId,
+      line: record.line,
+      ...(record.taskNotification.status !== undefined && {
+        status: record.taskNotification.status,
+      }),
+      ...(record.taskNotification.exitCode !== undefined && {
+        exitCode: record.taskNotification.exitCode,
+      }),
+      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+    });
+  }
+  if (record.toolUseDetail !== undefined) {
+    collectBackgroundLaunch(record, toolCallsById, backgroundLaunches);
   }
   if (
     record.promptText !== undefined &&
@@ -196,6 +278,47 @@ function collectUser(
     userPrompts.push({
       text: record.promptText,
       line: record.line,
+      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+    });
+  }
+}
+
+const LAUNCH_NAME_LIMIT = 120;
+
+function collectBackgroundLaunch(
+  record: UserRecord,
+  toolCallsById: Map<string, ToolCall>,
+  backgroundLaunches: BackgroundLaunch[],
+): void {
+  const detail = record.toolUseDetail;
+  if (detail === undefined) return;
+  const toolUseId = record.toolResults[0]?.toolUseId;
+  const call = toolUseId !== undefined ? toolCallsById.get(toolUseId) : undefined;
+  const input =
+    typeof call?.input === "object" && call.input !== null
+      ? (call.input as Record<string, unknown>)
+      : undefined;
+
+  if (detail.backgroundTaskId !== undefined) {
+    const description = typeof input?.description === "string" ? input.description : undefined;
+    const command = typeof input?.command === "string" ? input.command : undefined;
+    backgroundLaunches.push({
+      kind: "bash",
+      taskId: detail.backgroundTaskId,
+      name: (description ?? command ?? "background command").slice(0, LAUNCH_NAME_LIMIT),
+      line: record.line,
+      ...(toolUseId !== undefined && { toolUseId }),
+      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+    });
+  }
+  if (detail.asyncAgentId !== undefined) {
+    const description = typeof input?.description === "string" ? input.description : undefined;
+    backgroundLaunches.push({
+      kind: "agent",
+      taskId: detail.asyncAgentId,
+      name: (detail.asyncAgentDescription ?? description ?? "subagent").slice(0, LAUNCH_NAME_LIMIT),
+      line: record.line,
+      ...(toolUseId !== undefined && { toolUseId }),
       ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
     });
   }
