@@ -71,6 +71,20 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   orchestrator for planning/judging; grounded in official docs (model-config,
   advisor tool, managed-agents multi-agent) and measured with Junrei itself
 
+## v2 — Concept & IA redesign
+
+- ✅ Concept doc: mission, research-grounded signal catalog, layered
+  information architecture (see [concept.md](./concept.md)); Claude Design
+  prompt for screen design ([claude-design-prompt.md](./claude-design-prompt.md))
+- ⬜ Transcript API (ordered event stream per session / per subagent)
+- ⬜ Skill-invocation extraction as first-class events
+- ⬜ File-access event list (per-file, timestamped, agent-attributed)
+- ⬜ Subagent drill-down routes (recursive session-shaped detail)
+- ⬜ New derived signals: delegation share, subagent return sizes,
+  concurrency profile, sibling overlap, per-turn token composition,
+  instruction footprint
+- ⬜ UI lenses: Timeline / Orchestration / Context & cost / Files & skills
+
 ## Later (post-v1)
 
 - ⬜ Codex session support (adapter layer in core)
