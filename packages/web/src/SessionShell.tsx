@@ -1,0 +1,95 @@
+import { useEffect, useState } from "react";
+import { client, type SessionJson } from "./api.js";
+import type { Lens } from "./router.js";
+import { SessionDetail } from "./SessionDetail.js";
+import { Band } from "./shell/Band.js";
+import { LensTabs } from "./shell/LensTabs.js";
+
+interface Props {
+  project: string;
+  id: string;
+  lens: Lens;
+}
+
+const LENS_LABEL: Record<Lens, string> = {
+  overview: "Overview",
+  timeline: "Timeline",
+  orchestration: "Orchestration",
+  context: "Context & cost",
+  files: "Files & skills",
+};
+
+const COPY_FLASH_MS = 800;
+
+function shortenId(id: string): string {
+  return id.length > 13 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;
+}
+
+/**
+ * Shell shared by every session route: identity band with breadcrumb +
+ * copyable session id, then the persistent lens tab bar, then the active
+ * lens's content. Only "overview" renders real content in this PR (the
+ * existing SessionDetail component); the rest are placeholders.
+ */
+export function SessionShell({ project, id, lens }: Props) {
+  const [session, setSession] = useState<SessionJson | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setSession(null);
+    setError(null);
+    client.api.sessions[":project"][":id"]
+      .$get({ param: { project, id } })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+        setSession((await res.json()) as SessionJson);
+      })
+      .catch((e: unknown) => setError(String(e)));
+  }, [project, id]);
+
+  const title = session?.title ?? "…";
+
+  const handleCopy = () => {
+    navigator.clipboard
+      ?.writeText(id)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), COPY_FLASH_MS);
+      })
+      .catch(() => undefined);
+  };
+
+  return (
+    <div>
+      <Band
+        left={
+          <span className="mono fs11 mut nowrap">
+            <a href="#/">Sessions</a> / {project} / {title}
+          </span>
+        }
+        right={
+          <button type="button" className="cp" onClick={handleCopy}>
+            {shortenId(id)} {copied ? "copied" : "⧉"}
+          </button>
+        }
+      />
+      <div className="hpad mt16">
+        <LensTabs project={project} id={id} active={lens} />
+      </div>
+      <div className="hpad mt16">
+        {error !== null ? (
+          <div className="mut">Failed to load session: {error}</div>
+        ) : session === null ? (
+          <div className="mut">Analyzing session…</div>
+        ) : lens === "overview" ? (
+          <SessionDetail project={project} id={id} />
+        ) : (
+          <div className="pan tile mut">
+            {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

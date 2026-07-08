@@ -8,6 +8,7 @@ export const client = hc<AppType>("/");
 export type SessionListItem = InferResponseType<
   typeof client.api.sessions.$get
 >["sessions"][number];
+export type ModelMixEntry = SessionListItem["modelMix"][number];
 
 type SessionResponse = InferResponseType<(typeof client.api.sessions)[":project"][":id"]["$get"]>;
 export type SessionJson = Extract<SessionResponse, { sessionId: string }>;
