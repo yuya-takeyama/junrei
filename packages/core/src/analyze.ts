@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import type {
   ContextPoint,
   ExplorationProfile,
+  ModelUsageSummary,
   RepetitionFinding,
   TaskExecutionInfo,
   TokenTotals,
@@ -58,6 +59,8 @@ export interface SessionAnalysis {
   usage: UsageSummary;
   /** Main + all subagents. */
   totalUsage: TokenTotals & { costUsd: number; costIsComplete: boolean };
+  /** Per-model usage, main session + all subagents merged (recursively) by model id. */
+  totalUsageByModel: ModelUsageSummary[];
   contextTimeline: ContextPoint[];
   compactions: CompactionEvent[];
   apiErrorCount: number;
@@ -68,7 +71,48 @@ export interface SessionAnalysis {
   subagents: SubagentNode[];
   subagentCount: number;
   firstUserPrompt?: string;
+  /** Source line of the first user prompt (provenance for the Overview lens's "L<n>" ref). */
+  firstUserPromptLine?: number;
   parseWarningCount: number;
+}
+
+/**
+ * Merge per-model usage summaries from the main transcript and every subagent
+ * (recursively), keyed by model id — mirrors how `totalUsage` merges the
+ * flat token/cost totals, but preserves the per-model breakdown so the
+ * Overview lens's "cost by model" chart reflects delegated spend too.
+ */
+function mergeUsageByModel(
+  main: readonly ModelUsageSummary[],
+  subagents: readonly SubagentNode[],
+): ModelUsageSummary[] {
+  const totals = new Map<string, ModelUsageSummary>();
+  const add = (entries: readonly ModelUsageSummary[]) => {
+    for (const entry of entries) {
+      const existing = totals.get(entry.model);
+      if (existing === undefined) {
+        totals.set(entry.model, { ...entry });
+        continue;
+      }
+      existing.messageCount += entry.messageCount;
+      existing.inputTokens += entry.inputTokens;
+      existing.outputTokens += entry.outputTokens;
+      existing.cacheReadTokens += entry.cacheReadTokens;
+      existing.cacheCreationTokens += entry.cacheCreationTokens;
+      if (entry.costUsd !== undefined) {
+        existing.costUsd = (existing.costUsd ?? 0) + entry.costUsd;
+      }
+    }
+  };
+  add(main);
+  const visit = (nodes: readonly SubagentNode[]) => {
+    for (const node of nodes) {
+      add(node.usage.byModel);
+      visit(node.children);
+    }
+  };
+  visit(subagents);
+  return [...totals.values()];
 }
 
 interface SubagentMeta {
@@ -107,6 +151,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
       ? Date.parse(endedAt) - Date.parse(startedAt)
       : undefined;
   const firstUserPrompt = data.userPrompts[0]?.text.slice(0, PROMPT_PREVIEW_LIMIT);
+  const firstUserPromptLine = data.userPrompts[0]?.line;
 
   return {
     sessionId,
@@ -117,6 +162,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
     models,
     usage,
     totalUsage,
+    totalUsageByModel: mergeUsageByModel(usage.byModel, subagents),
     contextTimeline: computeContextTimeline(data),
     compactions: data.compactions,
     apiErrorCount: data.apiErrorCount,
@@ -135,6 +181,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
     ...(endedAt !== undefined && { endedAt }),
     ...(durationMs !== undefined && Number.isFinite(durationMs) && { durationMs }),
     ...(firstUserPrompt !== undefined && { firstUserPrompt }),
+    ...(firstUserPromptLine !== undefined && { firstUserPromptLine }),
   };
 }
 

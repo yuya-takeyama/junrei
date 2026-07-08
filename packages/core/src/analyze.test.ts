@@ -116,6 +116,33 @@ describe("analyzeSession", () => {
     expect(analysis.totalUsage.costUsd).toBeGreaterThan(analysis.usage.total.costUsd);
   });
 
+  it("merges per-model usage across the main session and subagents", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    const fableMain = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
+    const fableMerged = analysis.totalUsageByModel.find((m) => m.model === "claude-fable-5");
+    const haikuMerged = analysis.totalUsageByModel.find(
+      (m) => m.model === "claude-haiku-4-5-20251001",
+    );
+
+    // Main-only model: merging with an empty subagent contribution is a no-op.
+    expect(fableMerged?.inputTokens).toBe(fableMain?.inputTokens);
+    expect(fableMerged?.costUsd).toBe(fableMain?.costUsd);
+
+    // Subagent-only model must show up too, with its own priced cost.
+    expect(haikuMerged).toBeDefined();
+    expect(haikuMerged?.inputTokens).toBe(110);
+    expect(haikuMerged?.costUsd).toBeGreaterThan(0);
+
+    // Every dollar in totalUsage.costUsd must be attributed to some model.
+    const summedCost = analysis.totalUsageByModel.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
+    expect(summedCost).toBeCloseTo(analysis.totalUsage.costUsd, 6);
+  });
+
+  it("records the first user prompt's source line", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    expect(analysis.firstUserPromptLine).toBe(1);
+  });
+
   it("reconstructs task executions (foreground and background)", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
     // 2 foreground Bash + 1 background Bash + 1 async Agent.
