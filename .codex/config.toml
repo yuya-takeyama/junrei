@@ -1,0 +1,4 @@
+# Codex CLI project config — https://developers.openai.com/codex/config-reference
+# This repo has no AGENTS.md; let Codex fall back to CLAUDE.md as the
+# per-directory project instructions file so both tools share one source.
+project_doc_fallback_filenames = ["CLAUDE.md"]
