@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
 import { formatDateTime, formatDuration, formatProject, formatUsd } from "./format.js";
+import type { ModelClass } from "./modelClass.js";
+import { classifyModel } from "./modelClass.js";
 import { buildHash } from "./router.js";
 import { Band } from "./shell/Band.js";
 
@@ -15,16 +17,6 @@ const DATE_FILTER_LABEL: Record<DateFilter, string> = {
   "30": "last 30 days",
 };
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-type ModelClass = "f" | "s" | "h" | "mut";
-
-function classifyModel(model: string): ModelClass {
-  const m = model.toLowerCase();
-  if (m.includes("fable") || m.includes("opus")) return "f";
-  if (m.includes("sonnet")) return "s";
-  if (m.includes("haiku")) return "h";
-  return "mut";
-}
 
 function ModelMixBar({ mix }: { mix: ModelMixEntry[] }) {
   const total = mix.reduce((sum, m) => sum + m.outputTokens, 0);

@@ -29,6 +29,17 @@ export function formatDateTime(iso: string): string {
   });
 }
 
+/** Time-only, 24h — used for the L1 title-block meta line and chart axis labels. */
+export function formatTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 /** Shorten a munged project dir name to its meaningful tail. */
 export function formatProject(projectDirName: string, cwd?: string): string {
   if (cwd !== undefined) {
