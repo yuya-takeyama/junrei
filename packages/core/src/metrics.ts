@@ -287,11 +287,13 @@ export function computeRepetitions(data: SessionData): RepetitionFinding[] {
 }
 
 // ---------------------------------------------------------------------------
-// Background tasks
+// Task executions
 // ---------------------------------------------------------------------------
 
-export interface BackgroundTaskInfo {
+export interface TaskExecutionInfo {
   kind: "bash" | "agent" | "preview-server";
+  /** True when explicitly launched into the background (run_in_background / async agent). */
+  background: boolean;
   taskId: string;
   name: string;
   status: "completed" | "failed" | "stopped" | "unresolved";
@@ -307,82 +309,116 @@ const PREVIEW_START_TOOL = "mcp__Claude_Preview__preview_start";
 const PREVIEW_STOP_TOOL = "mcp__Claude_Preview__preview_stop";
 
 /**
- * Reconstruct the lifecycle of background work: Bash commands launched with
- * run_in_background, async subagents, and preview dev servers. Launches are
- * joined with harness task-notifications (by task id) to recover completion
- * time and outcome. "unresolved" means no completion notice exists in the
- * log — e.g. the task outlived the session.
+ * Reconstruct task executions the way Claude Code's Background-tasks panel
+ * counts them: every Bash command and Agent run (foreground and background)
+ * plus preview dev servers.
+ *
+ * Foreground executions complete with their tool_result (duration = result
+ * timestamp − call timestamp, which includes harness/queue latency).
+ * Background launches are joined with harness task-notifications by task id.
+ * "unresolved" means no completion evidence exists in the log — e.g. the task
+ * outlived the session.
  */
-export function computeBackgroundTasks(data: SessionData): BackgroundTaskInfo[] {
-  const tasks: BackgroundTaskInfo[] = [];
+export function computeTaskExecutions(data: SessionData): TaskExecutionInfo[] {
+  const tasks: TaskExecutionInfo[] = [];
 
   // Last notification per task id wins (agents can notify more than once).
   const notificationsByTask = new Map<string, TaskNotificationEvent>();
   for (const notification of data.taskNotifications) {
     notificationsByTask.set(notification.taskId, notification);
   }
-
+  const launchesByToolUseId = new Map<string, (typeof data.backgroundLaunches)[number]>();
   for (const launch of data.backgroundLaunches) {
-    const notification = notificationsByTask.get(launch.taskId);
-    let status: BackgroundTaskInfo["status"] = "unresolved";
-    if (notification !== undefined) {
-      if (notification.exitCode !== undefined) {
-        status = notification.exitCode === 0 ? "completed" : "failed";
-      } else if (notification.status === "completed") {
-        status = "completed";
-      } else if (notification.status === "failed") {
-        status = "failed";
-      } else {
-        status = "completed";
-      }
-    }
-    tasks.push({
-      kind: launch.kind,
-      taskId: launch.taskId,
-      name: launch.name,
-      status,
-      startLine: launch.line,
-      startedAt: launch.timestamp,
-      completedAt: notification?.timestamp,
-      completionLine: notification?.line,
-      durationMs: spanMs(launch.timestamp, notification?.timestamp),
-    });
+    if (launch.toolUseId !== undefined) launchesByToolUseId.set(launch.toolUseId, launch);
   }
 
-  // Preview servers: start/stop tool-call pairs joined by serverId.
   const stopsByServerId = new Map<string, ToolCall>();
   for (const call of data.toolCalls) {
     if (call.name !== PREVIEW_STOP_TOOL) continue;
-    const input =
-      typeof call.input === "object" && call.input !== null
-        ? (call.input as Record<string, unknown>)
-        : undefined;
-    const serverId = typeof input?.serverId === "string" ? input.serverId : undefined;
+    const serverId = stringInput(call, "serverId");
     if (serverId !== undefined) stopsByServerId.set(serverId, call);
   }
+
   for (const call of data.toolCalls) {
-    if (call.name !== PREVIEW_START_TOOL) continue;
-    const input =
-      typeof call.input === "object" && call.input !== null
-        ? (call.input as Record<string, unknown>)
-        : undefined;
-    const name = typeof input?.name === "string" ? input.name : "preview server";
-    const serverId = parseServerId(call.result?.text);
-    const stop = serverId !== undefined ? stopsByServerId.get(serverId) : undefined;
-    tasks.push({
-      kind: "preview-server",
-      taskId: serverId ?? `preview:${String(call.line)}`,
-      name,
-      status: stop !== undefined ? "stopped" : "unresolved",
-      startLine: call.line,
-      startedAt: call.timestamp,
-      completedAt: stop?.timestamp,
-      completionLine: stop?.line,
-      durationMs: spanMs(call.timestamp, stop?.timestamp),
-    });
+    if (call.name === "Bash" || call.name === "Agent" || call.name === "Task") {
+      const kind = call.name === "Bash" ? "bash" : "agent";
+      const launch = launchesByToolUseId.get(call.toolUseId);
+      if (launch !== undefined) {
+        // Background execution: completion comes from a task notification.
+        const notification = notificationsByTask.get(launch.taskId);
+        tasks.push({
+          kind,
+          background: true,
+          taskId: launch.taskId,
+          name: launch.name,
+          status: backgroundStatus(notification),
+          startLine: call.line,
+          startedAt: call.timestamp ?? launch.timestamp,
+          completedAt: notification?.timestamp,
+          completionLine: notification?.line,
+          durationMs: spanMs(call.timestamp ?? launch.timestamp, notification?.timestamp),
+        });
+      } else {
+        // Foreground execution: the tool_result is the completion.
+        const name =
+          stringInput(call, "description") ??
+          stringInput(call, "command") ??
+          stringInput(call, "prompt") ??
+          call.name;
+        let status: TaskExecutionInfo["status"] = "unresolved";
+        if (call.result !== undefined) {
+          status = call.result.isError ? "failed" : "completed";
+        }
+        tasks.push({
+          kind,
+          background: false,
+          taskId: call.toolUseId,
+          name: name.slice(0, 120),
+          status,
+          startLine: call.line,
+          startedAt: call.timestamp,
+          completedAt: call.result?.timestamp,
+          completionLine: call.result?.line,
+          durationMs: spanMs(call.timestamp, call.result?.timestamp),
+        });
+      }
+    } else if (call.name === PREVIEW_START_TOOL) {
+      const name = stringInput(call, "name") ?? "preview server";
+      const serverId = parseServerId(call.result?.text);
+      const stop = serverId !== undefined ? stopsByServerId.get(serverId) : undefined;
+      tasks.push({
+        kind: "preview-server",
+        background: true,
+        taskId: serverId ?? `preview:${String(call.line)}`,
+        name,
+        status: stop !== undefined ? "stopped" : "unresolved",
+        startLine: call.line,
+        startedAt: call.timestamp,
+        completedAt: stop?.timestamp,
+        completionLine: stop?.line,
+        durationMs: spanMs(call.timestamp, stop?.timestamp),
+      });
+    }
   }
 
   return tasks.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+}
+
+function backgroundStatus(
+  notification: TaskNotificationEvent | undefined,
+): TaskExecutionInfo["status"] {
+  if (notification === undefined) return "unresolved";
+  if (notification.exitCode !== undefined) {
+    return notification.exitCode === 0 ? "completed" : "failed";
+  }
+  if (notification.status === "failed") return "failed";
+  return "completed";
+}
+
+function stringInput(call: ToolCall, key: string): string | undefined {
+  if (typeof call.input !== "object" || call.input === null) return undefined;
+  const value = (call.input as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 function parseServerId(resultText: string | undefined): string | undefined {

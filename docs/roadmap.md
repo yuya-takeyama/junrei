@@ -45,11 +45,14 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 - ✅ Verified over Streamable HTTP (initialize / tools/list / tools/call
   against real sessions)
 
-### M3.5 — Background tasks (user request)
+### M3.5 — Task executions (user request)
 
 - ✅ Background task lifecycle: bash (`run_in_background`), async subagents,
   preview servers — joined with `<task-notification>` records (incl. queued
   variants) for duration and outcome; UI card + included in MCP summary
+- ✅ Expanded to ALL task executions (foreground Bash/Agent too, matching the
+  Background-tasks panel semantics); background-only UI filter;
+  `get_task_executions` MCP tool; summary carries kind/status aggregates
 - ✅ Fix: task notifications no longer counted as user turns
 - ✅ Fix: tool results appearing before their tool_use (parallel batches) are
   now linked (found by independent verifier agent — Edit error undercount)

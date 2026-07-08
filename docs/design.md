@@ -60,14 +60,16 @@ plus per-session sidecar dirs (`<sessionUuid>/subagents/agent-*.jsonl` + `.meta.
 
 **Added during v1 (user request):**
 
-- **Background task lifecycle**: Bash commands launched with
-  `run_in_background` (`toolUseResult.backgroundTaskId`), async subagents
-  (`toolUseResult.status == "async_launched"`), and preview dev servers
-  (`preview_start`/`preview_stop` tool calls) are joined with harness
-  `<task-notification>` records (by task id) to reconstruct start/end time,
-  duration, and outcome. Notifications that arrived while the agent was
-  mid-turn are recorded as `queue-operation` / `attachment(queued_command)`
-  records and are handled too.
+- **Task executions**: every Bash command and Agent run — foreground and
+  background — plus preview dev servers, matching how Claude Code's
+  Background-tasks panel counts tasks. Foreground executions complete with
+  their `tool_result` (duration = result timestamp − call timestamp);
+  background launches (`toolUseResult.backgroundTaskId`,
+  `status == "async_launched"`) are joined with harness `<task-notification>`
+  records by task id. Notifications that arrived while the agent was mid-turn
+  are recorded as `queue-operation` / `attachment(queued_command)` records and
+  are handled too. Note the panel itself is ephemeral UI state (entries can be
+  cleared and are capped), so Junrei's log-derived list is a superset.
 
 **Explicitly out of v1:** LLM-as-judge scoring, Codex support, live OTel ingestion,
 cross-session aggregate dashboards, interruption/outcome proxies.

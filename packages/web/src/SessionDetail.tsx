@@ -171,49 +171,7 @@ export function SessionDetail({ project, id }: Props) {
         </div>
       )}
 
-      {session.backgroundTasks.length > 0 && (
-        <div className="card">
-          <h2>Background tasks ({session.backgroundTasks.length})</h2>
-          <table className="mini-table">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Name</th>
-                <th>Started</th>
-                <th className="num">Duration</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {session.backgroundTasks.map((t) => (
-                <tr key={`${t.taskId}-${String(t.startLine)}`}>
-                  <td>
-                    <span className="badge">{t.kind}</span>
-                  </td>
-                  <td>{t.name}</td>
-                  <td className="muted">
-                    {t.startedAt !== undefined ? formatDateTime(t.startedAt) : "—"}
-                  </td>
-                  <td className="num muted">
-                    {t.durationMs !== undefined ? formatDuration(t.durationMs) : "—"}
-                  </td>
-                  <td>
-                    {t.status === "failed" ? (
-                      <span className="error-count">failed</span>
-                    ) : (
-                      <span className={t.status === "unresolved" ? "muted" : ""}>{t.status}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="muted" style={{ fontSize: "0.75rem", marginBottom: 0 }}>
-            "unresolved" means no completion notice exists in the log (e.g. the task outlived the
-            session).
-          </p>
-        </div>
-      )}
+      {session.taskExecutions.length > 0 && <TaskExecutionsCard session={session} />}
 
       {session.subagents.length > 0 && (
         <div className="card">
@@ -230,6 +188,69 @@ export function SessionDetail({ project, id }: Props) {
           <p className="first-prompt">{session.firstUserPrompt}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function TaskExecutionsCard({ session }: { session: SessionJson }) {
+  const [backgroundOnly, setBackgroundOnly] = useState(false);
+  const tasks = backgroundOnly
+    ? session.taskExecutions.filter((t) => t.background)
+    : session.taskExecutions;
+  return (
+    <div className="card">
+      <h2>
+        Task executions ({session.taskExecutions.length}){" "}
+        <label style={{ fontWeight: 400, fontSize: "0.78rem", marginLeft: "0.5rem" }}>
+          <input
+            type="checkbox"
+            checked={backgroundOnly}
+            onChange={(e) => setBackgroundOnly(e.target.checked)}
+          />{" "}
+          background only
+        </label>
+      </h2>
+      <table className="mini-table">
+        <thead>
+          <tr>
+            <th>Kind</th>
+            <th>Name</th>
+            <th>Started</th>
+            <th className="num">Duration</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tasks.map((t) => (
+            <tr key={`${t.taskId}-${String(t.startLine)}`}>
+              <td>
+                <span className="badge">
+                  {t.kind}
+                  {t.background ? " · bg" : ""}
+                </span>
+              </td>
+              <td>{t.name}</td>
+              <td className="muted">
+                {t.startedAt !== undefined ? formatDateTime(t.startedAt) : "—"}
+              </td>
+              <td className="num muted">
+                {t.durationMs !== undefined ? formatDuration(t.durationMs) : "—"}
+              </td>
+              <td>
+                {t.status === "failed" ? (
+                  <span className="error-count">failed</span>
+                ) : (
+                  <span className={t.status === "unresolved" ? "muted" : ""}>{t.status}</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted" style={{ fontSize: "0.75rem", marginBottom: 0 }}>
+        Every Bash command and Agent run counts as a task (matching Claude Code's Background-tasks
+        panel); "unresolved" means no completion evidence exists in the log.
+      </p>
     </div>
   );
 }

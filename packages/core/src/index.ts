@@ -4,11 +4,11 @@ export type { SessionFileRef } from "./discovery.js";
 export { listSessionFiles, resolveProjectsDirs } from "./discovery.js";
 export { parseJsonlLine } from "./jsonl.js";
 export type {
-  BackgroundTaskInfo,
   ContextPoint,
   ExplorationProfile,
   ModelUsageSummary,
   RepetitionFinding,
+  TaskExecutionInfo,
   TokenTotals,
   ToolErrorCategory,
   ToolStat,
@@ -16,10 +16,10 @@ export type {
 } from "./metrics.js";
 export {
   classifyToolError,
-  computeBackgroundTasks,
   computeContextTimeline,
   computeExploration,
   computeRepetitions,
+  computeTaskExecutions,
   computeToolStats,
   computeUsage,
 } from "./metrics.js";
