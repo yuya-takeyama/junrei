@@ -1,0 +1,89 @@
+{
+  "checksums": [
+    {
+      "id": "github_release/github.com/cli/cli/v2.96.0/gh_2.96.0_linux_amd64.tar.gz",
+      "checksum": "83D5C2CCAD5498F58BF6368ACB1AB32588CF43AB3A4B1C301BF36328B1C8BD60",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/cli/cli/v2.96.0/gh_2.96.0_linux_arm64.tar.gz",
+      "checksum": "06F86EC7103D41993B76CD78072F43595C34AAA56506D971D9860E67140BF909",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/cli/cli/v2.96.0/gh_2.96.0_macOS_amd64.zip",
+      "checksum": "4BD449DF9AD639391BC62B8032546F0FE9EDCD8526E06682A4F88ABD8C5D163C",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/cli/cli/v2.96.0/gh_2.96.0_macOS_arm64.zip",
+      "checksum": "F23A0C37D963AACC3BED703CCBD59B41C5CA22101FAB7F00EB2B7CAD23ABA463",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/cli/cli/v2.96.0/gh_2.96.0_windows_amd64.zip",
+      "checksum": "C2D6ACC935CD2F00E2144D7E036D5CD82E6B6BD5594E8C75AA75EF2A4ED6AAC3",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/cli/cli/v2.96.0/gh_2.96.0_windows_arm64.zip",
+      "checksum": "C517E0B32C98A4BA90AC95AF8D12CC3AC55781AB4AB72F9A91CE3DE0541D2B09",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/pnpm/pnpm/v11.10.0/pnpm-darwin-arm64.tar.gz",
+      "checksum": "D0D8A55B47DBE07A80D13FEC7EE5AF9BDCA36187E61F9562D72D81DD637178C4",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/pnpm/pnpm/v11.10.0/pnpm-linux-arm64.tar.gz",
+      "checksum": "7DA014033800DB506095D8D5EB15C4B1DF7AA9CC6A4992634E4D59C3985E720B",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/pnpm/pnpm/v11.10.0/pnpm-linux-x64.tar.gz",
+      "checksum": "CF22C9F1BA90F67C9A5CFB1CBE9C2087CF4C3A5C409DAD738C1F8A38B8137666",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/pnpm/pnpm/v11.10.0/pnpm-win32-arm64.zip",
+      "checksum": "96E8A4B44E1D0AA3E41042E9E4606FCD453832144087CE52B0309BE4DEC12D85",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/pnpm/pnpm/v11.10.0/pnpm-win32-x64.zip",
+      "checksum": "BB25E88285354CD2510A481859E5695B68F5DEF16F22E4FFB7AA76A87AF4F700",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "http/nodejs.org/dist/v24.18.0/node-v24.18.0-darwin-arm64.tar.gz",
+      "checksum": "E1A97E14C99C803E96C7339403282EA05A499C32F8D83DEFE9EF5EC66F979ED1",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "http/nodejs.org/dist/v24.18.0/node-v24.18.0-darwin-x64.tar.gz",
+      "checksum": "DFD0DBD3E721503434DF7B7205E719F61B3A3A31B2BCF9729B8B91FEA240F080",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "http/nodejs.org/dist/v24.18.0/node-v24.18.0-linux-arm64.tar.gz",
+      "checksum": "6B4484C2190274175DF9AA8F28E2D758A819CB1C1FE6AB481E2F95B463AB8508",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "http/nodejs.org/dist/v24.18.0/node-v24.18.0-linux-x64.tar.gz",
+      "checksum": "783130984963DB7BA9CBD01089EAF2C2EFB055C7C1693C943174B967B3050CB8",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "http/nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip",
+      "checksum": "0AE68406B42D7725661DA979B1403EC9926DA205C6770827F33AAC9D8F26E821",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "registries/github_content/github.com/aquaproj/aqua-registry/v4.533.1/registry.yaml",
+      "checksum": "7DEC97F215FABE0FE30D5CCF856B2ABF89E2F2DE67D2FBB6A3898E4C2EA83860",
+      "algorithm": "sha256"
+    }
+  ]
+}
