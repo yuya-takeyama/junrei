@@ -31,6 +31,18 @@ pnpm lint
 pnpm test
 ```
 
+## MCP
+
+The server exposes an MCP endpoint (Streamable HTTP) at `/mcp`. Register it in
+Claude Code with:
+
+```sh
+claude mcp add --transport http junrei http://localhost:7867/mcp
+```
+
+Tools: `list_sessions`, `get_session_summary`, `get_context_timeline`,
+`find_repetitions`, `get_subagent_tree`, `get_first_prompt`.
+
 ## License
 
 MIT

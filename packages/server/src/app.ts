@@ -1,4 +1,6 @@
+import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
+import { createMcpServer } from "./mcp.js";
 import { getSession, listSessions } from "./sessions.js";
 
 export type { SessionListItem } from "./sessions.js";
@@ -8,6 +10,13 @@ const MAX_LIST_LIMIT = 500;
 
 export function createApp() {
   return new Hono()
+    .all("/mcp", async (c) => {
+      // Stateless: a fresh server + transport per request keeps the endpoint
+      // usable by any number of clients with no session bookkeeping.
+      const transport = new StreamableHTTPTransport();
+      await createMcpServer().connect(transport);
+      return transport.handleRequest(c);
+    })
     .get("/api/health", (c) => c.json({ status: "ok", name: "junrei" } as const))
     .get("/api/sessions", async (c) => {
       const rawLimit = Number.parseInt(c.req.query("limit") ?? "", 10);

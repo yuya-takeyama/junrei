@@ -37,10 +37,13 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 
 ### M3 — MCP
 
-- ⬜ MCP endpoint (Streamable HTTP, official SDK) on the same server
-- ⬜ Tools: `list_sessions`, `get_session_summary`, `get_context_timeline`,
-  `get_tool_stats`, `find_repetitions`, `get_subagent_tree`
-- ⬜ Verified from Claude Code as an MCP client
+- ✅ MCP endpoint (`/mcp`, Streamable HTTP via official SDK + @hono/mcp,
+  stateless per-request transport) on the same server
+- ✅ Tools: `list_sessions`, `get_session_summary`, `get_context_timeline`,
+  `find_repetitions`, `get_subagent_tree`, `get_first_prompt`
+  (tool stats are part of `get_session_summary`)
+- ✅ Verified over Streamable HTTP (initialize / tools/list / tools/call
+  against real sessions)
 
 ### M4 — Polish
 
