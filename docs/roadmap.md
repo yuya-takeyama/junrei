@@ -64,6 +64,13 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   rates, per-model). The 1 failure became the out-of-order linkage fix above.
 - ⬜ Docs refreshed; README quick start
 
+### Dev harness
+
+- ✅ `cost-efficient-delegation` skill + CLAUDE.md model-cost policy: delegate
+  execution to cheaper models (haiku/sonnet/opus) per task, keep the expensive
+  orchestrator for planning/judging; grounded in official docs (model-config,
+  advisor tool, managed-agents multi-agent) and measured with Junrei itself
+
 ## Later (post-v1)
 
 - ⬜ Codex session support (adapter layer in core)
