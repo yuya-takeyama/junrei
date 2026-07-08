@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "junrei-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@junrei/web", "dev"],
+      "port": 5873
+    },
+    {
+      "name": "junrei-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@junrei/server", "dev"],
+      "port": 7867
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+
+# サプライチェーン対策: 公開から 3 日（4320 分）未満のパッケージはインストールしない
+minimumReleaseAge: 4320
+
+allowBuilds:
+  '@biomejs/biome': true
+  esbuild: true
