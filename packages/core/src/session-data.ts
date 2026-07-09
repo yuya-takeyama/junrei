@@ -44,6 +44,22 @@ export interface CompactionEvent {
   postTokens?: number;
 }
 
+/**
+ * One `api_error` system record, for the Context & cost lens's error list.
+ *
+ * Named `ApiErrorLogEntry` (not `ApiErrorEntry`) to avoid colliding with the
+ * unrelated `ApiErrorEntry` timeline-row type in timeline.ts (same package,
+ * both re-exported from index.ts).
+ */
+export interface ApiErrorLogEntry {
+  line: number;
+  timestamp?: string;
+  status?: number;
+  retryAttempt?: number;
+  /** Capped at 300 chars. */
+  message?: string;
+}
+
 /** A task launched into the background: Bash (run_in_background) or async Agent. */
 export interface BackgroundLaunch {
   kind: "bash" | "agent";
@@ -73,6 +89,8 @@ export interface SessionData {
   backgroundLaunches: BackgroundLaunch[];
   taskNotifications: TaskNotificationEvent[];
   apiErrorCount: number;
+  /** Capped at API_ERROR_LIST_CAP; apiErrorCount keeps counting past the cap. */
+  apiErrors: ApiErrorLogEntry[];
   title?: string;
   cwd?: string;
   gitBranch?: string;
@@ -125,6 +143,7 @@ export function buildSessionData(transcript: Transcript): SessionData {
   const compactions: CompactionEvent[] = [];
   const backgroundLaunches: BackgroundLaunch[] = [];
   const taskNotifications: TaskNotificationEvent[] = [];
+  const apiErrors: ApiErrorLogEntry[] = [];
   let apiErrorCount = 0;
   let aiTitle: string | undefined;
   let customTitle: string | undefined;
@@ -174,6 +193,19 @@ export function buildSessionData(transcript: Transcript): SessionData {
           });
         } else if ("subtype" in record && record.subtype === "api_error") {
           apiErrorCount += 1;
+          if (apiErrors.length < API_ERROR_LIST_CAP) {
+            apiErrors.push({
+              line: record.line,
+              ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+              ...("status" in record && record.status !== undefined && { status: record.status }),
+              ...("retryAttempt" in record &&
+                record.retryAttempt !== undefined && { retryAttempt: record.retryAttempt }),
+              ...("message" in record &&
+                record.message !== undefined && {
+                  message: record.message.slice(0, API_ERROR_MESSAGE_LIMIT),
+                }),
+            });
+          }
         }
         break;
       case "queue-operation":
@@ -221,6 +253,7 @@ export function buildSessionData(transcript: Transcript): SessionData {
     backgroundLaunches,
     taskNotifications,
     apiErrorCount,
+    apiErrors,
     ...(title !== undefined && { title }),
     ...(cwd !== undefined && { cwd }),
     ...(gitBranch !== undefined && { gitBranch }),
@@ -315,6 +348,8 @@ function collectUser(
 }
 
 const LAUNCH_NAME_LIMIT = 120;
+const API_ERROR_LIST_CAP = 200;
+const API_ERROR_MESSAGE_LIMIT = 300;
 
 function collectBackgroundLaunch(
   record: UserRecord,

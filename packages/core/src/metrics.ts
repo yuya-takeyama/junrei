@@ -1,4 +1,4 @@
-import { estimateCostUsd } from "./pricing/pricing.js";
+import { estimateCostComponents } from "./pricing/pricing.js";
 import type { SessionData, TaskNotificationEvent, ToolCall } from "./session-data.js";
 
 // ---------------------------------------------------------------------------
@@ -17,11 +17,13 @@ export interface ModelUsageSummary extends TokenTotals {
   messageCount: number;
   /** undefined when the model has no known pricing. */
   costUsd?: number;
+  /** The cache-creation ("cache write") slice of costUsd; undefined under the same conditions as costUsd. */
+  cacheWriteCostUsd?: number;
 }
 
 export interface UsageSummary {
   byModel: ModelUsageSummary[];
-  total: TokenTotals & { costUsd: number; costIsComplete: boolean };
+  total: TokenTotals & { costUsd: number; costIsComplete: boolean; cacheWriteCostUsd?: number };
 }
 
 export function computeUsage(data: SessionData): UsageSummary {
@@ -47,11 +49,12 @@ export function computeUsage(data: SessionData): UsageSummary {
     entry.outputTokens += message.usage.outputTokens;
     entry.cacheReadTokens += message.usage.cacheReadTokens;
     entry.cacheCreationTokens += message.usage.cacheCreationTokens;
-    const cost = estimateCostUsd(model, message.usage);
+    const cost = estimateCostComponents(model, message.usage);
     if (cost === undefined) {
       entry.unpriced = true;
     } else {
-      entry.costUsd = (entry.costUsd ?? 0) + cost;
+      entry.costUsd = (entry.costUsd ?? 0) + cost.totalCost;
+      entry.cacheWriteCostUsd = (entry.cacheWriteCostUsd ?? 0) + cost.cacheCreationCost;
     }
   }
 
@@ -62,6 +65,7 @@ export function computeUsage(data: SessionData): UsageSummary {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     costUsd: 0,
+    cacheWriteCostUsd: 0,
     costIsComplete: true,
   };
   for (const entry of models) {
@@ -70,12 +74,76 @@ export function computeUsage(data: SessionData): UsageSummary {
     total.cacheReadTokens += entry.cacheReadTokens;
     total.cacheCreationTokens += entry.cacheCreationTokens;
     total.costUsd += entry.costUsd ?? 0;
+    total.cacheWriteCostUsd += entry.cacheWriteCostUsd ?? 0;
     if (entry.unpriced) total.costIsComplete = false;
   }
   return {
     byModel: models.map(({ unpriced, ...rest }) => rest),
     total,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Per-turn token composition
+// ---------------------------------------------------------------------------
+
+export interface TurnUsage {
+  /** Source line of the user prompt that opened this turn. */
+  line: number;
+  timestamp?: string;
+  /** Fresh (uncached) input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  apiMessageCount: number;
+}
+
+/**
+ * Per-turn token composition, main transcript only — one entry per user
+ * prompt (the same records `SessionData.userPrompts` collects), aggregating
+ * every API message issued while answering it.
+ *
+ * Attribution: a message is folded into the turn opened by the greatest
+ * prompt line at or before the message's own line; messages that somehow
+ * precede the first prompt (rare) fall into that first turn. Sessions with
+ * no user prompts return `[]`.
+ *
+ * Compaction boundaries are NOT folded into this array — callers interleave
+ * `SessionData.compactions` (by line) between turns for display instead, so
+ * this stays a pure per-turn token breakdown.
+ */
+export function computeTurnUsage(data: SessionData): TurnUsage[] {
+  if (data.userPrompts.length === 0) return [];
+
+  const turns: TurnUsage[] = data.userPrompts.map((prompt) => ({
+    line: prompt.line,
+    ...(prompt.timestamp !== undefined && { timestamp: prompt.timestamp }),
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    apiMessageCount: 0,
+  }));
+
+  const messages = [...data.apiMessages].sort((a, b) => a.line - b.line);
+  let turnIndex = 0;
+  for (const message of messages) {
+    if (message.usage === undefined) continue;
+    while (
+      turnIndex + 1 < turns.length &&
+      (turns[turnIndex + 1] as TurnUsage).line <= message.line
+    ) {
+      turnIndex += 1;
+    }
+    const turn = turns[turnIndex] as TurnUsage;
+    turn.inputTokens += message.usage.inputTokens;
+    turn.outputTokens += message.usage.outputTokens;
+    turn.cacheReadTokens += message.usage.cacheReadTokens;
+    turn.cacheCreationTokens += message.usage.cacheCreationTokens;
+    turn.apiMessageCount += 1;
+  }
+  return turns;
 }
 
 // ---------------------------------------------------------------------------

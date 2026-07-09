@@ -266,6 +266,7 @@ describe("buildTimeline", () => {
       backgroundLaunches: [],
       taskNotifications: [],
       apiErrorCount: 0,
+      apiErrors: [],
       warningCount: 0,
     };
     const entries = await buildTimeline(data);

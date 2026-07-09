@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { client, type SessionJson } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
+import { ContextCost } from "./lenses/ContextCost.js";
 import { Orchestration } from "./lenses/Orchestration.js";
 import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
@@ -160,11 +161,15 @@ export function SessionShell() {
         {error === null && session !== null && lens === "orchestration" && (
           <Orchestration session={session} />
         )}
+        {error === null && session !== null && lens === "context" && (
+          <ContextCost session={session} />
+        )}
         {error === null &&
           session !== null &&
           lens !== "overview" &&
           lens !== "timeline" &&
-          lens !== "orchestration" && (
+          lens !== "orchestration" &&
+          lens !== "context" && (
             <div className="hpad mt16">
               <div className="pan tile mut">
                 {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.

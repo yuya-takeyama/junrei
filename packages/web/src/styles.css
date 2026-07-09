@@ -863,3 +863,87 @@ button.fb {
 .fb.sel {
   box-shadow: inset 0 0 0 2px var(--amb);
 }
+
+/* ---------------------------------------------------------------------
+   Context & cost (L2) — per-turn stacked bar, legend, cost-by-model table,
+   API errors list. See design-spec/14-context-cost.md.
+   --------------------------------------------------------------------- */
+
+.stk {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 110px;
+}
+.scol {
+  /*
+   * Deviates from the mock's fixed 16px column width: many-turn sessions
+   * must fit the row without introducing horizontal page scroll, so columns
+   * flex to share the available width instead, capped so short sessions
+   * don't stretch individual columns absurdly wide.
+   */
+  flex: 1 1 0;
+  max-width: 16px;
+  min-width: 2px;
+  display: flex;
+  flex-direction: column-reverse;
+}
+.sseg {
+  width: 100%;
+  display: block;
+}
+.k-cr {
+  background: var(--bd);
+}
+.k-cw {
+  background: var(--amb);
+  opacity: 0.5;
+}
+.k-in {
+  background: var(--mut);
+}
+.k-out {
+  background: var(--amb);
+}
+.svd {
+  width: 0;
+  border-left: 1px dashed var(--amb);
+  opacity: 0.6;
+  align-self: stretch;
+  flex: none;
+  margin: 0 3px;
+}
+.lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mut);
+}
+.lgs {
+  width: 10px;
+  height: 10px;
+  flex: none;
+}
+.cmg {
+  display: grid;
+  grid-template-columns: 80px repeat(4, minmax(0, 1fr)) 80px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.cmg.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+.tstat {
+  display: grid;
+  grid-template-columns: 150px 52px 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}

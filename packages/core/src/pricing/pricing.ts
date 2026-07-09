@@ -47,8 +47,21 @@ export function findModelPricing(model: string): ModelPricing | undefined {
   return best?.pricing;
 }
 
+export interface CostComponents {
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  /** The cache-creation ("cache write") portion — billed at 1.25x the input rate by default. */
+  cacheCreationCost: number;
+  totalCost: number;
+}
+
 /**
- * Estimate USD cost for one API message's usage.
+ * Break one API message's usage down into its rate components instead of
+ * just the summed total — lets callers surface e.g. "cache-write cost"
+ * without re-deriving the tiered-rate formula. `estimateCostUsd` is a thin
+ * wrapper over this that keeps returning just the total (byte-identical to
+ * before this was split out).
  *
  * Anthropic bills long-context requests (>200k input incl. cache) at the
  * `above_200k` tier for the entire request, so the tier is chosen from the
@@ -59,7 +72,10 @@ export function findModelPricing(model: string): ModelPricing | undefined {
  * documented multiplier). Without a 5m/1h breakdown the flat total is billed
  * at the 5m rate.
  */
-export function estimateCostUsd(model: string, usage: TokenUsage): number | undefined {
+export function estimateCostComponents(
+  model: string,
+  usage: TokenUsage,
+): CostComponents | undefined {
   const pricing = findModelPricing(model);
   if (pricing?.input_cost_per_token === undefined || pricing.output_cost_per_token === undefined) {
     return undefined;
@@ -94,12 +110,22 @@ export function estimateCostUsd(model: string, usage: TokenUsage): number | unde
     cacheCreationCost = usage.cacheCreationTokens * cacheCreateRate;
   }
 
-  return (
-    usage.inputTokens * inputRate +
-    usage.outputTokens * outputRate +
-    usage.cacheReadTokens * cacheReadRate +
-    cacheCreationCost
-  );
+  const inputCost = usage.inputTokens * inputRate;
+  const outputCost = usage.outputTokens * outputRate;
+  const cacheReadCost = usage.cacheReadTokens * cacheReadRate;
+
+  return {
+    inputCost,
+    outputCost,
+    cacheReadCost,
+    cacheCreationCost,
+    totalCost: inputCost + outputCost + cacheReadCost + cacheCreationCost,
+  };
+}
+
+/** Estimate total USD cost for one API message's usage. See `estimateCostComponents`. */
+export function estimateCostUsd(model: string, usage: TokenUsage): number | undefined {
+  return estimateCostComponents(model, usage)?.totalCost;
 }
 
 export function pricingSnapshotInfo(): { source: string; fetchedAt: string; modelCount: number } {

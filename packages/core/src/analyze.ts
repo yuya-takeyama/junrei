@@ -7,6 +7,7 @@ import type {
   TaskExecutionInfo,
   TokenTotals,
   ToolStat,
+  TurnUsage,
   UsageSummary,
 } from "./metrics.js";
 import {
@@ -15,10 +16,11 @@ import {
   computeRepetitions,
   computeTaskExecutions,
   computeToolStats,
+  computeTurnUsage,
   computeUsage,
 } from "./metrics.js";
 import { parseTranscriptFile } from "./parser.js";
-import type { CompactionEvent, SessionData, ToolCall } from "./session-data.js";
+import type { ApiErrorLogEntry, CompactionEvent, SessionData, ToolCall } from "./session-data.js";
 import { asyncAgentLaunchToolUseIds, buildSessionData, toolResultLength } from "./session-data.js";
 import { listSubagentRefs } from "./subagents.js";
 
@@ -101,6 +103,10 @@ export interface SessionAnalysis {
   contextTimeline: ContextPoint[];
   compactions: CompactionEvent[];
   apiErrorCount: number;
+  /** Capped list backing apiErrorCount — see `ApiErrorLogEntry`. Main transcript only. */
+  apiErrors: ApiErrorLogEntry[];
+  /** Per-turn token composition, main transcript only — see `TurnUsage`. */
+  turnUsage: TurnUsage[];
   toolStats: ToolStat[];
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
@@ -138,6 +144,9 @@ function mergeUsageByModel(
       existing.cacheCreationTokens += entry.cacheCreationTokens;
       if (entry.costUsd !== undefined) {
         existing.costUsd = (existing.costUsd ?? 0) + entry.costUsd;
+      }
+      if (entry.cacheWriteCostUsd !== undefined) {
+        existing.cacheWriteCostUsd = (existing.cacheWriteCostUsd ?? 0) + entry.cacheWriteCostUsd;
       }
     }
   };
@@ -196,6 +205,8 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
     contextTimeline: computeContextTimeline(data),
     compactions: data.compactions,
     apiErrorCount: data.apiErrorCount,
+    apiErrors: data.apiErrors,
+    turnUsage: computeTurnUsage(data),
     toolStats: computeToolStats(data),
     repetitions: computeRepetitions(data),
     exploration: computeExploration(data),

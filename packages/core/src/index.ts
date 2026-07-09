@@ -12,6 +12,7 @@ export type {
   TokenTotals,
   ToolErrorCategory,
   ToolStat,
+  TurnUsage,
   UsageSummary,
 } from "./metrics.js";
 export {
@@ -21,11 +22,19 @@ export {
   computeRepetitions,
   computeTaskExecutions,
   computeToolStats,
+  computeTurnUsage,
   computeUsage,
 } from "./metrics.js";
 export { parseTranscriptFile } from "./parser.js";
-export { estimateCostUsd, findModelPricing, pricingSnapshotInfo } from "./pricing/pricing.js";
+export type { CostComponents } from "./pricing/pricing.js";
+export {
+  estimateCostComponents,
+  estimateCostUsd,
+  findModelPricing,
+  pricingSnapshotInfo,
+} from "./pricing/pricing.js";
 export type {
+  ApiErrorLogEntry,
   ApiMessage,
   CompactionEvent,
   SessionData,

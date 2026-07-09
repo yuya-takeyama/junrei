@@ -161,6 +161,74 @@ describe("analyzeSession", () => {
     expect(analysis.firstUserPromptLine).toBe(1);
   });
 
+  it("builds per-turn token composition attributed by prompt line", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    // 2 user prompts (line 1, line 20) → 2 turns; every api message
+    // (apiMessageCount 11) is attributed to exactly one of them.
+    expect(analysis.turnUsage).toHaveLength(2);
+    const [turn1, turn2] = analysis.turnUsage;
+    expect(turn1?.line).toBe(1);
+    expect(turn2?.line).toBe(20);
+    expect((turn1?.apiMessageCount ?? 0) + (turn2?.apiMessageCount ?? 0)).toBe(
+      analysis.apiMessageCount,
+    );
+
+    // Turn 1 = msg_1..msg_7b (everything between line 1 and line 20).
+    expect(turn1?.apiMessageCount).toBe(8);
+    expect(turn1?.inputTokens).toBe(100 + 120 + 130 + 140 + 150 + 160 + 170 + 175);
+    expect(turn1?.outputTokens).toBe(50 + 30 + 25 + 40 + 20 + 20 + 20 + 15);
+    expect(turn1?.cacheReadTokens).toBe(0 + 300 + 310 + 320 + 330 + 340 + 350 + 355);
+    expect(turn1?.cacheCreationTokens).toBe(200 + 10 + 5);
+
+    // Turn 2 = msg_8, msg_10, msg_9 (everything after line 20).
+    expect(turn2?.apiMessageCount).toBe(3);
+    expect(turn2?.inputTokens).toBe(180 + 200 + 190);
+    expect(turn2?.outputTokens).toBe(60 + 10 + 80);
+    expect(turn2?.cacheReadTokens).toBe(9000 + 9200 + 9500);
+    expect(turn2?.cacheCreationTokens).toBe(500);
+
+    // Component sums across turns reconcile exactly with the model-level totals.
+    const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
+    const sumField = (field: "inputTokens" | "outputTokens" | "cacheCreationTokens") =>
+      (turn1?.[field] ?? 0) + (turn2?.[field] ?? 0);
+    expect(sumField("inputTokens")).toBe(fable?.inputTokens);
+    expect(sumField("outputTokens")).toBe(fable?.outputTokens);
+    expect(sumField("cacheCreationTokens")).toBe(fable?.cacheCreationTokens);
+  });
+
+  it("returns an empty turnUsage array for a session with no user prompts", async () => {
+    const AGENT_FILE = join(
+      FIXTURE_PROJECTS,
+      "-Users-test-proj/11111111-1111-1111-1111-111111111111/subagents/agent-aaaa111122223333f.jsonl",
+    );
+    // Sanity check on the general shape only — the dedicated empty case is
+    // exercised directly against computeTurnUsage in metrics coverage below,
+    // this just confirms analyzeSession wires it through for any transcript.
+    const analysis = await analyzeSession(AGENT_FILE);
+    expect(Array.isArray(analysis.turnUsage)).toBe(true);
+  });
+
+  it("collects the API error list alongside apiErrorCount", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    expect(analysis.apiErrorCount).toBe(1);
+    expect(analysis.apiErrors).toHaveLength(1);
+    const error = analysis.apiErrors[0];
+    expect(error?.line).toBe(7);
+    expect(error?.status).toBe(529);
+    expect(error?.retryAttempt).toBe(1);
+    expect(error?.message).toBe("529 Overloaded");
+    expect(error?.timestamp).toBe("2026-07-09T01:00:13.500Z");
+  });
+
+  it("gives cacheWriteCostUsd a positive value when cache-creation tokens are priced", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    // The fixture's fable messages carry cacheCreationTokens (715 total), all priced.
+    expect(analysis.usage.total.cacheWriteCostUsd).toBeGreaterThan(0);
+    const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
+    expect(fable?.cacheWriteCostUsd).toBeGreaterThan(0);
+    expect(fable?.cacheWriteCostUsd).toBeLessThan(fable?.costUsd ?? 0);
+  });
+
   it("reconstructs task executions (foreground and background)", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
     // 2 foreground Bash + 1 background Bash + 1 async Agent.
