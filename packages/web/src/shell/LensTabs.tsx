@@ -1,9 +1,9 @@
 import { Link } from "react-router";
-import { CLAUDE_LENSES, LENS_LABEL, type Lens, sessionPath } from "../router.js";
+import { CLAUDE_LENSES, LENS_LABEL, type Lens, type SessionRef, sessionPath } from "../router.js";
 
 interface LensTabsProps {
-  project: string;
-  id: string;
+  /** Session to link the tabs to — ignored when `buildPath` is given (the agent detail shell). */
+  sessionRef?: SessionRef;
   active: Lens;
   /**
    * Overrides the href each tab links to — used by the agent detail shell
@@ -22,14 +22,15 @@ interface LensTabsProps {
 }
 
 /** Persistent lens tab bar — see design-spec/01-shell.md (.b-tabs/.b-tab). */
-export function LensTabs({
-  project,
-  id,
-  active,
-  buildPath,
-  lenses = CLAUDE_LENSES,
-}: LensTabsProps) {
-  const toPath = buildPath ?? ((lens: Lens) => sessionPath(project, id, lens));
+export function LensTabs({ sessionRef, active, buildPath, lenses = CLAUDE_LENSES }: LensTabsProps) {
+  const toPath =
+    buildPath ??
+    ((lens: Lens) => {
+      if (sessionRef === undefined) {
+        throw new Error("LensTabs: one of sessionRef/buildPath is required");
+      }
+      return sessionPath(sessionRef, lens);
+    });
   return (
     <div className="b-tabs">
       {lenses.map((lens) => (

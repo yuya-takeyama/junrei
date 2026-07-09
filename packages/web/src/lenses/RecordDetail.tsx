@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { client, type RecordDetail as RecordDetailData } from "../api.js";
+import {
+  fetchRecordDetail,
+  type RecordDetail as RecordDetailData,
+  type SessionRef,
+} from "../api.js";
 import { formatDuration, formatTimeMs, formatTokens, formatUsd } from "../format.js";
 import { CopyButton, InlineCopyValue } from "./recordDetail/CopyButton.js";
 import { KvGrid, type KvRow } from "./recordDetail/KvGrid.js";
@@ -13,11 +17,10 @@ import {
 } from "./recordDetail/recordFormat.js";
 
 interface Props {
-  project: string;
-  id: string;
+  sessionRef: SessionRef;
   line: number;
   /** Subagent id to scope the fetch to, when opened from an agent-scoped timeline (unused today —
-   *  the Timeline lens only ever shows the main session — but the API already supports it). */
+   *  the Timeline lens only ever shows the main session — but the API already supports it). Claude-only. */
   agent?: string;
   /** Path to navigate to on close (the current session/lens with no `?record=` param). */
   closeHref: string;
@@ -372,31 +375,31 @@ function RecordBody({ detail, agent }: { detail: RecordDetailData; agent: string
  * `closeHref`. See router.ts's `recordPath` doc comment for why this is
  * hash-addressed rather than component-local state.
  */
-export function RecordDetail({ project, id, line, agent, closeHref }: Props) {
+export function RecordDetail({ sessionRef, line, agent, closeHref }: Props) {
   const [detail, setDetail] = useState<RecordDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const navigate = useNavigate();
 
+  // `sessionRef` is rebuilt fresh (a new object) on every caller render —
+  // depend on its primitive parts instead so this effect doesn't re-fire
+  // every render just because the caller re-rendered for an unrelated reason.
+  const refSource = sessionRef.source;
+  const refProject = refSource === "claude-code" ? sessionRef.project : undefined;
+  const refId = sessionRef.id;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depend on sessionRef's primitive parts (see comment above), not the object itself.
   useEffect(() => {
     setDetail(null);
     setError(null);
     setNotFound(false);
-    client.api.sessions[":project"][":id"].record[":line"]
-      .$get({
-        param: { project, id, line: String(line) },
-        ...(agent !== undefined && { query: { agent } }),
-      })
-      .then(async (res) => {
-        if (res.status === 404) {
-          setNotFound(true);
-          return;
-        }
-        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-        setDetail((await res.json()) as RecordDetailData);
+    fetchRecordDetail(sessionRef, line, agent)
+      .then((result) => {
+        if ("notFound" in result) setNotFound(true);
+        else setDetail(result.detail);
       })
       .catch((e: unknown) => setError(String(e)));
-  }, [project, id, line, agent]);
+  }, [refSource, refProject, refId, line, agent]);
 
   const close = () => {
     navigate(closeHref);

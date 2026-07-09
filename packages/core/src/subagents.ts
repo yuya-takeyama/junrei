@@ -10,7 +10,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { parseTranscriptFile } from "./parser.js";
+import { parseClaudeTranscriptFile } from "./parser.js";
 import { buildSessionData, type SessionData } from "./session-data.js";
 
 export interface SubagentMeta {
@@ -70,7 +70,7 @@ export async function loadSubagentSessionData(
 ): Promise<SessionData | undefined> {
   const jsonlPath = join(subagentsDirFor(mainFilePath), `agent-${agentId}.jsonl`);
   try {
-    const transcript = await parseTranscriptFile(jsonlPath);
+    const transcript = await parseClaudeTranscriptFile(jsonlPath);
     return buildSessionData(transcript);
   } catch {
     return undefined;

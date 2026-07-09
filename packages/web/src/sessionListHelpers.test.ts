@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeSessionListItem, CodexSessionListItem } from "./api.js";
 import {
   isEstimatedCost,
+  projectFilterKey,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -28,7 +29,6 @@ const claudeItem: ClaudeSessionListItem = {
 const codexItem: CodexSessionListItem = {
   source: "codex",
   sessionId: "s2",
-  projectDirName: "codex",
   subagentCount: 0,
   archived: false,
   userTurnCount: 2,
@@ -84,5 +84,15 @@ describe("isEstimatedCost", () => {
   it("is true only for Codex rows", () => {
     expect(isEstimatedCost(claudeItem)).toBe(false);
     expect(isEstimatedCost(codexItem)).toBe(true);
+  });
+});
+
+describe("projectFilterKey", () => {
+  it("returns the real projectDirName for a Claude row", () => {
+    expect(projectFilterKey(claudeItem)).toBe("-Users-me-proj");
+  });
+
+  it("returns the fixed 'codex' label for a Codex row (no project-dir concept)", () => {
+    expect(projectFilterKey(codexItem)).toBe("codex");
   });
 });

@@ -2,18 +2,14 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
 import {
+  claudeAdapter,
+  codexAdapter,
   getAgentSession,
-  getCodexSession,
-  getCodexSessionRecordDetail,
-  getCodexTimeline,
-  getSession,
-  getSessionRecordDetail,
-  getTimeline,
   listSessions,
   type SessionSourceFilter,
 } from "./sessions.js";
 
-export type { AnySessionListItem, SessionListItem } from "./sessions.js";
+export type { AnySessionListItem } from "./sessions.js";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 500;
@@ -38,25 +34,74 @@ export function createApp() {
         const limit = Number.isInteger(rawLimit)
           ? Math.min(Math.max(rawLimit, 1), MAX_LIST_LIMIT)
           : DEFAULT_LIST_LIMIT;
+        // Omitted `source` means "all" — see `listSessions`'s doc comment.
         const source = parseSourceFilter(c.req.query("source"));
         return c.json({ sessions: await listSessions(limit, source) });
       })
-      // Registered BEFORE the generic `/api/sessions/:project/:id` route below
-      // (and the codex/:id/timeline + codex/:id/record/:line routes below
-      // that, similarly, BEFORE their own generic `:project` equivalents):
-      // Hono matches routes in registration order, and munged Claude project
-      // dirs always start with "-" (see resolveProjectsDirs/listSessionFiles
-      // in @junrei/core), so the literal "codex" segment can never collide
-      // with a real `:project` value — but only as long as these stay first.
+      // Source-prefixed routes, symmetric between the two harnesses: Claude
+      // scopes by `{project, id}` (a munged project dir plus the session
+      // UUID), Codex by `{id}` alone (Codex has no project-dir concept). The
+      // two prefixes are disjoint path segments, so — unlike the old
+      // unprefixed routes this replaces — there's no registration-order
+      // collision to guard against.
+      .get("/api/sessions/claude-code/:project/:id", async (c) => {
+        const analysis = await claudeAdapter.getDetail({
+          project: c.req.param("project"),
+          id: c.req.param("id"),
+        });
+        if (analysis === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json({ analysis });
+      })
+      .get("/api/sessions/claude-code/:project/:id/timeline", async (c) => {
+        const entries = await claudeAdapter.getTimeline(
+          { project: c.req.param("project"), id: c.req.param("id") },
+          c.req.query("agent"),
+        );
+        if (entries === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json({ entries });
+      })
+      .get("/api/sessions/claude-code/:project/:id/record/:line", async (c) => {
+        const line = Number.parseInt(c.req.param("line"), 10);
+        if (!Number.isInteger(line) || line < 1) {
+          return c.json({ error: "record not found" } as const, 404);
+        }
+        const detail = await claudeAdapter.getRecordDetail(
+          { project: c.req.param("project"), id: c.req.param("id") },
+          line,
+          c.req.query("agent"),
+        );
+        if (detail === undefined) {
+          return c.json({ error: "record not found" } as const, 404);
+        }
+        return c.json(detail);
+      })
+      // Claude-only: Codex sub-agent threads are full sessions in their own
+      // right (fetch them via the codex detail route above), not sidecar
+      // transcripts scoped under a parent session.
+      .get("/api/sessions/claude-code/:project/:id/agents/:agentId", async (c) => {
+        const analysis = await getAgentSession(
+          c.req.param("project"),
+          c.req.param("id"),
+          c.req.param("agentId"),
+        );
+        if (analysis === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json({ analysis });
+      })
       .get("/api/sessions/codex/:id", async (c) => {
-        const analysis = await getCodexSession(c.req.param("id"));
+        const analysis = await codexAdapter.getDetail({ id: c.req.param("id") });
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
         return c.json({ analysis });
       })
       .get("/api/sessions/codex/:id/timeline", async (c) => {
-        const entries = await getCodexTimeline(c.req.param("id"));
+        const entries = await codexAdapter.getTimeline({ id: c.req.param("id") });
         if (entries === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
@@ -67,52 +112,7 @@ export function createApp() {
         if (!Number.isInteger(line) || line < 1) {
           return c.json({ error: "record not found" } as const, 404);
         }
-        const detail = await getCodexSessionRecordDetail(c.req.param("id"), line);
-        if (detail === undefined) {
-          return c.json({ error: "record not found" } as const, 404);
-        }
-        return c.json(detail);
-      })
-      .get("/api/sessions/:project/:id", async (c) => {
-        const analysis = await getSession(c.req.param("project"), c.req.param("id"));
-        if (analysis === undefined) {
-          return c.json({ error: "session not found" } as const, 404);
-        }
-        return c.json(analysis);
-      })
-      .get("/api/sessions/:project/:id/agents/:agentId", async (c) => {
-        const analysis = await getAgentSession(
-          c.req.param("project"),
-          c.req.param("id"),
-          c.req.param("agentId"),
-        );
-        if (analysis === undefined) {
-          return c.json({ error: "session not found" } as const, 404);
-        }
-        return c.json(analysis);
-      })
-      .get("/api/sessions/:project/:id/timeline", async (c) => {
-        const entries = await getTimeline(
-          c.req.param("project"),
-          c.req.param("id"),
-          c.req.query("agent"),
-        );
-        if (entries === undefined) {
-          return c.json({ error: "session not found" } as const, 404);
-        }
-        return c.json({ entries });
-      })
-      .get("/api/sessions/:project/:id/record/:line", async (c) => {
-        const line = Number.parseInt(c.req.param("line"), 10);
-        if (!Number.isInteger(line) || line < 1) {
-          return c.json({ error: "record not found" } as const, 404);
-        }
-        const detail = await getSessionRecordDetail(
-          c.req.param("project"),
-          c.req.param("id"),
-          line,
-          c.req.query("agent"),
-        );
+        const detail = await codexAdapter.getRecordDetail({ id: c.req.param("id") }, line);
         if (detail === undefined) {
           return c.json({ error: "record not found" } as const, 404);
         }

@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { AnySessionJson } from "../api.js";
 import { cacheHitRate, formatTokens, formatUsd } from "../format.js";
-import { sessionPath } from "../router.js";
+import { sessionPath, sessionRefOf } from "../router.js";
+import { capsFor } from "../sourceCaps.js";
 import { EstBadge } from "./EstBadge.js";
 
 interface Props {
@@ -23,18 +24,15 @@ interface Props {
  * minimal-branch reasoning as the rest of this component.
  */
 export function StatStrip({ session }: Props) {
-  const contextHref = sessionPath(
-    session.source === "claude-code" ? session.projectDirName : "codex",
-    session.sessionId,
-    "context",
-  );
+  const ref = sessionRefOf(session);
+  const contextHref = sessionPath(ref, "context");
 
   const cells: ReactNode[] = [
     <Cell key="cost" label="Total cost" href={contextHref}>
       <div className="big mt8 amb">
         {formatUsd(session.totalUsage.costUsd)}
         {session.totalUsage.costIsComplete ? "" : "*"}
-        {session.source === "codex" && <EstBadge />}
+        {capsFor(session).costIsEstimated && <EstBadge />}
       </div>
       {session.source === "claude-code" ? (
         <div className="sub num">
@@ -49,11 +47,7 @@ export function StatStrip({ session }: Props) {
 
   if (session.source === "claude-code") {
     cells.push(
-      <Cell
-        key="turns"
-        label="Turns / msgs"
-        href={sessionPath(session.projectDirName, session.sessionId, "timeline")}
-      >
+      <Cell key="turns" label="Turns / msgs" href={sessionPath(ref, "timeline")}>
         <div className="big mt8">
           {session.userTurnCount}
           <span className="mut" style={{ fontSize: "15px" }}>
@@ -66,7 +60,7 @@ export function StatStrip({ session }: Props) {
     );
   } else {
     cells.push(
-      <Cell key="turns" label="Turns" href={sessionPath("codex", session.sessionId, "turns")}>
+      <Cell key="turns" label="Turns" href={sessionPath(ref, "turns")}>
         <div className="big mt8">{session.userTurnCount}</div>
         <div className="sub">user turns</div>
       </Cell>,
@@ -99,12 +93,7 @@ export function StatStrip({ session }: Props) {
     );
     const nestedSubagents = Math.max(0, session.subagentCount - session.subagents.length);
     cells.push(
-      <Cell
-        key="subagents"
-        label="Subagents"
-        href={sessionPath(session.projectDirName, session.sessionId, "orchestration")}
-        last
-      >
+      <Cell key="subagents" label="Subagents" href={sessionPath(ref, "orchestration")} last>
         <div className={session.subagentCount === 0 ? "big mt8 mut" : "big mt8"}>
           {session.subagentCount}
         </div>
@@ -126,12 +115,7 @@ export function StatStrip({ session }: Props) {
     );
     const nestedSubagents = Math.max(0, session.subagentCount - session.subagents.length);
     cells.push(
-      <Cell
-        key="subagents"
-        label="Subagents"
-        href={sessionPath("codex", session.sessionId, "orchestration")}
-        last
-      >
+      <Cell key="subagents" label="Subagents" href={sessionPath(ref, "orchestration")} last>
         <div className={session.subagentCount === 0 ? "big mt8 mut" : "big mt8"}>
           {session.subagentCount}
         </div>

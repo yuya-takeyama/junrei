@@ -147,7 +147,6 @@ describe("listSessions (source filter + Codex merge)", () => {
     expect(items.length).toBe(5);
     for (const item of items) {
       expect(item.source).toBe("codex");
-      expect(item.projectDirName).toBe("codex");
     }
     expect(items.some((i) => i.sessionId === "44444444-4444-4444-4444-444444444444")).toBe(false);
     expect(items.some((i) => i.sessionId === "88888888-8888-8888-8888-888888888888")).toBe(false);
@@ -224,12 +223,12 @@ describe("listSessions (source filter + Codex merge)", () => {
     ]);
   });
 
-  it("source omitted stays Claude-only (pre-Codex clients see unchanged behavior)", async () => {
+  it('source omitted means "all" (no back-compat Claude-only default)', async () => {
     const items = await listSessions(50);
-    expect(items.length).toBe(3);
-    for (const item of items) {
-      expect(item.source).toBe("claude-code");
-    }
+    const all = await listSessions(50, "all");
+    expect(items.length).toBe(all.length);
+    expect(items.some((i) => i.source === "codex")).toBe(true);
+    expect(items.some((i) => i.source === "claude-code")).toBe(true);
   });
 
   it("missing CODEX_HOME yields zero Codex items, no error", async () => {

@@ -42,19 +42,23 @@ function StatTile({ label, big, sub }: { label: string; big: ReactNode; sub: Rea
  * the Overview lens's existing `CostByModelChart`.
  *
  * Reused as-is by the agent detail shell (L3) — every field here comes from
- * whichever `SessionAnalysis` JSON is passed in, main session or a
+ * whichever `ClaudeSessionAnalysis` JSON is passed in, main session or a
  * subagent's own sidecar analysis. Also reused for Codex sessions: row 1
  * (context growth + the three cache/token tiles) and row 3's cost-by-model
  * table read only `SessionAnalysisCore` fields, so they render unchanged.
  * The per-turn cache-write chart and API-errors panel are Claude-only
  * concepts (Codex has no cache-write cost and no "API error" log — see
- * `TurnCompositionChart`/`ApiErrorsPanel`) and are skipped for Codex; its
- * own per-turn detail lives in the dedicated Turns lens instead.
+ * `SourceCaps`'s `hasTurnCompositionChart`/`hasApiErrors` in `sourceCaps.ts`)
+ * and are skipped for Codex; its own per-turn detail lives in the dedicated
+ * Turns lens instead. Narrowed once here (rather than at each panel) since
+ * `TurnCompositionChart`/`ApiErrorsPanel` take a Claude-only `SessionJson`
+ * prop, not the `AnySessionJson` union.
  */
 export function ContextCost({ session, contextHref }: Props) {
   const total = session.usage.total;
   const hitRate = cacheHitRate(total);
   const effectiveInput = total.inputTokens + total.cacheReadTokens + total.cacheCreationTokens;
+  const claude = session.source === "claude-code" ? session : undefined;
 
   return (
     <>
@@ -98,11 +102,11 @@ export function ContextCost({ session, contextHref }: Props) {
         </div>
       </div>
 
-      {session.source === "claude-code" && <TurnCompositionChart session={session} />}
+      {claude !== undefined && <TurnCompositionChart session={claude} />}
 
       <div className="hpad fx gap16 mt16">
         <CostByModelTable session={session} />
-        {session.source === "claude-code" && <ApiErrorsPanel session={session} />}
+        {claude !== undefined && <ApiErrorsPanel session={claude} />}
       </div>
     </>
   );

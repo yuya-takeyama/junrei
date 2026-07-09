@@ -1,7 +1,7 @@
 import type { ClaudeSessionAnalysis } from "./analyze.js";
 import type { CodexSessionAnalysis } from "./codex/analyze.js";
 
-export type { ClaudeSessionAnalysis, SessionAnalysis, SubagentNode } from "./analyze.js";
+export type { ClaudeSessionAnalysis, SubagentNode } from "./analyze.js";
 export { analyzeSession, mergeUsageByModel } from "./analyze.js";
 export type {
   CodexRecord,
@@ -22,7 +22,7 @@ export { buildCodexSubagentForest } from "./codex/orchestration.js";
 export type { CodexTranscript } from "./codex/parser.js";
 export { parseCodexTranscriptFile } from "./codex/parser.js";
 export { buildCodexTimeline, getCodexRecordDetail } from "./codex/timeline.js";
-export type { SessionFileRef } from "./discovery.js";
+export type { ClaudeSessionFileRef } from "./discovery.js";
 export { listSessionFiles, resolveProjectsDirs } from "./discovery.js";
 export { parseJsonlLine } from "./jsonl.js";
 export type {
@@ -56,7 +56,7 @@ export {
   foldFileAccess,
   mergeFileAccess,
 } from "./metrics.js";
-export { parseTranscriptFile } from "./parser.js";
+export { parseClaudeTranscriptFile } from "./parser.js";
 export type { CostComponents } from "./pricing/pricing.js";
 export {
   estimateCostComponents,

@@ -23,7 +23,7 @@ import {
   foldFileAccess,
   mergeFileAccess,
 } from "./metrics.js";
-import { parseTranscriptFile } from "./parser.js";
+import { parseClaudeTranscriptFile } from "./parser.js";
 import type { SessionAnalysisCore } from "./session-analysis.js";
 import type { ApiErrorLogEntry, SessionData, ToolCall } from "./session-data.js";
 import {
@@ -102,7 +102,7 @@ export interface SubagentNode {
  * shared-core rationale (incl. why `fileAccess`/`skillInvocations` live
  * there rather than here) and `CodexSessionAnalysis` for the other variant.
  */
-export interface SessionAnalysis extends SessionAnalysisCore {
+export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   source: "claude-code";
   projectDirName: string;
   version?: string;
@@ -119,9 +119,6 @@ export interface SessionAnalysis extends SessionAnalysisCore {
   subagents: SubagentNode[];
   subagentCount: number;
 }
-
-/** Alias matching the `Claude*` naming used by the Codex counterpart — same type as `SessionAnalysis`. */
-export type ClaudeSessionAnalysis = SessionAnalysis;
 
 /**
  * Merge per-model usage summaries from a main transcript's own usage and
@@ -170,8 +167,8 @@ export function mergeUsageByModel(
 }
 
 /** Analyze one session file, including its subagent sidecar transcripts. */
-export async function analyzeSession(filePath: string): Promise<SessionAnalysis> {
-  const transcript = await parseTranscriptFile(filePath);
+export async function analyzeSession(filePath: string): Promise<ClaudeSessionAnalysis> {
+  const transcript = await parseClaudeTranscriptFile(filePath);
   const data = buildSessionData(transcript);
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
@@ -295,7 +292,7 @@ async function analyzeSubagents(
   registerOwner(MAIN_OWNER, mainData);
 
   for (const { agentId, jsonlPath, meta } of refs) {
-    const transcript = await parseTranscriptFile(jsonlPath);
+    const transcript = await parseClaudeTranscriptFile(jsonlPath);
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
     registerOwner(agentId, data);

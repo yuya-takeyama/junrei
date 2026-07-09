@@ -1,13 +1,7 @@
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import {
-  type AnySessionJson,
-  type CodexSessionResponseBody,
-  client,
-  type SessionJson,
-  unwrapCodexSessionResponse,
-} from "./api.js";
+import { type AnySessionJson, fetchSessionDetail, type SessionRef } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
 import { CodexTurns } from "./lenses/CodexTurns.js";
 import { ContextCost } from "./lenses/ContextCost.js";
@@ -107,12 +101,22 @@ function SubagentOfChip({ session }: { session: AnySessionJson }) {
   return (
     <Link
       className="chip mt8"
-      to={sessionPath("codex", parentId)}
+      to={sessionPath({ source: "codex", id: parentId })}
       style={{ display: "inline-flex" }}
     >
       ↑ sub-agent of {shortenId(parentId)}
     </Link>
   );
+}
+
+interface Props {
+  /**
+   * Which harness this route serves — passed by the route config (main.tsx)
+   * rather than inferred from URL params, since the Codex route pattern has
+   * no `:project` segment to sniff a sentinel from (the pre-refactor
+   * `project === "codex"` convention is gone — see router.ts's `SessionRef`).
+   */
+  source: "claude-code" | "codex";
 }
 
 /**
@@ -121,39 +125,37 @@ function SubagentOfChip({ session }: { session: AnySessionJson }) {
  * persistent lens tab bar, then the active lens's content — see
  * design-spec/01-shell.md.
  *
- * Rendered directly as the `session/:project/:id/:lens?` route element (see
- * main.tsx) — project/id/lens/record all come from the router rather than
- * props, so opening/closing the record slide-over is a plain navigation and
- * never remounts this component or its active lens.
+ * Rendered as either the `session/claude-code/:project/:id/:lens?` or
+ * `session/codex/:id/:lens?` route element (see main.tsx) — id/lens/record
+ * all come from the router rather than props, so opening/closing the record
+ * slide-over is a plain navigation and never remounts this component or its
+ * active lens.
  *
- * Doubles as the Codex session shell: the literal `project === "codex"`
- * segment (matching the sentinel `projectDirName` Codex list rows carry —
- * see `sessions.ts` on the server) is dispatched to the Codex detail
- * endpoint instead of a dedicated route, so every Codex session URL stays
- * `sessionPath("codex", id, lens)` like any other session link. Every lens
- * except "turns" renders the exact same component for both sources —
- * `FilesSkills` included, now that `fileAccess`/`skillInvocations` live on
- * `SessionAnalysisCore` and Codex populates them too (see
+ * Every lens except "turns" renders the exact same component for both
+ * sources — `FilesSkills` included, now that `fileAccess`/`skillInvocations`
+ * live on `SessionAnalysisCore` and Codex populates them too (see
  * `codex/files-skills.ts` in `@junrei/core`); Orchestration likewise renders
  * unchanged (a Codex sub-agent is its own rollout file, not a sidecar, but
  * `getCodexSession` on the server attaches the same `subagents`/
  * `subagentCount` shape — see `codex/orchestration.ts`); Timeline and the
- * record slide-over fetch through the same generic `:project/:id/timeline` /
- * `:project/:id/record/:line` routes/components used for Claude, since the
- * server registers Codex-specific handlers ahead of those generic routes
- * (see app.ts) that return the exact same `TimelineEntry`/`RecordDetail`
- * shapes — no separate dispatch needed here. "turns" stays Codex-only (no
- * Claude equivalent) — see `CLAUDE_LENSES`/`CODEX_LENSES`.
+ * record slide-over fetch through `fetchTimeline`/`fetchRecordDetail`
+ * (api.ts), which dispatch to each source's own route shape internally — no
+ * per-source branching needed here. "turns" stays Codex-only (no Claude
+ * equivalent) — see `CLAUDE_LENSES`/`CODEX_LENSES`.
  */
-export function SessionShell() {
+export function SessionShell({ source }: Props) {
   const {
     project: projectParam,
     id: idParam,
     lens: lensParam,
   } = useParams<"project" | "id" | "lens">();
-  const project = projectParam ?? "";
   const id = idParam ?? "";
-  const isCodex = project === "codex";
+  const isCodex = source === "codex";
+  // "" for Codex (no project segment on that route) — only used for the Claude ref/breadcrumb.
+  const project = projectParam ?? "";
+  const ref: SessionRef = isCodex
+    ? { source: "codex", id }
+    : { source: "claude-code", project, id };
   const lens = normalizeLens(lensParam);
   const [searchParams] = useSearchParams();
   const record = parseRecordParam(searchParams);
@@ -163,36 +165,28 @@ export function SessionShell() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const recordOpen = record !== undefined;
-  const closeRecordHref = sessionPath(project, id, lens);
+  const closeRecordHref = sessionPath(ref, lens);
 
+  // `ref` is rebuilt fresh (a new object) on every render — depend on its
+  // primitive parts (`source`/`project`/`id`, already plain locals above)
+  // instead so this effect doesn't re-fire every render.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depend on ref's primitive parts (see comment above), not the object itself.
   useEffect(() => {
     setSession(null);
     setError(null);
-    if (isCodex) {
-      client.api.sessions.codex[":id"]
-        .$get({ param: { id } })
-        .then(async (res) => {
-          if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-          const body = (await res.json()) as CodexSessionResponseBody;
-          const analysis = unwrapCodexSessionResponse(body);
-          if (analysis === undefined) throw new Error("malformed Codex session response");
-          setSession(analysis);
-        })
-        .catch((e: unknown) => setError(String(e)));
-      return;
-    }
-    client.api.sessions[":project"][":id"]
-      .$get({ param: { project, id } })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-        setSession((await res.json()) as SessionJson);
-      })
+    fetchSessionDetail(ref)
+      .then(setSession)
       .catch((e: unknown) => setError(String(e)));
-  }, [project, id, isCodex]);
+  }, [source, project, id]);
 
   const title = session?.title ?? session?.sessionId ?? "…";
   const lensTabs = isCodex ? CODEX_LENSES : CLAUDE_LENSES;
   const lensAvailable = (lensTabs as readonly string[]).includes(lens);
+  // Pre-refactor, the Codex breadcrumb's middle segment showed the literal
+  // "codex" sentinel that used to live in `projectDirName`/the `:project`
+  // URL segment — kept identical here now that it's a real per-source label
+  // instead of borrowed URL/data plumbing.
+  const breadcrumbMiddle = isCodex ? "codex" : project;
 
   const handleCopy = () => {
     navigator.clipboard
@@ -213,7 +207,7 @@ export function SessionShell() {
         <Band
           left={
             <span className="mono fs11 mut nowrap">
-              <Link to="/">Sessions</Link> / {project} / {title}
+              <Link to="/">Sessions</Link> / {breadcrumbMiddle} / {title}
             </span>
           }
           right={
@@ -235,7 +229,7 @@ export function SessionShell() {
           </>
         )}
         <div className="hpad mt16">
-          <LensTabs project={project} id={id} active={lens} lenses={lensTabs} />
+          <LensTabs sessionRef={ref} active={lens} lenses={lensTabs} />
         </div>
         {error !== null && <div className="hpad mt16 mut">Failed to load session: {error}</div>}
         {error === null && session === null && (
@@ -255,10 +249,9 @@ export function SessionShell() {
         )}
         {error === null && session !== null && lens === "timeline" && (
           <Timeline
-            project={project}
-            id={id}
+            sessionRef={ref}
             onOpenRecord={(line) => {
-              navigate(recordPath(project, id, lens, line));
+              navigate(recordPath(ref, lens, line));
             }}
           />
         )}
@@ -276,7 +269,7 @@ export function SessionShell() {
         )}
       </div>
       {record !== undefined && (
-        <RecordDetail project={project} id={id} line={record} closeHref={closeRecordHref} />
+        <RecordDetail sessionRef={ref} line={record} closeHref={closeRecordHref} />
       )}
     </div>
   );

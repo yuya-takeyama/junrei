@@ -3,12 +3,11 @@ import { Link } from "react-router";
 import type { TimelineEntry } from "../../api.js";
 import { formatDuration, formatTime, formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
-import { agentPath } from "../../router.js";
+import { agentPath, type SessionRef } from "../../router.js";
 
 export interface TimelineRowProps {
   entry: TimelineEntry;
-  project: string;
-  id: string;
+  sessionRef: SessionRef;
   expanded: boolean;
   onToggleExpand: (line: number) => void;
   registerRef: (line: number, el: HTMLDivElement | null) => void;
@@ -180,13 +179,11 @@ function ToolBlock({
 
 function SubagentBlock({
   entry,
-  project,
-  id,
+  sessionRef,
   onOpenRecord,
 }: {
   entry: Extract<TimelineEntry, { kind: "subagent-launch" }>;
-  project: string;
-  id: string;
+  sessionRef: SessionRef;
   onOpenRecord: (line: number) => void;
 }) {
   const displayName = entry.name ?? entry.agentType ?? "subagent";
@@ -198,6 +195,14 @@ function SubagentBlock({
     }
     if (entry.durationMs !== undefined) metaParts.push(formatDuration(entry.durationMs));
   }
+  // Claude-only route (agentPath) — Codex never emits a "subagent-launch" timeline entry
+  // (a Codex sub-agent is its own full session, not a launch inline in the parent's
+  // transcript — see codex/timeline.ts), so this branch is unreachable for a Codex
+  // sessionRef in practice, but stays type-safe/honest rather than assuming so.
+  const agentHref =
+    sessionRef.source === "claude-code" && entry.agentId !== undefined
+      ? agentPath(sessionRef.project, sessionRef.id, entry.agentId)
+      : undefined;
   return (
     <div className="blk" style={{ borderStyle: "double", borderWidth: "3px" }}>
       <div className="bhd">
@@ -207,12 +212,8 @@ function SubagentBlock({
         <ModelBadge model={entry.model} />
         {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
         <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
-        {entry.agentId !== undefined ? (
-          <Link
-            className="linkc mono fs10"
-            style={{ marginLeft: "auto" }}
-            to={agentPath(project, id, entry.agentId)}
-          >
+        {agentHref !== undefined ? (
+          <Link className="linkc mono fs10" style={{ marginLeft: "auto" }} to={agentHref}>
             open detail →
           </Link>
         ) : (
@@ -323,8 +324,7 @@ function CompactionBreak({
  */
 export const TimelineRow = memo(function TimelineRow({
   entry,
-  project,
-  id,
+  sessionRef,
   expanded,
   onToggleExpand,
   registerRef,
@@ -353,7 +353,7 @@ export const TimelineRow = memo(function TimelineRow({
         />
       )}
       {entry.kind === "subagent-launch" && (
-        <SubagentBlock entry={entry} project={project} id={id} onOpenRecord={onOpenRecord} />
+        <SubagentBlock entry={entry} sessionRef={sessionRef} onOpenRecord={onOpenRecord} />
       )}
       {entry.kind === "task-notification" && (
         <TaskBlock entry={entry} onOpenRecord={onOpenRecord} />

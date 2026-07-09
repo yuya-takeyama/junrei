@@ -38,7 +38,7 @@ function bool(value: unknown): boolean | undefined {
 }
 
 /** Parse one session JSONL file into lenient typed records. */
-export async function parseTranscriptFile(filePath: string): Promise<Transcript> {
+export async function parseClaudeTranscriptFile(filePath: string): Promise<Transcript> {
   const records: SessionRecord[] = [];
   const warnings: ParseWarning[] = [];
   const rl = createInterface({

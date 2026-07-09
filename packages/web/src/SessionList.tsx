@@ -5,9 +5,10 @@ import { client } from "./api.js";
 import { formatDateTime, formatDuration, formatProject, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel } from "./modelClass.js";
-import { parseSourceTab, type SourceTab, sessionPath } from "./router.js";
+import { parseSourceTab, type SourceTab, sessionPath, sessionRefOf } from "./router.js";
 import {
   isEstimatedCost,
+  projectFilterKey,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -109,7 +110,7 @@ export function SessionList() {
 
   const projects = useMemo(() => {
     if (sessions === null) return [];
-    return [...new Set(sessions.map((s) => s.projectDirName))].sort();
+    return [...new Set(sessions.map(projectFilterKey))].sort();
   }, [sessions]);
 
   const filtered = useMemo(() => {
@@ -117,7 +118,7 @@ export function SessionList() {
     const cutoff = dateFilter === "all" ? undefined : Date.now() - Number(dateFilter) * DAY_MS;
     const needle = search.trim().toLowerCase();
     return sessions.filter((s) => {
-      if (project !== "all" && s.projectDirName !== project) return false;
+      if (project !== "all" && projectFilterKey(s) !== project) return false;
       if (needle !== "") {
         const title = (s.title ?? s.firstUserPrompt ?? s.sessionId).toLowerCase();
         if (!title.includes(needle)) return false;
@@ -212,12 +213,12 @@ export function SessionList() {
           </div>
           {filtered.map((s) => (
             <Link
-              key={`${s.projectDirName}/${s.sessionId}`}
+              key={`${s.source}/${projectFilterKey(s)}/${s.sessionId}`}
               className="l0g"
-              to={sessionPath(s.projectDirName, s.sessionId)}
+              to={sessionPath(sessionRefOf(s))}
             >
-              <span className="mono fs11 mut nowrap" title={s.projectDirName}>
-                {formatProject(s.projectDirName, s.cwd)}
+              <span className="mono fs11 mut nowrap" title={projectFilterKey(s)}>
+                {formatProject(projectFilterKey(s), s.cwd)}
               </span>
               <span className="fx ac gap8 nowrap">
                 {sourceTab === "all" && (

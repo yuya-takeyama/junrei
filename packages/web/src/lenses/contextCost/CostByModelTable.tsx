@@ -2,6 +2,7 @@ import type { AnySessionJson } from "../../api.js";
 import { formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import { EstBadge } from "../../shell/EstBadge.js";
+import { capsFor } from "../../sourceCaps.js";
 
 interface Props {
   session: AnySessionJson;
@@ -70,7 +71,7 @@ export function CostByModelTable({ session }: Props) {
             <span className="num fs12 cellr amb">
               {formatUsd(session.totalUsage.costUsd)}
               {session.totalUsage.costIsComplete ? "" : "*"}
-              {session.source === "codex" && <EstBadge />}
+              {capsFor(session).costIsEstimated && <EstBadge />}
             </span>
           </div>
         </>

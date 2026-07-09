@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { AnySessionJson } from "../api.js";
 import { formatTime, formatTokens } from "../format.js";
-import { sessionPath } from "../router.js";
+import { sessionPath, sessionRefOf } from "../router.js";
 
 interface Props {
   session: AnySessionJson;
@@ -160,17 +160,7 @@ function buildGeometry(session: AnySessionJson): Geometry | null {
 export function ContextGrowthChart({ session, contextHref, bare = false }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(session), [session]);
-  // Codex sessions have no `projectDirName` field (that's a Claude-only
-  // concept — see session-analysis.ts) but always route through the literal
-  // "codex" project segment (matches sessionPath usage everywhere else a
-  // Codex session id is turned into a URL).
-  const resolvedContextHref =
-    contextHref ??
-    sessionPath(
-      session.source === "claude-code" ? session.projectDirName : "codex",
-      session.sessionId,
-      "context",
-    );
+  const resolvedContextHref = contextHref ?? sessionPath(sessionRefOf(session), "context");
   const hovered =
     hoverIndex !== null && geometry !== null ? geometry.hoverNodes[hoverIndex] : undefined;
 

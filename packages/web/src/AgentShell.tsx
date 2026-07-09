@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { type AgentJson, client, type SessionJson, type SubagentNodeJson } from "./api.js";
+import {
+  type AgentJson,
+  fetchAgentSession,
+  fetchSessionDetail,
+  type SessionJson,
+  type SubagentNodeJson,
+} from "./api.js";
 import { cacheHitRate, formatDuration, formatTime, formatTokens, formatUsd } from "./format.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
@@ -300,24 +306,16 @@ export function AgentShell() {
   useEffect(() => {
     setSession(null);
     setSessionError(null);
-    client.api.sessions[":project"][":id"]
-      .$get({ param: { project, id } })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-        setSession((await res.json()) as SessionJson);
-      })
+    fetchSessionDetail({ source: "claude-code", project, id })
+      .then(setSession)
       .catch((e: unknown) => setSessionError(String(e)));
   }, [project, id]);
 
   useEffect(() => {
     setAgent(null);
     setAgentError(null);
-    client.api.sessions[":project"][":id"].agents[":agentId"]
-      .$get({ param: { project, id, agentId } })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-        setAgent((await res.json()) as AgentJson);
-      })
+    fetchAgentSession(project, id, agentId)
+      .then(setAgent)
       .catch((e: unknown) => setAgentError(String(e)));
   }, [project, id, agentId]);
 
@@ -335,7 +333,7 @@ export function AgentShell() {
           {
             key: "session",
             label: session.title ?? session.sessionId,
-            href: sessionPath(project, id),
+            href: sessionPath({ source: "claude-code", project, id }),
           },
           ...ancestorChain.slice(0, -1).map((ancestor) => ({
             key: ancestor.agentId,
@@ -381,7 +379,7 @@ export function AgentShell() {
           </>
         )}
         <div className="hpad mt16">
-          <LensTabs project={project} id={id} active={lens} buildPath={buildAgentLensPath} />
+          <LensTabs active={lens} buildPath={buildAgentLensPath} />
         </div>
         {error !== null && <div className="hpad mt16 mut">Failed to load agent: {error}</div>}
         {loading && <div className="hpad mt16 mut">Analyzing agent…</div>}
@@ -392,8 +390,7 @@ export function AgentShell() {
         )}
         {ready && lens === "timeline" && (
           <Timeline
-            project={project}
-            id={id}
+            sessionRef={{ source: "claude-code", project, id }}
             agent={agentId}
             onOpenRecord={(line) => {
               navigate(agentRecordPath(project, id, agentId, lens, line));
@@ -422,8 +419,7 @@ export function AgentShell() {
       </div>
       {record !== undefined && (
         <RecordDetail
-          project={project}
-          id={id}
+          sessionRef={{ source: "claude-code", project, id }}
           line={record}
           agent={agentId}
           closeHref={closeRecordHref}
