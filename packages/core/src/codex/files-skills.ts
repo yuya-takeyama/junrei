@@ -18,6 +18,19 @@
  *    pull path-looking tokens out of their arguments. This under-reports
  *    (e.g. a script that reads a file internally is invisible to us) rather
  *    than risk over-reporting by guessing at arbitrary shell invocations.
+ *
+ * Unlike Claude (see `metrics.ts#computeFileAccess`), NO context-injection
+ * tracking (`injectedCount`/`injectedChars`) is derived for Codex, on
+ * purpose: the only injected-context marker Codex's rollout format exposes,
+ * `# AGENTS.md instructions for <cwd>` (`isSyntheticUserText` in
+ * `./analyze.ts`), names a DIRECTORY, never a single file — Codex merges
+ * AGENTS.md from several directory levels, so there is no one honest path to
+ * attribute the injection to. The `[$plugin:skill](path/to/SKILL.md)` marker
+ * `computeCodexSkillInvocations` parses below DOES carry an honest path, but
+ * it's the human's own mention syntax typed into their prompt, not a
+ * harness-generated record proving the body was actually loaded (no matching
+ * record measures its size, unlike Claude's isMeta injection) — so it's left
+ * out rather than guessed at too.
  */
 import type {
   FileAccessAgg,

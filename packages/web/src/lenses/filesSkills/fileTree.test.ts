@@ -71,6 +71,34 @@ describe("buildFileTreeRows", () => {
     expect(fileRows.find((r) => r.label === "a.ts")?.indent).toBe(true);
     expect(fileRows.find((r) => r.label === "root.ts")?.indent).toBe(false);
   });
+
+  it("handles an injected-only entry (reads/edits both 0) without crashing, carrying injectedCount/injectedChars through", () => {
+    const entries: FileAccessEntryLike[] = [
+      entry({
+        path: "/proj/CLAUDE.md",
+        reads: 0,
+        edits: 0,
+        injectedCount: 1,
+        injectedChars: 4200,
+      }),
+      entry({ path: "/proj/src/a.ts", reads: 2, edits: 1 }),
+    ];
+    const rows = buildFileTreeRows(entries, "/proj");
+    const fileRows = rows.filter((r) => r.kind === "file");
+
+    // Root-level injected-only file sorts after the directory group, same as
+    // any other root-level path.
+    const claudeMd = fileRows.find((r) => r.label === "CLAUDE.md");
+    expect(claudeMd?.entry.injectedCount).toBe(1);
+    expect(claudeMd?.entry.injectedChars).toBe(4200);
+    expect(claudeMd?.entry.reads).toBe(0);
+    expect(claudeMd?.entry.edits).toBe(0);
+
+    // An entry with no injections at all keeps both fields undefined.
+    const aTs = fileRows.find((r) => r.label === "a.ts");
+    expect(aTs?.entry.injectedCount).toBeUndefined();
+    expect(aTs?.entry.injectedChars).toBeUndefined();
+  });
 });
 
 describe("shortSubject", () => {

@@ -1,6 +1,7 @@
 import type { AnySessionJson } from "../../api.js";
 import { formatTime } from "../../format.js";
-import { buildFileTreeRows, REREAD_THRESHOLD } from "./fileTree.js";
+import { buildFileTreeRows, type FileAccessEntryLike, REREAD_THRESHOLD } from "./fileTree.js";
+import { formatInjectedSize } from "./skillInvocationFormat.js";
 
 interface Props {
   session: AnySessionJson;
@@ -13,12 +14,26 @@ const THREAD_LABEL: Record<AnySessionJson["fileAccess"][number]["threads"], stri
   both: "M+S",
 };
 
+/** Hover detail for the `inj N` marker — counts only in the row itself (see `FileAccessTree`'s doc comment), the char total goes in the tooltip. */
+function injectedTitle(entry: FileAccessEntryLike): string {
+  const count = entry.injectedCount ?? 0;
+  const noun = count === 1 ? "injection" : "injections";
+  const size = formatInjectedSize(entry.injectedChars);
+  return size !== undefined ? `${String(count)} ${noun}, ${size}` : `${String(count)} ${noun}`;
+}
+
 /**
  * File access tree (Files & skills lens, row 1 left) — see
  * design-spec/15-files-skills.md's `.ftg` grid. Directory rows group files by
  * their (cwd-relative or `~`-shortened) parent directory; the re-read flag
  * (`.rere` on both the path and the read count) uses the DOCUMENTED >=3-reads
  * rule rather than the design spec's own inconsistent sample rendering.
+ *
+ * A path with `injectedCount` — content pushed into context without a
+ * Read/Edit call, e.g. CLAUDE.md/MEMORY.md system-reminders or a Skill's
+ * `SKILL.md` — gets a muted `· inj N` marker next to its name; the Reads/Edits
+ * cells stay numeric-only (already muted at 0 by the existing rule below), the
+ * injected char count only surfaces in the marker's tooltip.
  */
 export function FileAccessTree({ session }: Props) {
   const rows = buildFileTreeRows(session.fileAccess, session.cwd);
@@ -63,6 +78,15 @@ export function FileAccessTree({ session }: Props) {
                 style={row.indent ? { paddingLeft: "16px" } : undefined}
               >
                 {row.label}
+                {entry.injectedCount !== undefined && (
+                  <span
+                    className="fs10 mut"
+                    style={{ marginLeft: "6px" }}
+                    title={injectedTitle(entry)}
+                  >
+                    · inj {entry.injectedCount}
+                  </span>
+                )}
               </span>
               <span
                 className={`num fs12 cellr${reread ? " rere" : entry.reads === 0 ? " mut" : ""}`}

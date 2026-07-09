@@ -6,17 +6,35 @@ import {
   computeSkillInvocations,
   computeUsage,
   type FileAccessAgg,
+  foldFileAccess,
   mergeFileAccess,
 } from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
 import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
+import type { UserRecord } from "./types.js";
 
 /** Bare `SessionData` with only `apiMessages` populated — mirrors the literal in the "computeSkillInvocations" describe block below, sized for `computeUsage` instead. */
 function sessionDataWithMessages(apiMessages: ApiMessage[]): SessionData {
   return {
     records: [],
     apiMessages,
+    toolCalls: [],
+    userPrompts: [],
+    compactions: [],
+    backgroundLaunches: [],
+    taskNotifications: [],
+    apiErrorCount: 0,
+    apiErrors: [],
+    warningCount: 0,
+  };
+}
+
+/** Bare `SessionData` with only `records` populated — for the injection-scanning tests, which read `data.records` directly. */
+function sessionDataWithRecords(records: SessionData["records"]): SessionData {
+  return {
+    records,
+    apiMessages: [],
     toolCalls: [],
     userPrompts: [],
     compactions: [],
@@ -113,6 +131,70 @@ describe("computeFileAccess", () => {
     // Grep/Glob/LS calls never appear here — the fixture has none, but
     // confirm no unexpected extra paths snuck in beyond foo.ts.
     expect([...access.keys()]).toEqual(["/p/foo.ts"]);
+  });
+
+  // Modeled on the real shape (observed verbatim in a live harness-injected
+  // system-reminder): two "Contents of ...:" headers in one turn, wrapped in
+  // a <system-reminder> block, each followed by its own file body.
+  it("records a CLAUDE.md 'Contents of' system-reminder injection with no reads/edits", () => {
+    const header1 =
+      "Contents of /Users/test/proj/CLAUDE.md (project instructions, checked into the codebase):";
+    const body1 = "\n\n# CLAUDE.md\nSome project instructions here.\n\n";
+    const header2 =
+      "Contents of /Users/test/.claude/CLAUDE.md (user's private global instructions for all projects):";
+    const body2 = "\n\n# About Me\nSome global instructions here.\n";
+    const suffix = "</system-reminder>\n\nWhat does CLAUDE.md say?";
+    const promptText = `<system-reminder>\n${header1}${body1}${header2}${body2}${suffix}`;
+
+    const record: UserRecord = {
+      type: "user",
+      line: 1,
+      timestamp: "2026-07-10T00:00:00.000Z",
+      toolResults: [],
+      promptText,
+    };
+    const access = computeFileAccess(sessionDataWithRecords([record]));
+
+    // First header's injected span stops at the second header — not the end
+    // of the message.
+    const project = access.get("/Users/test/proj/CLAUDE.md");
+    expect(project?.reads).toBe(0);
+    expect(project?.edits).toBe(0);
+    expect(project?.injectedCount).toBe(1);
+    expect(project?.injectedChars).toBe(body1.length);
+    expect(project?.firstLine).toBe(1);
+    expect(project?.firstTimestamp).toBe("2026-07-10T00:00:00.000Z");
+
+    // Last header's injected span runs to the end of the message (the
+    // trailing non-file text is swallowed into it — an approximation, not a
+    // per-file guess).
+    const global = access.get("/Users/test/.claude/CLAUDE.md");
+    expect(global?.reads).toBe(0);
+    expect(global?.injectedCount).toBe(1);
+    expect(global?.injectedChars).toBe(body2.length + suffix.length);
+  });
+
+  it("never fires on ordinary prose that merely mentions 'contents of'", () => {
+    const record: UserRecord = {
+      type: "user",
+      line: 1,
+      toolResults: [],
+      promptText: "Contents of the box were empty; check the contents of the drawer too.",
+    };
+    expect(computeFileAccess(sessionDataWithRecords([record])).size).toBe(0);
+  });
+
+  it("records a Skill SKILL.md injection alongside its tool call, reusing the PR #39 matching", async () => {
+    const data = await loadSkillInjectionData();
+    const access = computeFileAccess(data);
+
+    // Same fixture/injection record `computeSkillInvocations`'s "matches a
+    // plain (non-namespaced) skill" test asserts injectedChars=188 for.
+    const skillMd = access.get("/Users/test/proj4/.claude/skills/solo-skill/SKILL.md");
+    expect(skillMd?.reads).toBe(0);
+    expect(skillMd?.edits).toBe(0);
+    expect(skillMd?.injectedCount).toBe(1);
+    expect(skillMd?.injectedChars).toBe(188);
   });
 });
 
@@ -215,6 +297,121 @@ describe("mergeFileAccess", () => {
     // Kept entries are sorted back to path order for display.
     const sorted = [...fileAccess].sort((a, b) => a.path.localeCompare(b.path));
     expect(fileAccess).toEqual(sorted);
+  });
+
+  it("merges injectedCount/injectedChars across main and subagent, summing both", () => {
+    const main = new Map([
+      [
+        "/CLAUDE.md",
+        agg({ path: "/CLAUDE.md", reads: 0, edits: 0, injectedCount: 1, injectedChars: 500 }),
+      ],
+    ]);
+    const subagents = new Map([
+      [
+        "/CLAUDE.md",
+        agg({ path: "/CLAUDE.md", reads: 0, edits: 0, injectedCount: 2, injectedChars: 300 }),
+      ],
+    ]);
+    const { fileAccess } = mergeFileAccess(main, subagents);
+    expect(fileAccess[0]?.injectedCount).toBe(3);
+    expect(fileAccess[0]?.injectedChars).toBe(800);
+    expect(fileAccess[0]?.reads).toBe(0);
+    expect(fileAccess[0]?.edits).toBe(0);
+  });
+
+  it("omits injectedCount/injectedChars for a plain read/edit entry with no injections", () => {
+    const main = new Map([["/a.ts", agg({ path: "/a.ts", reads: 1, edits: 0, firstLine: 1 })]]);
+    const { fileAccess } = mergeFileAccess(main, new Map());
+    expect(fileAccess[0]).not.toHaveProperty("injectedCount");
+    expect(fileAccess[0]).not.toHaveProperty("injectedChars");
+  });
+
+  it("counts injections toward the keep-score when capping, so an injected-only file isn't dropped first", () => {
+    const main = new Map<string, FileAccessAgg>();
+    for (let i = 0; i < 501; i += 1) {
+      const path = `/file-${String(i).padStart(4, "0")}.ts`;
+      main.set(path, agg({ path, reads: 1, edits: 0, firstLine: i + 1 }));
+    }
+    // Zero reads/edits, but a higher injection count than every reads:1 path
+    // above (score 1) — under a reads+edits-only score this would always be
+    // the first dropped; it must survive instead.
+    main.set(
+      "/CLAUDE.md",
+      agg({ path: "/CLAUDE.md", reads: 0, edits: 0, injectedCount: 5, firstLine: 999 }),
+    );
+
+    const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
+      main,
+      new Map(),
+    );
+    expect(fileAccessTruncated).toBe(true);
+    expect(fileAccessOmittedCount).toBe(2);
+    expect(fileAccess.some((e) => e.path === "/CLAUDE.md")).toBe(true);
+  });
+});
+
+describe("foldFileAccess", () => {
+  it("sums injectedCount/injectedChars alongside reads/edits, keeping the earliest timestamp/line", () => {
+    const target = new Map<string, FileAccessAgg>([
+      [
+        "/CLAUDE.md",
+        {
+          path: "/CLAUDE.md",
+          reads: 0,
+          edits: 0,
+          injectedCount: 1,
+          injectedChars: 100,
+          firstLine: 5,
+          firstTimestamp: "t2",
+        },
+      ],
+    ]);
+    const source = new Map<string, FileAccessAgg>([
+      [
+        "/CLAUDE.md",
+        {
+          path: "/CLAUDE.md",
+          reads: 0,
+          edits: 0,
+          injectedCount: 2,
+          injectedChars: 50,
+          firstLine: 1,
+          firstTimestamp: "t1",
+        },
+      ],
+    ]);
+    foldFileAccess(target, source);
+    const merged = target.get("/CLAUDE.md");
+    expect(merged?.injectedCount).toBe(3);
+    expect(merged?.injectedChars).toBe(150);
+    expect(merged?.firstLine).toBe(1);
+    expect(merged?.firstTimestamp).toBe("t1");
+  });
+
+  it("copies injectedCount/injectedChars through untouched when the path is new to target", () => {
+    const target = new Map<string, FileAccessAgg>();
+    const source = new Map<string, FileAccessAgg>([
+      [
+        "/MEMORY.md",
+        {
+          path: "/MEMORY.md",
+          reads: 0,
+          edits: 0,
+          injectedCount: 1,
+          injectedChars: 42,
+          firstLine: 1,
+        },
+      ],
+    ]);
+    foldFileAccess(target, source);
+    expect(target.get("/MEMORY.md")).toEqual({
+      path: "/MEMORY.md",
+      reads: 0,
+      edits: 0,
+      injectedCount: 1,
+      injectedChars: 42,
+      firstLine: 1,
+    });
   });
 });
 

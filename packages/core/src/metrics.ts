@@ -573,11 +573,21 @@ export function computeExploration(data: SessionData): ExplorationProfile {
 // File access (Files & skills lens, row 1)
 // ---------------------------------------------------------------------------
 
-/** One transcript's own read/edit tally for a single file path. */
+/** One transcript's own read/edit/injection tally for a single file path. */
 export interface FileAccessAgg {
   path: string;
   reads: number;
   edits: number;
+  /**
+   * Count of times this path's content was pushed into context WITHOUT a
+   * Read/Edit tool call — CLAUDE.md/MEMORY.md "Contents of ...:" system-reminder
+   * headers and Skill `SKILL.md` loads (see `computeFileAccess`). A path can be
+   * injected-only (reads/edits both 0) — it was loaded into context, just never
+   * opened by the agent itself.
+   */
+  injectedCount?: number;
+  /** Cumulative injected character count, paired with `injectedCount`. */
+  injectedChars?: number;
   /** Earliest timestamp among this transcript's touches of the path. */
   firstTimestamp?: string;
   /** Earliest line among this transcript's touches of the path. */
@@ -593,6 +603,10 @@ export interface FileAccessEntry {
   reads: number;
   /** Edit + Write + MultiEdit + NotebookEdit calls, main + every subagent, merged. */
   edits: number;
+  /** Context injections of this path, main + every subagent, merged — see `FileAccessAgg.injectedCount`. */
+  injectedCount?: number;
+  /** Cumulative injected character count, paired with `injectedCount`. */
+  injectedChars?: number;
   /** Earliest timestamp across every transcript that touched this path. */
   firstTouchTimestamp?: string;
   /** Line of the first MAIN-transcript touch, if any — omitted when only subagents touched the path. */
@@ -613,14 +627,91 @@ const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const FILE_ACCESS_CAP = 500;
 
 /**
+ * "Contents of <abs-path> (<label>):" headers the harness injects into a user
+ * turn's text — CLAUDE.md (project + global) and the auto-memory MEMORY.md,
+ * both bare and wrapped in a `<system-reminder>` block. Anchored at line start
+ * with a trailing ":" after a parenthesized label so ordinary prose never
+ * matches, and only absolute paths qualify.
+ */
+const CONTENTS_OF_HEADER = /^Contents of (\/.+?) \([^)]*\):$/gm;
+
+interface ContentsOfInjection {
+  path: string;
+  chars: number;
+  line: number;
+  timestamp?: string;
+}
+
+/**
+ * Every "Contents of ...:" header found in any record's `promptText` (not
+ * just non-meta `userPrompts` — mirrors `computeSkillInvocations`'s
+ * defensive direct scan of `data.records`). When one turn injects several
+ * files, a header's body is the span up to the NEXT header (or end of text)
+ * — the actual injected span, not a per-file guess.
+ */
+function collectContentsOfInjections(records: readonly SessionRecord[]): ContentsOfInjection[] {
+  const injections: ContentsOfInjection[] = [];
+  for (const record of records) {
+    if (!("promptText" in record) || record.promptText === undefined) continue;
+    const text = record.promptText;
+    const matches = [...text.matchAll(CONTENTS_OF_HEADER)];
+    for (let i = 0; i < matches.length; i += 1) {
+      const match = matches[i];
+      const path = match?.[1];
+      if (match?.index === undefined || path === undefined) continue;
+      const bodyStart = match.index + match[0].length;
+      const bodyEnd = matches[i + 1]?.index ?? text.length;
+      injections.push({
+        path,
+        chars: bodyEnd - bodyStart,
+        line: record.line,
+        ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+      });
+    }
+  }
+  return injections;
+}
+
+/**
  * Per-transcript file-access tally — Grep/Glob/LS are deliberately excluded
  * (searches, not file touches). Calls with a missing or non-string
  * `file_path` are skipped. `toolCalls` is already in ascending line order
  * (see `buildSessionData`), so the first call touching a path is naturally
  * its first touch — no need to compare timestamps across entries.
+ *
+ * Beyond Read/Edit tool calls, this also tallies context INJECTIONS of a
+ * path — content that entered the model's context without any tool call:
+ * CLAUDE.md/MEMORY.md "Contents of ...:" headers (`collectContentsOfInjections`
+ * above) and Skill `SKILL.md` loads (`collectSkillFileInjections`, defined
+ * with the rest of the skill-injection matching further down this file, which
+ * this reuses). A path can end up injected-only (reads/edits both 0).
  */
 export function computeFileAccess(data: SessionData): Map<string, FileAccessAgg> {
   const map = new Map<string, FileAccessAgg>();
+
+  const touch = (path: string, line: number, timestamp: string | undefined): FileAccessAgg => {
+    let entry = map.get(path);
+    if (entry === undefined) {
+      entry = {
+        path,
+        reads: 0,
+        edits: 0,
+        firstLine: line,
+        ...(timestamp !== undefined && { firstTimestamp: timestamp }),
+      };
+      map.set(path, entry);
+    } else {
+      if (line < (entry.firstLine ?? line)) entry.firstLine = line;
+      if (
+        timestamp !== undefined &&
+        (entry.firstTimestamp === undefined || timestamp < entry.firstTimestamp)
+      ) {
+        entry.firstTimestamp = timestamp;
+      }
+    }
+    return entry;
+  };
+
   for (const call of data.toolCalls) {
     const isRead = FILE_READ_TOOLS.has(call.name);
     const isEdit = FILE_EDIT_TOOLS.has(call.name);
@@ -632,20 +723,22 @@ export function computeFileAccess(data: SessionData): Map<string, FileAccessAgg>
     const filePath = typeof input?.file_path === "string" ? input.file_path : undefined;
     if (filePath === undefined) continue;
 
-    let entry = map.get(filePath);
-    if (entry === undefined) {
-      entry = {
-        path: filePath,
-        reads: 0,
-        edits: 0,
-        firstLine: call.line,
-        ...(call.timestamp !== undefined && { firstTimestamp: call.timestamp }),
-      };
-      map.set(filePath, entry);
-    }
+    const entry = touch(filePath, call.line, call.timestamp);
     if (isRead) entry.reads += 1;
     else entry.edits += 1;
   }
+
+  for (const injection of collectContentsOfInjections(data.records)) {
+    const entry = touch(injection.path, injection.line, injection.timestamp);
+    entry.injectedCount = (entry.injectedCount ?? 0) + 1;
+    entry.injectedChars = (entry.injectedChars ?? 0) + injection.chars;
+  }
+  for (const injection of collectSkillFileInjections(data)) {
+    const entry = touch(injection.path, injection.line, injection.timestamp);
+    entry.injectedCount = (entry.injectedCount ?? 0) + 1;
+    entry.injectedChars = (entry.injectedChars ?? 0) + injection.chars;
+  }
+
   return map;
 }
 
@@ -672,6 +765,8 @@ export function mergeFileAccess(
     const s = subagents.get(path);
     const reads = (m?.reads ?? 0) + (s?.reads ?? 0);
     const edits = (m?.edits ?? 0) + (s?.edits ?? 0);
+    const injectedCount = (m?.injectedCount ?? 0) + (s?.injectedCount ?? 0);
+    const injectedChars = (m?.injectedChars ?? 0) + (s?.injectedChars ?? 0);
     const threads: FileAccessThread =
       m !== undefined && s !== undefined ? "both" : m !== undefined ? "main" : "subagent";
     let firstTouchTimestamp: string | undefined;
@@ -685,6 +780,8 @@ export function mergeFileAccess(
       path,
       reads,
       edits,
+      ...(injectedCount > 0 && { injectedCount }),
+      ...(injectedChars > 0 && { injectedChars }),
       ...(firstTouchTimestamp !== undefined && { firstTouchTimestamp }),
       ...(m?.firstLine !== undefined && { firstTouchLine: m.firstLine }),
       threads,
@@ -697,9 +794,12 @@ export function mergeFileAccess(
   }
 
   const omittedCount = entries.length - FILE_ACCESS_CAP;
+  // Injections count toward the keep-score too — an injected-only file (e.g.
+  // CLAUDE.md) would otherwise always score 0 and be the first dropped.
+  const score = (e: FileAccessEntry) => e.reads + e.edits + (e.injectedCount ?? 0);
   const kept = [...entries]
     .sort((a, b) => {
-      const scoreDiff = b.reads + b.edits - (a.reads + a.edits);
+      const scoreDiff = score(b) - score(a);
       return scoreDiff !== 0 ? scoreDiff : a.path.localeCompare(b.path);
     })
     .slice(0, FILE_ACCESS_CAP)
@@ -707,7 +807,7 @@ export function mergeFileAccess(
   return { fileAccess: kept, fileAccessTruncated: true, fileAccessOmittedCount: omittedCount };
 }
 
-/** Fold `source` into `target` in place — sums reads/edits, keeps the earliest timestamp/line. */
+/** Fold `source` into `target` in place — sums reads/edits/injections, keeps the earliest timestamp/line. */
 export function foldFileAccess(
   target: Map<string, FileAccessAgg>,
   source: ReadonlyMap<string, FileAccessAgg>,
@@ -720,6 +820,12 @@ export function foldFileAccess(
     }
     existing.reads += entry.reads;
     existing.edits += entry.edits;
+    if (entry.injectedCount !== undefined) {
+      existing.injectedCount = (existing.injectedCount ?? 0) + entry.injectedCount;
+    }
+    if (entry.injectedChars !== undefined) {
+      existing.injectedChars = (existing.injectedChars ?? 0) + entry.injectedChars;
+    }
     if (
       entry.firstTimestamp !== undefined &&
       (existing.firstTimestamp === undefined || entry.firstTimestamp < existing.firstTimestamp)
@@ -777,6 +883,9 @@ const INJECTION_PREFIX = "Base directory for this skill:";
 
 interface InjectionCandidate {
   line: number;
+  timestamp?: string;
+  /** Absolute base directory exactly as reported by the harness — `collectSkillFileInjections` joins this with `/SKILL.md`. */
+  basePath: string;
   /** Trailing path segment of the base directory — see `skillShortName`. */
   shortName: string;
   chars: number;
@@ -817,7 +926,14 @@ function collectInjectionCandidates(records: readonly SessionRecord[]): Injectio
     const segments = basePath.split("/").filter((segment) => segment !== "");
     const shortName = segments[segments.length - 1];
     if (shortName === undefined) continue;
-    candidates.push({ line: record.line, shortName, chars: text.length, consumed: false });
+    candidates.push({
+      line: record.line,
+      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+      basePath,
+      shortName,
+      chars: text.length,
+      consumed: false,
+    });
   }
   return candidates;
 }
@@ -844,6 +960,44 @@ function findInjection(
     return candidate;
   }
   return undefined;
+}
+
+interface SkillFileInjection {
+  path: string;
+  chars: number;
+  line: number;
+  timestamp?: string;
+}
+
+/**
+ * `<baseDir>/SKILL.md` context injections for THIS transcript's own `Skill`
+ * tool calls — called from `computeFileAccess` above (forward reference; safe
+ * since it only runs at call time, after the whole module has loaded). Reuses
+ * `findInjection`'s nearest-forward matching rather than sharing state with
+ * `computeSkillInvocations`, so it also covers subagent-invoked skills, which
+ * `computeSkillInvocations` (main transcript only) never sees.
+ */
+function collectSkillFileInjections(data: SessionData): SkillFileInjection[] {
+  const injections: SkillFileInjection[] = [];
+  const candidates = collectInjectionCandidates(data.records);
+  for (const call of data.toolCalls) {
+    if (call.name !== "Skill") continue;
+    const input =
+      typeof call.input === "object" && call.input !== null
+        ? (call.input as Record<string, unknown>)
+        : undefined;
+    const skillName = typeof input?.skill === "string" ? input.skill : undefined;
+    if (skillName === undefined) continue;
+    const injection = findInjection(candidates, call.result?.line ?? call.line, skillName);
+    if (injection === undefined) continue;
+    injections.push({
+      path: `${injection.basePath}/SKILL.md`,
+      chars: injection.chars,
+      line: injection.line,
+      ...(injection.timestamp !== undefined && { timestamp: injection.timestamp }),
+    });
+  }
+  return injections;
 }
 
 /**
