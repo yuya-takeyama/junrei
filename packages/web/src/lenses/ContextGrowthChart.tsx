@@ -6,6 +6,19 @@ import { sessionPath } from "../router.js";
 
 interface Props {
   session: SessionJson;
+  /**
+   * Overrides the "→ context & cost" link target — used by the agent detail
+   * shell (L3) to point at its own (placeholder) context lens instead of the
+   * session-level one this component defaults to.
+   */
+  contextHref?: string;
+  /**
+   * Skips the outer full-width `.hpad.mt16` wrapper and uses `.pan.f1`
+   * (flexible width) instead of a bare `.pan` — for embedding inside a
+   * caller-built flex row alongside another panel, e.g. the agent detail
+   * shell's (L3) context-growth + "return to parent" row (design-spec/16).
+   */
+  bare?: boolean;
 }
 
 const WIDTH = 1160;
@@ -144,100 +157,98 @@ function buildGeometry(session: SessionJson): Geometry | null {
 }
 
 /** Context-growth chart (headline panel) — see design-spec/11-session-overview.md. */
-export function ContextGrowthChart({ session }: Props) {
+export function ContextGrowthChart({ session, contextHref, bare = false }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(session), [session]);
-  const contextHref = sessionPath(session.projectDirName, session.sessionId, "context");
+  const resolvedContextHref =
+    contextHref ?? sessionPath(session.projectDirName, session.sessionId, "context");
   const hovered =
     hoverIndex !== null && geometry !== null ? geometry.hoverNodes[hoverIndex] : undefined;
 
-  return (
-    <div className="hpad mt16">
-      <div className="pan" style={{ padding: "18px 20px" }}>
-        <div className="chartcap">
-          <span className="lbl">Context growth · tokens in window</span>
-          <Link className="linkc mono fs11" to={contextHref}>
-            → context &amp; cost
-          </Link>
-        </div>
-        {geometry === null ? (
-          <p className="mut fs12">No usage records in this session.</p>
-        ) : (
-          <>
-            <div className="chart-wrap">
-              <svg
-                viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-                width="100%"
-                height={HEIGHT}
-                role="img"
-                aria-label="Context tokens over time"
-                onMouseLeave={() => setHoverIndex(null)}
-                onMouseMove={(e) => {
-                  if (geometry.hoverNodes.length === 0) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const x = ((e.clientX - rect.left) / rect.width) * WIDTH;
-                  let nearest = 0;
-                  let nearestDist = Number.POSITIVE_INFINITY;
-                  geometry.hoverNodes.forEach((n, i) => {
-                    const dist = Math.abs(n.x - x);
-                    if (dist < nearestDist) {
-                      nearestDist = dist;
-                      nearest = i;
-                    }
-                  });
-                  setHoverIndex(nearest);
-                }}
-              >
-                <line className="gl" x1={0} y1={12} x2={WIDTH} y2={12} strokeDasharray="2 4" />
-                <line className="gl" x1={0} y1={86} x2={WIDTH} y2={86} strokeDasharray="2 4" />
-                <line className="gl" x1={0} y1={BASELINE_Y} x2={WIDTH} y2={BASELINE_Y} />
-                {geometry.gridTicks.map((t) => (
-                  <text key={t.y} className="axis" x={4} y={t.y + 12}>
-                    {t.label}
-                  </text>
-                ))}
-                <path className="carea" d={geometry.areaPath} />
-                <path className="cline" d={geometry.linePath} />
-                {geometry.markers.map((m) => (
-                  <g key={`${m.x}-${m.label}`}>
-                    <line className="cmark" x1={m.x} y1={16} x2={m.x} y2={BASELINE_Y} />
-                    <text className="axamb" x={m.x + 6} y={26}>
-                      {m.label}
-                    </text>
-                  </g>
-                ))}
-                {hovered !== undefined && (
-                  <g>
-                    <line
-                      x1={hovered.x}
-                      x2={hovered.x}
-                      y1={PAD_TOP}
-                      y2={BASELINE_Y}
-                      className="gl"
-                    />
-                    <circle cx={hovered.x} cy={hovered.y} r={3.5} fill="var(--amb)" />
-                  </g>
-                )}
-              </svg>
-              {hovered?.raw !== undefined && (
-                <div
-                  className="chart-tooltip"
-                  style={{ left: `${((hovered.x / WIDTH) * 100).toFixed(1)}%`, top: 0 }}
-                >
-                  context {formatTokens(hovered.raw.contextTokens)} · out{" "}
-                  {formatTokens(hovered.raw.outputTokens)} ·{" "}
-                  {formatTime(new Date(hovered.raw.t).toISOString())}
-                </div>
-              )}
-            </div>
-            <div className="fx jb mono fs10 mut mt8">
-              {geometry.xLabels.map((x) => (
-                <span key={x.frac}>{x.label}</span>
-              ))}
-            </div>
-          </>
-        )}
+  const card = (
+    <div
+      className={bare ? "pan f1" : "pan"}
+      style={{ padding: "18px 20px", ...(bare && { minWidth: 0 }) }}
+    >
+      <div className="chartcap">
+        <span className="lbl">Context growth · tokens in window</span>
+        <Link className="linkc mono fs11" to={resolvedContextHref}>
+          → context &amp; cost
+        </Link>
       </div>
+      {geometry === null ? (
+        <p className="mut fs12">No usage records in this session.</p>
+      ) : (
+        <>
+          <div className="chart-wrap">
+            <svg
+              viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+              width="100%"
+              height={HEIGHT}
+              role="img"
+              aria-label="Context tokens over time"
+              onMouseLeave={() => setHoverIndex(null)}
+              onMouseMove={(e) => {
+                if (geometry.hoverNodes.length === 0) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * WIDTH;
+                let nearest = 0;
+                let nearestDist = Number.POSITIVE_INFINITY;
+                geometry.hoverNodes.forEach((n, i) => {
+                  const dist = Math.abs(n.x - x);
+                  if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = i;
+                  }
+                });
+                setHoverIndex(nearest);
+              }}
+            >
+              <line className="gl" x1={0} y1={12} x2={WIDTH} y2={12} strokeDasharray="2 4" />
+              <line className="gl" x1={0} y1={86} x2={WIDTH} y2={86} strokeDasharray="2 4" />
+              <line className="gl" x1={0} y1={BASELINE_Y} x2={WIDTH} y2={BASELINE_Y} />
+              {geometry.gridTicks.map((t) => (
+                <text key={t.y} className="axis" x={4} y={t.y + 12}>
+                  {t.label}
+                </text>
+              ))}
+              <path className="carea" d={geometry.areaPath} />
+              <path className="cline" d={geometry.linePath} />
+              {geometry.markers.map((m) => (
+                <g key={`${m.x}-${m.label}`}>
+                  <line className="cmark" x1={m.x} y1={16} x2={m.x} y2={BASELINE_Y} />
+                  <text className="axamb" x={m.x + 6} y={26}>
+                    {m.label}
+                  </text>
+                </g>
+              ))}
+              {hovered !== undefined && (
+                <g>
+                  <line x1={hovered.x} x2={hovered.x} y1={PAD_TOP} y2={BASELINE_Y} className="gl" />
+                  <circle cx={hovered.x} cy={hovered.y} r={3.5} fill="var(--amb)" />
+                </g>
+              )}
+            </svg>
+            {hovered?.raw !== undefined && (
+              <div
+                className="chart-tooltip"
+                style={{ left: `${((hovered.x / WIDTH) * 100).toFixed(1)}%`, top: 0 }}
+              >
+                context {formatTokens(hovered.raw.contextTokens)} · out{" "}
+                {formatTokens(hovered.raw.outputTokens)} ·{" "}
+                {formatTime(new Date(hovered.raw.t).toISOString())}
+              </div>
+            )}
+          </div>
+          <div className="fx jb mono fs10 mut mt8">
+            {geometry.xLabels.map((x) => (
+              <span key={x.frac}>{x.label}</span>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
+
+  return bare ? card : <div className="hpad mt16">{card}</div>;
 }

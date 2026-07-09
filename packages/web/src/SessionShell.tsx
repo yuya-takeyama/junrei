@@ -7,18 +7,10 @@ import { Orchestration } from "./lenses/Orchestration.js";
 import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
-import { type Lens, normalizeLens, parseRecordParam, recordPath, sessionPath } from "./router.js";
+import { LENS_LABEL, normalizeLens, parseRecordParam, recordPath, sessionPath } from "./router.js";
 import { Band } from "./shell/Band.js";
 import { LensTabs } from "./shell/LensTabs.js";
 import { StatStrip } from "./shell/StatStrip.js";
-
-const LENS_LABEL: Record<Lens, string> = {
-  overview: "Overview",
-  timeline: "Timeline",
-  orchestration: "Orchestration",
-  context: "Context & cost",
-  files: "Files & skills",
-};
 
 const COPY_FLASH_MS = 800;
 

@@ -1,7 +1,13 @@
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
-import { getSession, getSessionRecordDetail, getTimeline, listSessions } from "./sessions.js";
+import {
+  getAgentSession,
+  getSession,
+  getSessionRecordDetail,
+  getTimeline,
+  listSessions,
+} from "./sessions.js";
 
 export type { SessionListItem } from "./sessions.js";
 
@@ -27,6 +33,17 @@ export function createApp() {
     })
     .get("/api/sessions/:project/:id", async (c) => {
       const analysis = await getSession(c.req.param("project"), c.req.param("id"));
+      if (analysis === undefined) {
+        return c.json({ error: "session not found" } as const, 404);
+      }
+      return c.json(analysis);
+    })
+    .get("/api/sessions/:project/:id/agents/:agentId", async (c) => {
+      const analysis = await getAgentSession(
+        c.req.param("project"),
+        c.req.param("id"),
+        c.req.param("agentId"),
+      );
       if (analysis === undefined) {
         return c.json({ error: "session not found" } as const, 404);
       }

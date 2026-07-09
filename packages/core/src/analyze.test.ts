@@ -125,6 +125,7 @@ describe("analyzeSession", () => {
     expect(agent?.launchLine).toBe(21);
     expect(agent?.asyncLaunch).toBe(true);
     expect(agent?.returnedChars).toBeUndefined();
+    expect(agent?.returnedPreview).toBeUndefined();
     expect(agent?.startedAt).toBe("2026-07-09T01:02:32.000Z");
     expect(agent?.launchedAt).toBe("2026-07-09T01:02:05.000Z");
 
@@ -190,6 +191,26 @@ describe("analyzeSession", () => {
   });
 });
 
+describe("analyzeSession applied to a subagent sidecar transcript", () => {
+  const AGENT_FILE = join(
+    FIXTURE_PROJECTS,
+    "-Users-test-proj/11111111-1111-1111-1111-111111111111/subagents/agent-aaaa111122223333f.jsonl",
+  );
+
+  it("analyzes the sidecar directly and returns no nested subagents", async () => {
+    // A sidecar's own "subagents" dir (sibling to a file named after the
+    // sidecar itself) never exists, so listSubagentRefs's readdir throws and
+    // is swallowed — analyzeSession must degrade to an empty subagent forest
+    // rather than throwing, since the server's per-agent endpoint reuses this
+    // same function on sidecar paths.
+    const analysis = await analyzeSession(AGENT_FILE);
+    expect(analysis.sessionId).toBe("agent-aaaa111122223333f");
+    expect(analysis.subagents).toEqual([]);
+    expect(analysis.subagentCount).toBe(0);
+    expect(analysis.apiMessageCount).toBeGreaterThan(0);
+  });
+});
+
 describe("analyzeSession with out-of-order tool results", () => {
   const OUT_OF_ORDER_FILE = join(
     FIXTURE_PROJECTS,
@@ -218,6 +239,7 @@ describe("analyzeSession with out-of-order tool results", () => {
     expect(agent?.returnedChars).toBe(
       "Both edits failed because the files were never read.".length,
     );
+    expect(agent?.returnedPreview).toBe("Both edits failed because the files were never read.");
     expect(agent?.spawnedBy).toBe("main");
     expect(agent?.launchLine).toBe(6);
   });

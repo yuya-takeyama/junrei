@@ -14,6 +14,8 @@ import {
 interface Props {
   project: string;
   id: string;
+  /** Scopes the timeline to one subagent's own transcript, when set (see AgentShell.tsx). */
+  agent?: string;
   /** Opens the record slide-over (L3, screen 8) for a given source line. */
   onOpenRecord: (line: number) => void;
 }
@@ -46,7 +48,7 @@ const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "e
  * is wrapped in `memo` so toggling one tool-call's expansion doesn't
  * re-render its siblings.
  */
-export function Timeline({ project, id, onOpenRecord }: Props) {
+export function Timeline({ project, id, agent, onOpenRecord }: Props) {
   const [entries, setEntries] = useState<TimelineEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dial, setDial] = useState<DetailDial>("full");
@@ -61,14 +63,14 @@ export function Timeline({ project, id, onOpenRecord }: Props) {
     setEntries(null);
     setError(null);
     client.api.sessions[":project"][":id"].timeline
-      .$get({ param: { project, id } })
+      .$get({ param: { project, id }, ...(agent !== undefined && { query: { agent } }) })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
         const body = (await res.json()) as { entries: TimelineEntry[] };
         setEntries(body.entries);
       })
       .catch((e: unknown) => setError(String(e)));
-  }, [project, id]);
+  }, [project, id, agent]);
 
   const counts = useMemo(() => computeChipCounts(entries ?? []), [entries]);
 

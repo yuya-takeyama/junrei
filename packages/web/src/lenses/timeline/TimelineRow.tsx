@@ -1,7 +1,9 @@
 import { memo } from "react";
+import { Link } from "react-router";
 import type { TimelineEntry } from "../../api.js";
 import { formatDuration, formatTime, formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
+import { agentPath } from "../../router.js";
 
 export interface TimelineRowProps {
   entry: TimelineEntry;
@@ -196,11 +198,6 @@ function SubagentBlock({
     }
     if (entry.durationMs !== undefined) metaParts.push(formatDuration(entry.durationMs));
   }
-  const detailHref =
-    entry.agentId !== undefined
-      ? `#/session/${encodeURIComponent(project)}/${encodeURIComponent(id)}/agent/${encodeURIComponent(entry.agentId)}`
-      : undefined;
-
   return (
     <div className="blk" style={{ borderStyle: "double", borderWidth: "3px" }}>
       <div className="bhd">
@@ -210,10 +207,14 @@ function SubagentBlock({
         <ModelBadge model={entry.model} />
         {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
         <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
-        {detailHref !== undefined ? (
-          <a className="linkc mono fs10" style={{ marginLeft: "auto" }} href={detailHref}>
+        {entry.agentId !== undefined ? (
+          <Link
+            className="linkc mono fs10"
+            style={{ marginLeft: "auto" }}
+            to={agentPath(project, id, entry.agentId)}
+          >
             open detail →
-          </a>
+          </Link>
         ) : (
           <span className="linkc mono fs10 mut" style={{ marginLeft: "auto" }}>
             open detail →

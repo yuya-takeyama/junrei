@@ -87,4 +87,32 @@ describe("timeline + record routes", () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "record not found" });
   });
+
+  it("GET /api/sessions/:project/:id/agents/:agentId analyzes the sidecar transcript", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/agents/${AGENT_ID}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      sessionId: string;
+      usage: { total: { inputTokens: number } };
+      apiMessageCount: number;
+      subagents: unknown[];
+    };
+    // Same SessionAnalysis shape as the main session endpoint, applied to the
+    // agent's own sidecar transcript instead — sessionId is the sidecar's
+    // filename stem (agent-<id>), it has its own usage/apiMessageCount, and
+    // (this fixture agent has no nested children of its own) an empty
+    // subagent forest.
+    expect(body.sessionId).toBe(`agent-${AGENT_ID}`);
+    expect(body.usage.total.inputTokens).toBeGreaterThan(0);
+    expect(body.apiMessageCount).toBeGreaterThan(0);
+    expect(body.subagents).toEqual([]);
+  });
+
+  it("GET .../agents/:agentId 404s for an unknown agent id", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/agents/does-not-exist`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "session not found" });
+  });
 });
