@@ -460,7 +460,8 @@ describe("analyzeSession with meta.json files lacking toolUseId", () => {
 describe("listSessionFiles", () => {
   it("finds session files under a projects dir", async () => {
     const refs = await listSessionFiles([FIXTURE_PROJECTS]);
-    expect(refs).toHaveLength(3);
+    // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture, #27).
+    expect(refs).toHaveLength(4);
     expect(refs.map((r) => r.sessionId)).toContain("11111111-1111-1111-1111-111111111111");
     expect(refs[0]?.projectDirName).toBe("-Users-test-proj");
   });

@@ -1,5 +1,6 @@
 import { estimateCostComponents } from "./pricing/pricing.js";
 import type { SessionData, TaskNotificationEvent, ToolCall, UserPrompt } from "./session-data.js";
+import type { SessionRecord } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Tokens & cost
@@ -749,12 +750,101 @@ export interface SkillInvocation {
   timestamp?: string;
   /** 1-based user-turn index — same greatest-prompt-line-<= attribution as `computeTurnUsage`. */
   userTurn?: number;
-  /** Skill tool only: full (untruncated) length of the tool_result text, when known. */
+  /**
+   * Skill tool only: full (untruncated) length of the tool_result text, when
+   * known. For a `Skill` call this is just the ~44-char "Launching skill: …"
+   * acknowledgment — see `injectedChars` for the actual context payload.
+   */
   resultChars?: number;
+  /**
+   * Skill tool only: full length of the harness-injected SKILL.md body (the
+   * `isMeta` user record matched via `findInjection` below), when found. This
+   * — not `resultChars` — is the number that matters for context/cost
+   * analysis. Undefined when no matching injection record exists: older
+   * transcript formats, or skills whose frontmatter renders a templated
+   * prompt instead of injecting the file verbatim (observed for
+   * `commit-commands:*`, whose injected text starts with "## Context", never
+   * "Base directory for this skill:") — never guessed.
+   */
+  injectedChars?: number;
+  /** Source line of the matched injection record (provenance), paired with `injectedChars`. */
+  injectionLine?: number;
 }
 
 const COMMAND_NAME_PATTERN = /<command-name>([^<]*)<\/command-name>/;
 const COMMAND_ARGS_PATTERN = /<command-args>([^<]*)<\/command-args>/;
+const INJECTION_PREFIX = "Base directory for this skill:";
+
+interface InjectionCandidate {
+  line: number;
+  /** Trailing path segment of the base directory — see `skillShortName`. */
+  shortName: string;
+  chars: number;
+  consumed: boolean;
+}
+
+/**
+ * `input.skill` values are sometimes `plugin:skill` (e.g.
+ * `anthropic-skills:skill-creator`), but the on-disk base directory the
+ * harness injects never reproduces the plugin prefix — verified against real
+ * transcripts, where the same invocation's injection base directory ends in
+ * plain `.../skills/skill-creator` (observed under a
+ * `local-agent-mode-sessions/skills-plugin/<uuid>/<uuid>/skills/<name>` path
+ * for plugin skills, and `.claude/skills/<name>` / a `bundled-skills/<hash>/
+ * <name>` path for project/bundled ones). So matching is done on the trailing
+ * path segment against the part of `input.skill` after the last `:`.
+ */
+function skillShortName(skillId: string): string {
+  const idx = skillId.lastIndexOf(":");
+  return idx === -1 ? skillId : skillId.slice(idx + 1);
+}
+
+/**
+ * Every `isMeta` user record whose text is a skill-body injection, in file
+ * order — one candidate per record, each consumable by at most one `Skill`
+ * invocation (see `findInjection`).
+ */
+function collectInjectionCandidates(records: readonly SessionRecord[]): InjectionCandidate[] {
+  const candidates: InjectionCandidate[] = [];
+  for (const record of records) {
+    if (!("isMeta" in record) || record.isMeta !== true) continue;
+    if (!("promptText" in record)) continue;
+    const text = record.promptText;
+    if (text === undefined || !text.startsWith(INJECTION_PREFIX)) continue;
+    const newlineIndex = text.indexOf("\n");
+    const firstLine = newlineIndex === -1 ? text : text.slice(0, newlineIndex);
+    const basePath = firstLine.slice(INJECTION_PREFIX.length).trim();
+    const segments = basePath.split("/").filter((segment) => segment !== "");
+    const shortName = segments[segments.length - 1];
+    if (shortName === undefined) continue;
+    candidates.push({ line: record.line, shortName, chars: text.length, consumed: false });
+  }
+  return candidates;
+}
+
+/**
+ * Nearest-forward match: the first not-yet-consumed candidate after
+ * `afterLine` whose base-directory short name matches `skillName`, scanning
+ * candidates in ascending line order. Marks the match `consumed` so a later
+ * invocation of the same skill name can't double-attribute it — this is what
+ * makes multiple invocations (same or different skills) in one turn each get
+ * their own payload instead of everyone grabbing the first injection record.
+ */
+function findInjection(
+  candidates: InjectionCandidate[],
+  afterLine: number,
+  skillName: string,
+): InjectionCandidate | undefined {
+  const shortName = skillShortName(skillName);
+  for (const candidate of candidates) {
+    if (candidate.consumed || candidate.line <= afterLine || candidate.shortName !== shortName) {
+      continue;
+    }
+    candidate.consumed = true;
+    return candidate;
+  }
+  return undefined;
+}
 
 /**
  * 1-based index of the user turn open at `line` — mirrors `computeTurnUsage`'s
@@ -787,6 +877,7 @@ function turnIndexForLine(prompts: readonly UserPrompt[], line: number): number 
  */
 export function computeSkillInvocations(data: SessionData): SkillInvocation[] {
   const invocations: SkillInvocation[] = [];
+  const injectionCandidates = collectInjectionCandidates(data.records);
 
   for (const call of data.toolCalls) {
     if (call.name !== "Skill") continue;
@@ -800,6 +891,9 @@ export function computeSkillInvocations(data: SessionData): SkillInvocation[] {
     const argsPreview =
       typeof argsValue === "string" ? argsValue.slice(0, DETAIL_LIMIT) : undefined;
     const userTurn = turnIndexForLine(data.userPrompts, call.line);
+    // Scan forward from the tool_result (falling back to the call itself when
+    // unresolved) — the injection record always follows the ACK in file order.
+    const injection = findInjection(injectionCandidates, call.result?.line ?? call.line, skillName);
     invocations.push({
       kind: "skill",
       name: skillName,
@@ -808,6 +902,10 @@ export function computeSkillInvocations(data: SessionData): SkillInvocation[] {
       ...(argsPreview !== undefined && { argsPreview }),
       ...(userTurn !== undefined && { userTurn }),
       ...(call.result?.fullTextLength !== undefined && { resultChars: call.result.fullTextLength }),
+      ...(injection !== undefined && {
+        injectedChars: injection.chars,
+        injectionLine: injection.line,
+      }),
     });
   }
 

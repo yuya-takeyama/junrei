@@ -33,9 +33,18 @@ const SESSION_FILE = join(
   FIXTURE_PROJECTS,
   "-Users-test-proj/11111111-1111-1111-1111-111111111111.jsonl",
 );
+const SKILL_INJECTION_SESSION_FILE = join(
+  FIXTURE_PROJECTS,
+  "-Users-test-proj/44444444-4444-4444-4444-444444444445.jsonl",
+);
 
 async function loadMainData(): Promise<SessionData> {
   const transcript = await parseClaudeTranscriptFile(SESSION_FILE);
+  return buildSessionData(transcript);
+}
+
+async function loadSkillInjectionData(): Promise<SessionData> {
+  const transcript = await parseClaudeTranscriptFile(SKILL_INJECTION_SESSION_FILE);
   return buildSessionData(transcript);
 }
 
@@ -240,5 +249,69 @@ describe("computeSkillInvocations", () => {
       warningCount: 0,
     };
     expect(computeSkillInvocations(data)).toEqual([]);
+  });
+
+  // Fixture: 44444444-4444-4444-4444-444444444444.jsonl — modeled on the real
+  // "Base directory for this skill:" isMeta-injection shape (see issue #27),
+  // covering: a plain skill, a namespaced (plugin) skill, two skills invoked
+  // in one turn with their injection records in reversed order, the same
+  // skill invoked twice, and a skill with no injection record at all.
+  describe("injectedChars / injectionLine (the isMeta SKILL.md payload)", () => {
+    it("matches a plain (non-namespaced) skill to its injection record", async () => {
+      const data = await loadSkillInjectionData();
+      const invocations = computeSkillInvocations(data);
+      const solo = invocations.find((i) => i.name === "solo-skill");
+      expect(solo?.resultChars).toBe(27); // "Launching skill: solo-skill"
+      expect(solo?.injectedChars).toBe(188);
+      expect(solo?.injectionLine).toBe(4);
+    });
+
+    it("matches a namespaced (plugin:skill) skill by its trailing path segment", async () => {
+      const data = await loadSkillInjectionData();
+      const invocations = computeSkillInvocations(data);
+      // Base directory observed in real transcripts for a plugin skill:
+      // ".../local-agent-mode-sessions/skills-plugin/<uuid>/<uuid>/skills/docx"
+      // — no "anthropic-skills:" segment anywhere in the path.
+      const docx = invocations.find((i) => i.name === "anthropic-skills:docx");
+      expect(docx?.injectedChars).toBe(304);
+      expect(docx?.injectionLine).toBe(7);
+    });
+
+    it("attributes each of two skills invoked in one turn to its OWN injection, regardless of record order", async () => {
+      const data = await loadSkillInjectionData();
+      const invocations = computeSkillInvocations(data);
+      // skill-beta's injection record (line 10) appears BEFORE skill-alpha's
+      // (line 11) even though alpha was invoked first — matching keys off
+      // the base-directory name, not proximity/order.
+      const alpha = invocations.find((i) => i.name === "skill-alpha");
+      const beta = invocations.find((i) => i.name === "skill-beta");
+      expect(beta?.injectionLine).toBe(10);
+      expect(beta?.injectedChars).toBe(222);
+      expect(alpha?.injectionLine).toBe(11);
+      expect(alpha?.injectedChars).toBe(162);
+    });
+
+    it("consumes each injection at most once when the same skill is invoked twice", async () => {
+      const data = await loadSkillInjectionData();
+      const invocations = computeSkillInvocations(data);
+      const repeats = invocations.filter((i) => i.name === "repeat-skill");
+      expect(repeats).toHaveLength(2);
+      // First invocation (tool_use at line 12) gets the first injection...
+      expect(repeats[0]?.injectionLine).toBe(14);
+      expect(repeats[0]?.injectedChars).toBe(110);
+      // ...and the second invocation (line 15) gets the second injection —
+      // NOT a re-attribution of the first (already-`consumed`) record.
+      expect(repeats[1]?.injectionLine).toBe(17);
+      expect(repeats[1]?.injectedChars).toBe(184);
+    });
+
+    it("leaves injectedChars/injectionLine undefined when no injection record follows", async () => {
+      const data = await loadSkillInjectionData();
+      const invocations = computeSkillInvocations(data);
+      const none = invocations.find((i) => i.name === "no-injection-skill");
+      expect(none?.resultChars).toBe(35); // "Launching skill: no-injection-skill"
+      expect(none?.injectedChars).toBeUndefined();
+      expect(none?.injectionLine).toBeUndefined();
+    });
   });
 });
