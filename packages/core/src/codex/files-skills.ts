@@ -242,8 +242,9 @@ const SKILL_LINK_PATTERN = /\[\$([\w-]+):([\w-]+)]\(([^)]+)\)/g;
  * the parent's `skillInvocations`). `name` is the `plugin:skill` pair as
  * written in the marker (not just the skill id) since that's the identifier
  * that actually disambiguates it — Codex has no separate "slash command"
- * concept, so every invocation here is `kind: "skill"`. `argsPreview` and
- * `resultChars` (Claude-only: a `Skill` tool call's args/tool-result) have no
+ * concept, so every invocation here is `kind: "skill"`. `argsPreview`,
+ * `resultChars`, and `injectedChars`/`injectionLine` (Claude-only: a `Skill`
+ * tool call's args/tool-result and its matched injection record) have no
  * Codex equivalent and are left unset rather than fabricated.
  */
 export function computeCodexSkillInvocations(transcript: CodexTranscript): SkillInvocation[] {

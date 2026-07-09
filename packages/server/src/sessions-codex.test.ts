@@ -106,6 +106,16 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
     ),
     1_767_193_100,
   ],
+  // Skill-injection fixture (core issue #27) — unrelated to the Claude/Codex
+  // interleaving under test here. Stamped OLDER than everything else so it
+  // appends after codex:66666666 without disturbing the asserted order above.
+  [
+    join(
+      CLAUDE_FIXTURES_DIR,
+      "projects/-Users-test-proj/44444444-4444-4444-4444-444444444445.jsonl",
+    ),
+    1_767_193_000,
+  ],
 ];
 
 async function stampFixtureMtimes() {
@@ -187,7 +197,8 @@ describe("listSessions (source filter + Codex merge)", () => {
 
   it("source: 'claude-code' lists only Claude sessions (unchanged behavior)", async () => {
     const items = await listSessions(50, "claude-code");
-    expect(items.length).toBe(3);
+    // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture, #27).
+    expect(items.length).toBe(4);
     for (const item of items) {
       expect(item.source).toBe("claude-code");
     }
@@ -198,11 +209,13 @@ describe("listSessions (source filter + Codex merge)", () => {
     // Claude and Codex sessions: codex-77777777 (newest — the orchestration
     // parent fixture) > codex-33333333(archived) > claude-33333333 >
     // codex-22222222 > claude-22222222 > codex-11111111 > claude-11111111 >
-    // codex-66666666 (oldest — the rescued orphan sub-agent).
+    // codex-66666666 (oldest of the interleaved set — the rescued orphan
+    // sub-agent) > claude-44444444…445 (the skill-injection fixture, stamped
+    // oldest of all so it doesn't disturb that interleaving).
     // 88888888/99999999 don't appear — they're 77777777's sub-agents,
     // excluded from the list.
     const all = await listSessions(50, "all");
-    expect(all.length).toBe(8);
+    expect(all.length).toBe(9);
     expect(all.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
       "codex:77777777",
       "codex:33333333",
@@ -212,6 +225,7 @@ describe("listSessions (source filter + Codex merge)", () => {
       "codex:11111111",
       "claude-code:11111111",
       "codex:66666666",
+      "claude-code:44444444",
     ]);
 
     // limit=3 must cut the *merged* series, not take 3 from each source first.

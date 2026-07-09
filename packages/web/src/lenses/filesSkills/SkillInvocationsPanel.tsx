@@ -1,5 +1,6 @@
 import type { AnySessionJson } from "../../api.js";
-import { formatTime, formatTokens } from "../../format.js";
+import { formatTime } from "../../format.js";
+import { formatInjectedSize } from "./skillInvocationFormat.js";
 
 interface Props {
   session: AnySessionJson;
@@ -25,30 +26,37 @@ export function SkillInvocationsPanel({ session }: Props) {
           <span className="fs12 mut">no skill invocations</span>
         </div>
       ) : (
-        invocations.map((inv, i) => (
-          <div
-            className="tstat"
-            key={`${inv.kind}-${String(inv.line)}`}
-            style={i === invocations.length - 1 ? { borderBottom: 0 } : undefined}
-          >
-            <span className="mono fs11">{inv.name}</span>
-            <span className="mono fs11 mut">
-              {inv.userTurn !== undefined ? `t${inv.userTurn}` : EM_DASH}
-            </span>
-            <span className="mono fs11 mut">
-              {inv.timestamp !== undefined ? formatTime(inv.timestamp) : EM_DASH}
-            </span>
-            <span className="fs12 nowrap">
-              {inv.argsPreview ?? "(no args)"}
-              {inv.resultChars !== undefined && (
-                <>
-                  {" "}
-                  · <span className="num">{formatTokens(inv.resultChars)} chars</span>
-                </>
-              )}
-            </span>
-          </div>
-        ))
+        invocations.map((inv, i) => {
+          // injectedChars is the harness-injected SKILL.md body — the actual
+          // context payload. resultChars (the ~44-char "Launching skill: …"
+          // ACK) is deliberately not shown here: presenting it as the size
+          // would read as "how much this skill cost", which it isn't.
+          const injectedSize = formatInjectedSize(inv.injectedChars);
+          return (
+            <div
+              className="tstat"
+              key={`${inv.kind}-${String(inv.line)}`}
+              style={i === invocations.length - 1 ? { borderBottom: 0 } : undefined}
+            >
+              <span className="mono fs11">{inv.name}</span>
+              <span className="mono fs11 mut">
+                {inv.userTurn !== undefined ? `t${inv.userTurn}` : EM_DASH}
+              </span>
+              <span className="mono fs11 mut">
+                {inv.timestamp !== undefined ? formatTime(inv.timestamp) : EM_DASH}
+              </span>
+              <span className="fs12 nowrap">
+                {inv.argsPreview ?? "(no args)"}
+                {injectedSize !== undefined && (
+                  <>
+                    {" "}
+                    · <span className="num">{injectedSize}</span>
+                  </>
+                )}
+              </span>
+            </div>
+          );
+        })
       )}
     </div>
   );
