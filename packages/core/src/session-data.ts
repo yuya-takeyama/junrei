@@ -82,6 +82,37 @@ export interface SessionData {
   warningCount: number;
 }
 
+/**
+ * Length of a tool call's captured result text, if it has resolved yet.
+ * Shared by timeline.ts (`SubagentLaunchEntry.returnedChars`) and analyze.ts
+ * (`SubagentNode.returnedChars`) — both derive "how much came back" from the
+ * same parent-side `tool_result`, just for different presentations.
+ *
+ * NOT meaningful for async agent launches — see `asyncAgentLaunchToolUseIds`.
+ */
+export function toolResultLength(call: Pick<ToolCall, "result">): number | undefined {
+  return call.result?.text.length;
+}
+
+/**
+ * tool_use ids of Agent/Task calls that were ASYNC launches (toolUseResult
+ * carried `status: "async_launched"`, surfaced here as a `kind: "agent"`
+ * background launch). For these, the parent-side `tool_result` text is only
+ * the launch-acknowledgment boilerplate — NOT the agent's actual return,
+ * which arrives later as a task-notification whose text isn't captured in
+ * the log. Callers measuring "returned chars" must treat async launches as
+ * unresolved instead of measuring the ack.
+ */
+export function asyncAgentLaunchToolUseIds(
+  data: Pick<SessionData, "backgroundLaunches">,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const launch of data.backgroundLaunches) {
+    if (launch.kind === "agent" && launch.toolUseId !== undefined) ids.add(launch.toolUseId);
+  }
+  return ids;
+}
+
 export function buildSessionData(transcript: Transcript): SessionData {
   const apiMessagesById = new Map<string, ApiMessage>();
   const toolCalls: ToolCall[] = [];
