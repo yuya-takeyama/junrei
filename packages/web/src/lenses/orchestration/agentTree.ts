@@ -104,6 +104,24 @@ export function findSubagent(
   return undefined;
 }
 
+/**
+ * Ancestor chain (root-first, inclusive of the target) for a given agentId
+ * anywhere in the forest — used by the agent detail shell (L3) to render its
+ * breadcrumb (`session ▸ ancestor ▸ … ▸ agent`) and depth ticks. `undefined`
+ * when the agentId isn't in the tree at all.
+ */
+export function findAgentPath(
+  nodes: readonly SubagentNodeJson[],
+  agentId: string,
+): SubagentNodeJson[] | undefined {
+  for (const node of nodes) {
+    if (node.agentId === agentId) return [node];
+    const childPath = findAgentPath(node.children, agentId);
+    if (childPath !== undefined) return [node, ...childPath];
+  }
+  return undefined;
+}
+
 /** Duration in ms between a node's startedAt/endedAt, when both are present. */
 export function nodeDurationMs(
   node: Pick<SubagentNodeJson, "startedAt" | "endedAt">,

@@ -15,6 +15,18 @@ export type SessionJson = Extract<SessionResponse, { sessionId: string }>;
 export type SubagentNodeJson = SessionJson["subagents"][number];
 export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
 
+/**
+ * A subagent's own analysis (`GET .../agents/:agentId`) — deliberately the
+ * same `SessionAnalysis` JSON shape as `SessionJson` (just analyzed from the
+ * agent's sidecar transcript instead of the main one), so every session-level
+ * component (ContextGrowthChart, FirstPromptPanel, ...) is directly reusable
+ * for the agent detail shell (L3) with no separate DTO.
+ */
+type AgentResponse = InferResponseType<
+  (typeof client.api.sessions)[":project"][":id"]["agents"][":agentId"]["$get"]
+>;
+export type AgentJson = Extract<AgentResponse, { sessionId: string }>;
+
 type TimelineResponse = InferResponseType<
   (typeof client.api.sessions)[":project"][":id"]["timeline"]["$get"]
 >;

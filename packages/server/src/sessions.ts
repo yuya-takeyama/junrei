@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   analyzeSession,
   buildSessionData,
@@ -12,6 +14,7 @@ import {
   type SessionData,
   type SessionFileRef,
   type SubagentNode,
+  subagentsDirFor,
   type TimelineEntry,
 } from "@junrei/core";
 
@@ -144,6 +147,54 @@ export async function getSession(
   sessionId: string,
 ): Promise<SessionAnalysis | undefined> {
   const ref = await findRef(projectDirName, sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    return await analyzeCached(ref);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve a subagent's own sidecar transcript as a synthetic `SessionFileRef`
+ * (`sessionId` set to the agentId, `filePath` the sidecar jsonl) so it can
+ * flow through the same `analyzeCached` cache as main sessions — keyed by
+ * `filePath`, which is unique per sidecar, so no separate cache is needed.
+ * `undefined` when the main session or the sidecar file doesn't exist.
+ */
+async function findAgentRef(
+  projectDirName: string,
+  sessionId: string,
+  agentId: string,
+): Promise<SessionFileRef | undefined> {
+  const mainRef = await findRef(projectDirName, sessionId);
+  if (mainRef === undefined) return undefined;
+  const filePath = join(subagentsDirFor(mainRef.filePath), `agent-${agentId}.jsonl`);
+  try {
+    const stats = await stat(filePath);
+    return {
+      sessionId: agentId,
+      filePath,
+      projectDirName,
+      mtimeMs: stats.mtimeMs,
+      sizeBytes: stats.size,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Analysis for one subagent's own transcript, scoped exactly like
+ * `getSession` but for a sidecar — same `SessionAnalysis` shape, reused
+ * as-is by the web's agent-detail shell (deliberate: no separate DTO).
+ */
+export async function getAgentSession(
+  projectDirName: string,
+  sessionId: string,
+  agentId: string,
+): Promise<SessionAnalysis | undefined> {
+  const ref = await findAgentRef(projectDirName, sessionId, agentId);
   if (ref === undefined) return undefined;
   try {
     return await analyzeCached(ref);

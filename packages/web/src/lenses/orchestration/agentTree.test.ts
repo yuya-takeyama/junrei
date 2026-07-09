@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { SubagentNodeJson } from "../../api.js";
-import { flattenSubagents, mainDelegatedSplit, spawnedByLabel, subtreeCost } from "./agentTree.js";
+import {
+  findAgentPath,
+  flattenSubagents,
+  mainDelegatedSplit,
+  spawnedByLabel,
+  subtreeCost,
+} from "./agentTree.js";
 
 function usage(costUsd: number) {
   return {
@@ -88,6 +94,27 @@ describe("mainDelegatedSplit", () => {
       totalUsage: { costUsd: 0 },
     } as never;
     expect(mainDelegatedSplit(session)).toEqual({ mainPct: 0, delegatedPct: 0 });
+  });
+});
+
+describe("findAgentPath", () => {
+  it("returns the root-first ancestor chain, inclusive of the target", () => {
+    const lintFixer = node("lint-fixer", 0.09);
+    const testWriter = node("test-writer", 1.86, [lintFixer]);
+    const research = node("research-agent", 0.94);
+
+    expect(findAgentPath([research, testWriter], "lint-fixer")?.map((n) => n.agentId)).toEqual([
+      "test-writer",
+      "lint-fixer",
+    ]);
+    expect(findAgentPath([research, testWriter], "research-agent")?.map((n) => n.agentId)).toEqual([
+      "research-agent",
+    ]);
+  });
+
+  it("returns undefined when the agentId isn't anywhere in the forest", () => {
+    const research = node("research-agent", 0.94);
+    expect(findAgentPath([research], "does-not-exist")).toBeUndefined();
   });
 });
 

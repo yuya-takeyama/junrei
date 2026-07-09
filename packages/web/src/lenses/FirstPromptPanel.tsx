@@ -3,6 +3,12 @@ import type { SessionJson } from "../api.js";
 
 interface Props {
   session: SessionJson;
+  /**
+   * Overrides the `.lbl` text — the agent detail shell (L3) reuses this
+   * component verbatim for its "Launch prompt" strip (design-spec/16), same
+   * markup and behavior as the session-level "First prompt" strip.
+   */
+  label?: string;
 }
 
 /**
@@ -10,7 +16,7 @@ interface Props {
  * by default (single-line, ellipsis-truncated preview); clicking expands the
  * `.ph` text in place.
  */
-export function FirstPromptPanel({ session }: Props) {
+export function FirstPromptPanel({ session, label = "First prompt" }: Props) {
   const [expanded, setExpanded] = useState(false);
   if (session.firstUserPrompt === undefined) return null;
 
@@ -33,7 +39,7 @@ export function FirstPromptPanel({ session }: Props) {
           {expanded ? "▾" : "▸"}
         </span>
         <span className="lbl noshrink" style={{ paddingTop: expanded ? "2px" : 0 }}>
-          First prompt
+          {label}
         </span>
         <span className={expanded ? "ph f1 expanded" : "ph f1"}>{session.firstUserPrompt}</span>
         {session.firstUserPromptLine !== undefined && (

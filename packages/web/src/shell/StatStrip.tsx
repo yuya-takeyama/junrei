@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { SessionJson } from "../api.js";
-import { formatTokens, formatUsd } from "../format.js";
+import { cacheHitRate, formatTokens, formatUsd } from "../format.js";
 import { sessionPath } from "../router.js";
 
 interface Props {
@@ -15,12 +15,6 @@ interface Props {
  */
 export function StatStrip({ session }: Props) {
   const delegatedCost = Math.max(0, session.totalUsage.costUsd - session.usage.total.costUsd);
-  const cacheDenominator =
-    session.totalUsage.inputTokens +
-    session.totalUsage.cacheReadTokens +
-    session.totalUsage.cacheCreationTokens;
-  const cacheHitRate =
-    cacheDenominator > 0 ? session.totalUsage.cacheReadTokens / cacheDenominator : 0;
   const nestedSubagents = Math.max(0, session.subagentCount - session.subagents.length);
   const contextHref = sessionPath(session.projectDirName, session.sessionId, "context");
 
@@ -47,7 +41,7 @@ export function StatStrip({ session }: Props) {
         <div className="sub">user / API</div>
       </Cell>
       <Cell label="Cache hit" href={contextHref}>
-        <div className="big mt8">{(cacheHitRate * 100).toFixed(0)}%</div>
+        <div className="big mt8">{(cacheHitRate(session.totalUsage) * 100).toFixed(0)}%</div>
         <div className="sub">of input tokens</div>
       </Cell>
       <Cell label="Output tok" href={contextHref}>

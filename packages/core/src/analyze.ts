@@ -26,6 +26,8 @@ import { listSubagentRefs } from "./subagents.js";
 const MAIN_OWNER = "main";
 
 const PROMPT_PREVIEW_LIMIT = 500;
+/** Cap for `SubagentNode.returnedPreview` — matches the parser's own tool-result capture cap. */
+const RETURNED_PREVIEW_LIMIT = 2000;
 
 export interface SubagentNode {
   agentId: string;
@@ -51,6 +53,14 @@ export interface SubagentNode {
    * timeline builder just to show "↩ return" tokens in the tree.
    */
   returnedChars?: number;
+  /**
+   * The parent-side `tool_result` text itself (truncated to 2000 chars),
+   * for the "return to parent" panel — same resolution rules as
+   * `returnedChars` (undefined while unresolved or for async launches; the
+   * async launch-ack boilerplate must never surface here as if it were the
+   * agent's real return).
+   */
+  returnedPreview?: string;
   /**
    * True when the launch was asynchronous (`status: "async_launched"`). The
    * parent-side tool_result for an async launch is only the launch-ack
@@ -314,7 +324,10 @@ function launchLinkage(
   ownerId: string | undefined,
   toolCallsByOwner: ReadonlyMap<string, ReadonlyMap<string, ToolCall>>,
   asyncLaunchIds: ReadonlySet<string>,
-): Pick<SubagentNode, "returnedChars" | "asyncLaunch" | "launchLine" | "launchedAt" | "spawnedBy"> {
+): Pick<
+  SubagentNode,
+  "returnedChars" | "returnedPreview" | "asyncLaunch" | "launchLine" | "launchedAt" | "spawnedBy"
+> {
   const spawnedBy = ownerId ?? MAIN_OWNER;
   const asyncLaunch = node.toolUseId !== undefined && asyncLaunchIds.has(node.toolUseId);
   const launchCall =
@@ -323,11 +336,15 @@ function launchLinkage(
     return { spawnedBy, ...(asyncLaunch && { asyncLaunch }) };
   }
   const returnedChars = asyncLaunch ? undefined : toolResultLength(launchCall);
+  const returnedPreview = asyncLaunch
+    ? undefined
+    : launchCall.result?.text.slice(0, RETURNED_PREVIEW_LIMIT);
   return {
     spawnedBy,
     launchLine: launchCall.line,
     ...(asyncLaunch && { asyncLaunch }),
     ...(returnedChars !== undefined && { returnedChars }),
+    ...(returnedPreview !== undefined && { returnedPreview }),
     ...(launchCall.timestamp !== undefined &&
       launchCall.timestamp !== node.startedAt && { launchedAt: launchCall.timestamp }),
   };

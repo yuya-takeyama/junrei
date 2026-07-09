@@ -1,6 +1,8 @@
+import { Link } from "react-router";
 import type { SessionJson, SubagentNodeJson } from "../../api.js";
 import { formatDuration, formatTime, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
+import { agentPath } from "../../router.js";
 import {
   displayName,
   findSubagent,
@@ -76,7 +78,7 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: Sessi
   ]
     .filter((p): p is string => p !== undefined)
     .join(" · ");
-  const detailHref = `#/session/${encodeURIComponent(session.projectDirName)}/${encodeURIComponent(session.sessionId)}/agent/${encodeURIComponent(node.agentId)}`;
+  const detailHref = agentPath(session.projectDirName, session.sessionId, node.agentId);
 
   return (
     <>
@@ -126,9 +128,9 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: Sessi
       <div className="ann mt12" style={{ borderTop: "1px dotted var(--bd)", paddingTop: "10px" }}>
         ref · typical subagent summary: 1–2k tokens
       </div>
-      <a className="linkc mono fs11 mt12" style={{ display: "block" }} href={detailHref}>
+      <Link className="linkc mono fs11 mt12" style={{ display: "block" }} to={detailHref}>
         open full detail →
-      </a>
+      </Link>
     </>
   );
 }

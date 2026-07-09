@@ -196,6 +196,26 @@ button {
   border-bottom: 1px dotted var(--bd);
 }
 
+/* Agent detail (L3) breadcrumb + depth-cue — see design-spec/16-subagent-detail.md. */
+.bc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+.bc-cur {
+  color: var(--tx);
+}
+.dbar {
+  width: 4px;
+  height: 13px;
+  background: var(--amb);
+  flex: none;
+  opacity: 0.9;
+}
+
 .theme-toggle {
   background: transparent;
   border: none;

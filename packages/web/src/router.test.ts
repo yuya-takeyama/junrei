@@ -1,5 +1,15 @@
+import { matchRoutes, type RouteObject } from "react-router";
 import { describe, expect, it } from "vitest";
-import { normalizeLens, parseRecordParam, recordPath, sessionPath } from "./router.js";
+import {
+  AGENT_ROUTE_PATH,
+  agentPath,
+  agentRecordPath,
+  normalizeLens,
+  parseRecordParam,
+  recordPath,
+  SESSION_ROUTE_PATH,
+  sessionPath,
+} from "./router.js";
 
 describe("sessionPath", () => {
   it("omits the lens segment for overview (default)", () => {
@@ -24,6 +34,67 @@ describe("recordPath", () => {
 
   it("omits the lens segment for overview but keeps the record param", () => {
     expect(recordPath("proj", "abc123", "overview", 7)).toBe("/session/proj/abc123?record=7");
+  });
+});
+
+describe("agentPath", () => {
+  it("omits the lens segment for overview (default)", () => {
+    expect(agentPath("proj", "abc123", "agentA")).toBe("/session/proj/abc123/agent/agentA");
+  });
+
+  it("includes non-overview lens segments", () => {
+    expect(agentPath("proj", "abc123", "agentA", "timeline")).toBe(
+      "/session/proj/abc123/agent/agentA/timeline",
+    );
+  });
+
+  it("percent-encodes project, id, and agentId", () => {
+    expect(agentPath("a/b", "c d", "e f")).toBe("/session/a%2Fb/c%20d/agent/e%20f");
+  });
+});
+
+describe("agentRecordPath", () => {
+  it("appends a record search param to the agent path", () => {
+    expect(agentRecordPath("proj", "abc123", "agentA", "timeline", 42)).toBe(
+      "/session/proj/abc123/agent/agentA/timeline?record=42",
+    );
+  });
+
+  it("omits the lens segment for overview but keeps the record param", () => {
+    expect(agentRecordPath("proj", "abc123", "agentA", "overview", 7)).toBe(
+      "/session/proj/abc123/agent/agentA?record=7",
+    );
+  });
+});
+
+describe("route ranking: AGENT_ROUTE_PATH vs SESSION_ROUTE_PATH", () => {
+  // Mirrors main.tsx's actual route registration (order included, to prove the
+  // ranking — not the declaration order — is what disambiguates them).
+  const routes: RouteObject[] = [
+    {
+      path: "/",
+      children: [
+        { index: true, id: "index" },
+        { path: AGENT_ROUTE_PATH, id: "agent" },
+        { path: SESSION_ROUTE_PATH, id: "session" },
+        { path: "*", id: "catchall" },
+      ],
+    },
+  ];
+
+  function matchedRouteId(pathname: string): string | undefined {
+    const matches = matchRoutes(routes, pathname);
+    return matches?.[matches.length - 1]?.route.id;
+  }
+
+  it("matches plain session paths (with or without a lens) to SESSION_ROUTE_PATH", () => {
+    expect(matchedRouteId("/session/proj/id")).toBe("session");
+    expect(matchedRouteId("/session/proj/id/timeline")).toBe("session");
+  });
+
+  it("matches agent paths to AGENT_ROUTE_PATH, not SESSION_ROUTE_PATH with lens='agent'", () => {
+    expect(matchedRouteId("/session/proj/id/agent/abc")).toBe("agent");
+    expect(matchedRouteId("/session/proj/id/agent/abc/timeline")).toBe("agent");
   });
 });
 
