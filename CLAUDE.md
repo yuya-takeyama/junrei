@@ -11,7 +11,9 @@ the subtask genuinely needs orchestrator-tier reasoning. Keep planning and
 judging in the main loop, but delegate routine preview/UI verification to the
 `preview-verifier` agent (`.claude/agents/preview-verifier.md`) — screenshots
 and DOM dumps must not accumulate in the orchestrator context; judge its text
-verdict instead.
+verdict instead. Likewise, delegate commit → rebase → push → PR → CI-watch
+chores to the `pr-shepherd` agent (`.claude/agents/pr-shepherd.md`): prepare
+the tree and the messages in the main loop, then hand off execution.
 
 After significant multi-agent work, check the real spend with Junrei itself
 (session detail → Cost by model / Subagent tree, or the `get_subagent_tree` MCP
