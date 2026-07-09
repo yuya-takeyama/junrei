@@ -19,6 +19,17 @@ After significant multi-agent work, check the real spend with Junrei itself
 (session detail → Cost by model / Subagent tree, or the `get_subagent_tree` MCP
 tool) and adjust delegation choices from evidence.
 
+## CI fallback policy
+
+CI runs the same quality gates as local (`pnpm typecheck && pnpm lint && pnpm test`).
+When GitHub Actions is unstable — an incident on
+https://www.githubstatus.com, or checks that never start/finish despite no
+merge conflict — a PR may be merged **without waiting for CI**, provided the
+full local quality gates passed on the exact commit being merged (i.e. after
+the final rebase onto latest `origin/main`). Leave a PR comment noting the
+bypass and the local gate results so the audit trail shows why checks were
+skipped. When Actions is healthy, the normal CI-watch flow applies.
+
 ## Development
 
 - Tooling via aqua (`aqua i -l`), packages managed with pnpm workspaces.

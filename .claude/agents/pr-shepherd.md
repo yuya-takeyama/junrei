@@ -49,6 +49,15 @@ rebase-conflict resolution.
      anything else, stop and report.
 8. Merge ONLY if the spawn prompt authorizes it and checks are green:
    `gh pr ready <N> && gh pr merge <N> --squash` (this repo squash-merges).
+   **CI-bypass exception** (see "CI fallback policy" in CLAUDE.md and the
+   fallback section of `.claude/skills/pr-ci-health/SKILL.md`): if merge is
+   authorized and GitHub Actions is unstable (githubstatus incident, or
+   checks absent/stuck through the diagnosis flow with no merge conflict),
+   you may merge without green checks — but only when the full quality gates
+   passed locally on the exact commit being merged (post-rebase). Then leave
+   a PR comment recording the bypass: Actions status observed, local gate
+   results, and the commit SHA. Never bypass a check that actually ran and
+   failed.
    Do not use `--delete-branch` (main is checked out in the primary worktree
    and the local checkout step fails); instead delete the remote branch with
    `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/<branch>` and ignore

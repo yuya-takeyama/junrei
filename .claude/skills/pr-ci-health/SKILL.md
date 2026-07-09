@@ -43,3 +43,23 @@ cause was.
 4. **Retrigger (last resort)**: empty commit to fire a `synchronize` event —
    `git commit --allow-empty -m 'chore: retrigger CI'` + push. Still nothing?
    `gh pr close <N> && gh pr reopen <N>`.
+
+## Fallback — merging without CI when Actions is unstable
+
+CI runs the exact same quality gates as local
+(`pnpm typecheck && pnpm lint && pnpm test`), so when GitHub Actions itself is
+the problem, local gates are an acceptable substitute (see "CI fallback
+policy" in CLAUDE.md):
+
+1. Confirm the cause is Actions instability, not the PR: no merge conflict
+   (step 2 above) and either a githubstatus incident on the Actions component
+   or checks that stay absent/stuck through the diagnosis flow.
+2. Run the full quality gates locally **on the exact commit to be merged** —
+   after the final rebase onto latest `origin/main`. A pass on an older commit
+   does not count.
+3. Merge without waiting for checks, then leave a PR comment recording the
+   bypass: Actions status/incident observed, and that local gates passed
+   (with the commit SHA).
+
+Do not use this fallback to route around a real CI failure — only when checks
+cannot run or complete for infrastructure reasons.
