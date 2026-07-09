@@ -220,6 +220,8 @@ function toCodexListItem(
     sizeBytes: ref.sizeBytes,
     modelMix: codexModelMix(analysis, forest),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
+    ...(analysis.repoRoot !== undefined && { repoRoot: analysis.repoRoot }),
+    ...(analysis.worktreeName !== undefined && { worktreeName: analysis.worktreeName }),
     ...(analysis.title !== undefined && { title: analysis.title }),
     ...(analysis.firstUserPrompt !== undefined && { firstUserPrompt: analysis.firstUserPrompt }),
     ...(analysis.startedAt !== undefined && { startedAt: analysis.startedAt }),

@@ -64,6 +64,8 @@ export {
   findModelPricing,
   pricingSnapshotInfo,
 } from "./pricing/pricing.js";
+export type { RepoIdentity } from "./repo.js";
+export { deriveRepoIdentity } from "./repo.js";
 export type { SessionAnalysisCore, SessionSource } from "./session-analysis.js";
 export type {
   ApiErrorLogEntry,
