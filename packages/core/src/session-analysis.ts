@@ -72,11 +72,14 @@ export interface SessionAnalysisCore {
   firstUserPromptLine?: number;
   parseWarningCount: number;
   /**
-   * Per-file read/edit tally. Claude: main + every subagent, merged (see
-   * `analyze.ts`). Codex: this session's own transcript, merged with every
-   * descendant sub-agent thread at serve time (see
-   * `getCodexSession`/`mergeCodexFileAccess` on the server) — same
-   * main/subagent/both `threads` vocabulary either way.
+   * Per-file read/edit/injection tally. Claude: main + every subagent, merged
+   * (see `analyze.ts`) — includes paths whose content entered context without
+   * a Read/Edit call at all (CLAUDE.md/MEMORY.md system-reminders, Skill
+   * `SKILL.md` loads), see `FileAccessEntry.injectedCount`. Codex: this
+   * session's own transcript, merged with every descendant sub-agent thread
+   * at serve time (see `getCodexSession`/`mergeCodexFileAccess` on the
+   * server) — same main/subagent/both `threads` vocabulary either way, but no
+   * injection tracking (see `codex/files-skills.ts`).
    */
   fileAccess: FileAccessEntry[];
   /** True when the merged path count exceeded the cap (500) and entries were dropped. */
