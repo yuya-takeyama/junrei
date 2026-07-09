@@ -2,6 +2,7 @@ import { matchRoutes, type RouteObject } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
   AGENT_ROUTE_PATH,
+  ALL_REPOS,
   agentPath,
   agentRecordPath,
   CLAUDE_LENSES,
@@ -10,6 +11,7 @@ import {
   CODEX_SESSION_ROUTE_PATH,
   normalizeLens,
   parseRecordParam,
+  parseRepoParam,
   parseSourceTab,
   recordPath,
   sessionPath,
@@ -214,5 +216,32 @@ describe("parseSourceTab", () => {
     // The "All" tab omits the param entirely (see SessionList's tab click handler).
     params.delete("source");
     expect(parseSourceTab(params.get("source"))).toBe("all");
+  });
+});
+
+describe("parseRepoParam", () => {
+  it("passes through a repoRoot value unchanged", () => {
+    expect(parseRepoParam("/Users/me/junrei")).toBe("/Users/me/junrei");
+  });
+
+  it("falls back to the 'all' sentinel for a missing value", () => {
+    expect(parseRepoParam(null)).toBe(ALL_REPOS);
+  });
+
+  it("round-trips through a URLSearchParams the way the session-list URL does", () => {
+    const params = new URLSearchParams();
+    params.set("repo", "/Users/me/junrei");
+    expect(parseRepoParam(params.get("repo"))).toBe("/Users/me/junrei");
+
+    // The "all repos" choice omits the param entirely (see SessionList's select handler).
+    params.delete("repo");
+    expect(parseRepoParam(params.get("repo"))).toBe(ALL_REPOS);
+  });
+
+  it("percent-decodes a repoRoot containing reserved URL characters", () => {
+    const params = new URLSearchParams();
+    params.set("repo", "/Users/me/repo with spaces");
+    const url = `?${params.toString()}`;
+    expect(parseRepoParam(new URLSearchParams(url).get("repo"))).toBe("/Users/me/repo with spaces");
   });
 });

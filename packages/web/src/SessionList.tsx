@@ -2,13 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
-import { formatDateTime, formatDuration, formatProject, formatUsd } from "./format.js";
+import { formatDateTime, formatDuration, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel } from "./modelClass.js";
-import { parseSourceTab, type SourceTab, sessionPath, sessionRefOf } from "./router.js";
+import {
+  ALL_REPOS,
+  parseRepoParam,
+  parseSourceTab,
+  type SourceTab,
+  sessionPath,
+  sessionRefOf,
+} from "./router.js";
 import {
   isEstimatedCost,
   projectFilterKey,
+  repoFilterKey,
+  repoOptionsFor,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -74,14 +83,14 @@ function NumCell({
 export function SessionList() {
   const [sessions, setSessions] = useState<SessionListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [project, setProject] = useState("all");
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [searchParams, setSearchParams] = useSearchParams();
-  // Persisted in the URL (`?source=`) rather than component state so a
-  // reload or shared link keeps the selected tab — same pattern as the lens
+  // Persisted in the URL (`?source=`/`?repo=`) rather than component state so
+  // a reload or shared link keeps the selection — same pattern as the lens
   // segment / `?record=` param elsewhere in the router (see router.ts).
   const sourceTab = parseSourceTab(searchParams.get("source"));
+  const repoFilter = parseRepoParam(searchParams.get("repo"));
 
   useEffect(() => {
     setSessions(null);
@@ -108,17 +117,22 @@ export function SessionList() {
     };
   }, [sourceTab]);
 
-  const projects = useMemo(() => {
+  const repoOptions = useMemo(() => {
     if (sessions === null) return [];
-    return [...new Set(sessions.map(projectFilterKey))].sort();
+    return repoOptionsFor(sessions);
   }, [sessions]);
+  const repoOptionByKey = useMemo(() => {
+    const map = new Map<string, (typeof repoOptions)[number]>();
+    for (const opt of repoOptions) map.set(opt.key, opt);
+    return map;
+  }, [repoOptions]);
 
   const filtered = useMemo(() => {
     if (sessions === null) return [];
     const cutoff = dateFilter === "all" ? undefined : Date.now() - Number(dateFilter) * DAY_MS;
     const needle = search.trim().toLowerCase();
     return sessions.filter((s) => {
-      if (project !== "all" && projectFilterKey(s) !== project) return false;
+      if (repoFilter !== ALL_REPOS && repoFilterKey(s) !== repoFilter) return false;
       if (needle !== "") {
         const title = (s.title ?? s.firstUserPrompt ?? s.sessionId).toLowerCase();
         if (!title.includes(needle)) return false;
@@ -128,7 +142,7 @@ export function SessionList() {
       }
       return true;
     });
-  }, [sessions, project, search, dateFilter]);
+  }, [sessions, repoFilter, search, dateFilter]);
 
   const cycleDateFilter = () => {
     const index = DATE_FILTER_CYCLE.indexOf(dateFilter);
@@ -165,14 +179,20 @@ export function SessionList() {
         <div className="fx ac gap8" style={{ flexWrap: "wrap" }}>
           <select
             className="chip on"
-            value={project}
-            onChange={(e) => setProject(e.target.value)}
-            aria-label="Filter by project"
+            value={repoFilter}
+            onChange={(e) => {
+              const next = new URLSearchParams(searchParams);
+              if (e.target.value === ALL_REPOS) next.delete("repo");
+              else next.set("repo", e.target.value);
+              setSearchParams(next);
+            }}
+            aria-label="Filter by repo"
+            title={repoFilter === ALL_REPOS ? undefined : repoOptionByKey.get(repoFilter)?.title}
           >
-            <option value="all">project: all</option>
-            {projects.map((p) => (
-              <option key={p} value={p}>
-                project: {formatProject(p)}
+            <option value={ALL_REPOS}>repo: all</option>
+            {repoOptions.map((opt) => (
+              <option key={opt.key} value={opt.key} title={opt.title}>
+                repo: {opt.label}
               </option>
             ))}
           </select>
@@ -200,7 +220,7 @@ export function SessionList() {
       {sessions !== null && (
         <div className="l0-wrap">
           <div className="l0g hdr">
-            <span className="lbl">Project</span>
+            <span className="lbl">Repo</span>
             <span className="lbl">Title</span>
             <span className="lbl">Start</span>
             <span className="lbl cellr">Dur</span>
@@ -217,8 +237,21 @@ export function SessionList() {
               className="l0g"
               to={sessionPath(sessionRefOf(s))}
             >
-              <span className="mono fs11 mut nowrap" title={projectFilterKey(s)}>
-                {formatProject(projectFilterKey(s), s.cwd)}
+              <span
+                className="mono fs11 mut nowrap"
+                title={repoOptionByKey.get(repoFilterKey(s))?.title ?? projectFilterKey(s)}
+              >
+                {repoOptionByKey.get(repoFilterKey(s))?.label ?? projectFilterKey(s)}
+                {s.worktreeName !== undefined && (
+                  // Subtle worktree marker — mirrors the "archived" marker
+                  // below (same `mut fs10` treatment) rather than the bordered
+                  // `.mbdg` source badge, since this is secondary provenance
+                  // info on a cell that's already muted.
+                  <span className="mut fs10" title={`worktree: ${s.worktreeName}`}>
+                    {" "}
+                    · {s.worktreeName}
+                  </span>
+                )}
               </span>
               <span className="fx ac gap8 nowrap">
                 {sourceTab === "all" && (
