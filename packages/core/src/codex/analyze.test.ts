@@ -202,6 +202,26 @@ describe("analyzeCodexSession", () => {
     const analysis = await analyzeFixture();
     expect(analysis.codex.rateLimits).toEqual({ primary: { used_percent: 10 } });
   });
+
+  it("attaches this session's own fileAccess (deterministic apply_patch edit), threads 'main' since no sub-agent has been merged in yet", async () => {
+    const analysis = await analyzeFixture();
+    // Line 10's "*** Update File: foo.spec.ts" — the only file-touching call
+    // in this fixture (line 6's "shell pytest foo.spec.ts" isn't a
+    // recognized read command). No skill markers appear in either
+    // user_message here, so skillInvocations is empty.
+    expect(analysis.fileAccess).toEqual([
+      {
+        path: "/Users/test/codex-proj/foo.spec.ts",
+        reads: 0,
+        edits: 1,
+        firstTouchTimestamp: "2026-07-01T10:00:06.500Z",
+        firstTouchLine: 10,
+        threads: "main",
+      },
+    ]);
+    expect(analysis.fileAccessTruncated).toBe(false);
+    expect(analysis.skillInvocations).toEqual([]);
+  });
 });
 
 describe("analyzeCodexSession — sub-agent orchestration", () => {

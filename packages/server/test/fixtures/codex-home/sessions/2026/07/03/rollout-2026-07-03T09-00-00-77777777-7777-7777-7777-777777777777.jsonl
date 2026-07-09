@@ -8,3 +8,5 @@
 {"timestamp":"2026-07-03T09:00:20.000Z","type":"event_msg","payload":{"type":"collab_waiting_end","call_id":"call_spawn_child"}}
 {"timestamp":"2026-07-03T09:00:21.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"cached_input_tokens":100,"output_tokens":200,"reasoning_output_tokens":30,"total_tokens":1230},"last_token_usage":{"input_tokens":400,"cached_input_tokens":100,"output_tokens":120,"reasoning_output_tokens":20,"total_tokens":650}}}}
 {"timestamp":"2026-07-03T09:00:22.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-p1","last_agent_message":"Done — explorer reported back.","completed_at":1782295222,"duration_ms":21000}}
+{"timestamp":"2026-07-03T09:00:23.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"call_p1","name":"apply_patch","input":"*** Update File: src/parent-only.ts\n@@\n-old\n+new\n*** End Patch"}}
+{"timestamp":"2026-07-03T09:00:23.500Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_p1","output":"Applied patch"}}

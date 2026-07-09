@@ -1,6 +1,6 @@
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 
-export type FileAccessEntryLike = SessionJson["fileAccess"][number];
+export type FileAccessEntryLike = AnySessionJson["fileAccess"][number];
 
 /**
  * Re-read flagging threshold — the DOCUMENTED rule from

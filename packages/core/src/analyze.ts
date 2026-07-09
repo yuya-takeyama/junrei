@@ -2,10 +2,8 @@ import { basename, dirname } from "node:path";
 import type {
   ExplorationProfile,
   FileAccessAgg,
-  FileAccessEntry,
   ModelUsageSummary,
   RepetitionFinding,
-  SkillInvocation,
   TaskExecutionInfo,
   TokenTotals,
   ToolStat,
@@ -100,8 +98,9 @@ export interface SubagentNode {
 /**
  * Claude Code session analysis — `SessionAnalysisCore` plus everything that
  * only makes sense for a Claude Code transcript (subagent trees, per-tool
- * breakdowns, skill invocations, ...). See `session-analysis.ts` for the
- * shared-core rationale and `CodexSessionAnalysis` for the other variant.
+ * breakdowns, task executions, ...). See `session-analysis.ts` for the
+ * shared-core rationale (incl. why `fileAccess`/`skillInvocations` live
+ * there rather than here) and `CodexSessionAnalysis` for the other variant.
  */
 export interface SessionAnalysis extends SessionAnalysisCore {
   source: "claude-code";
@@ -117,14 +116,6 @@ export interface SessionAnalysis extends SessionAnalysisCore {
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
   taskExecutions: TaskExecutionInfo[];
-  /** Per-file read/edit tally, main + every subagent merged — see `FileAccessEntry`. */
-  fileAccess: FileAccessEntry[];
-  /** True when the merged path count exceeded the cap (500) and entries were dropped. */
-  fileAccessTruncated: boolean;
-  /** Present only when `fileAccessTruncated` — number of distinct paths dropped by the cap. */
-  fileAccessOmittedCount?: number;
-  /** Skill/slash-command invocations, main transcript only — see `SkillInvocation`. */
-  skillInvocations: SkillInvocation[];
   subagents: SubagentNode[];
   subagentCount: number;
 }

@@ -1,12 +1,11 @@
 /**
  * Lens tabs shown inside a session shell (the persistent "band" + tab bar).
- * "turns" is Codex-only (per-turn model/duration/token table). Codex now
- * also gets "timeline" and "orchestration" (see `codex/orchestration.ts` in
- * `@junrei/core` — a Codex sub-agent is its own rollout file, not a sidecar,
- * but the Orchestration lens consumes the same `SubagentNode` forest shape
- * either way), but still has no files/skills concept, so a Codex session
- * shell shows overview/timeline/orchestration/context/turns — see
- * `CLAUDE_LENSES`/`CODEX_LENSES` below.
+ * "turns" is Codex-only (per-turn model/duration/token table). Codex gets
+ * the same tab order as Claude (overview/timeline/orchestration/context/
+ * files — see `codex/orchestration.ts` / `codex/files-skills.ts` in
+ * `@junrei/core` for how a Codex sub-agent forest and file access/skill
+ * invocations are derived), with "turns" appended last as its one extra,
+ * Codex-only tab — see `CLAUDE_LENSES`/`CODEX_LENSES` below.
  */
 export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "turns";
 
@@ -38,12 +37,13 @@ export const CLAUDE_LENSES: readonly Lens[] = [
   "files",
 ];
 
-/** Tab bar for a Codex session shell — Claude's tab position for "orchestration", no files/skills data exists to show. */
+/** Tab bar for a Codex session shell — Claude's tab order, plus "turns" (Codex-only) appended last. */
 export const CODEX_LENSES: readonly Lens[] = [
   "overview",
   "timeline",
   "orchestration",
   "context",
+  "files",
   "turns",
 ];
 

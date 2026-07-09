@@ -1,9 +1,11 @@
 import type { ContextPoint, ModelUsageSummary, TokenTotals, UsageSummary } from "../metrics.js";
+import { mergeFileAccess } from "../metrics.js";
 import { estimateCostComponents } from "../pricing/pricing.js";
 import type { SessionAnalysisCore } from "../session-analysis.js";
 import type { CompactionEvent } from "../session-data.js";
 import type { TokenUsage } from "../types.js";
 import type { CodexSessionFileRef } from "./discovery.js";
+import { computeCodexFileAccess, computeCodexSkillInvocations } from "./files-skills.js";
 import type {
   CodexRecord,
   CodexSessionMetaRecord,
@@ -419,6 +421,17 @@ export function analyzeCodexSession(
   const { callCount: toolCallCount, errorCount: toolErrorCount } = linkToolCalls(
     transcript.records,
   );
+  // This session's own file access, "merged" with an empty sub-agent map —
+  // `mergeFileAccess` still does the useful work here (sorting + the
+  // 500-path cap), and `threads` naturally comes out "main" since there's
+  // nothing to fold in yet. `getCodexSession` (server) re-derives the real
+  // merged view once it knows this session's descendant sub-agent threads —
+  // see `mergeCodexFileAccess`.
+  const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
+    computeCodexFileAccess(transcript),
+    new Map(),
+  );
+  const skillInvocations = computeCodexSkillInvocations(transcript);
   const userTurnCount =
     eventUserMessageCount > 0 ? eventUserMessageCount : fallbackUserMessageCount;
   if (firstUserPrompt === undefined) {
@@ -480,6 +493,10 @@ export function analyzeCodexSession(
     contextTimeline,
     compactions,
     parseWarningCount: transcript.warnings.length,
+    fileAccess,
+    fileAccessTruncated,
+    ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
+    skillInvocations,
     codex,
     ...(sessionMeta?.cwd !== undefined && { cwd: sessionMeta.cwd }),
     ...(sessionMeta?.git?.branch !== undefined && { gitBranch: sessionMeta.git.branch }),

@@ -15,14 +15,21 @@ import {
 } from "./router.js";
 
 describe("CODEX_LENSES", () => {
-  it("offers overview/timeline/orchestration/context/turns, in that order — Codex sub-agent threads now have a real forest, but still no files/skills data", () => {
-    expect(CODEX_LENSES).toEqual(["overview", "timeline", "orchestration", "context", "turns"]);
+  it("offers overview/timeline/orchestration/context/files/turns, in that order — Claude's tab order plus Codex-only 'turns' appended last", () => {
+    expect(CODEX_LENSES).toEqual([
+      "overview",
+      "timeline",
+      "orchestration",
+      "context",
+      "files",
+      "turns",
+    ]);
   });
 
-  it("includes 'timeline'/'orchestration', now shared with Claude, but omits Claude-only 'files'", () => {
+  it("includes 'files', now shared with Claude (fileAccess/skillInvocations are SessionAnalysisCore fields)", () => {
     expect(CODEX_LENSES).toContain("timeline");
     expect(CODEX_LENSES).toContain("orchestration");
-    expect(CODEX_LENSES).not.toContain("files");
+    expect(CODEX_LENSES).toContain("files");
   });
 });
 
