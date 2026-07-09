@@ -56,12 +56,20 @@ describe("sessionsListQuery", () => {
 });
 
 describe("subagentCellText", () => {
-  it("shows the real count for Claude Code sessions", () => {
+  it("shows the real count for Claude Code sessions when > 0", () => {
     expect(subagentCellText(claudeItem)).toBe("3");
   });
 
-  it("shows an em dash for Codex sessions instead of a misleading 0", () => {
+  it("shows an em dash instead of a literal 0 (Codex sessions have a real subagentCount too now)", () => {
     expect(subagentCellText(codexItem)).toBe("—");
+  });
+
+  it("shows an em dash for a Claude Code session with zero subagents too — 0 and 'not applicable' must read the same", () => {
+    expect(subagentCellText({ ...claudeItem, subagentCount: 0 })).toBe("—");
+  });
+
+  it("shows the real count for a Codex parent session with sub-agents", () => {
+    expect(subagentCellText({ ...codexItem, subagentCount: 2 })).toBe("2");
   });
 });
 

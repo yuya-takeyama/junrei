@@ -1,0 +1,3 @@
+{"timestamp":"2026-07-03T09:00:11.000Z","type":"session_meta","payload":{"id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","parent_thread_id":"77777777-7777-7777-7777-777777777777","agent_nickname":"TopLevelOnly","agent_role":"reviewer","cwd":"/Users/test/orchestration-proj","originator":"codex_cli_rs","cli_version":"0.50.0","source":"exec"}}
+{"timestamp":"2026-07-03T09:00:11.500Z","type":"turn_context","payload":{"turn_id":"turn-t1","cwd":"/Users/test/orchestration-proj","model":"gpt-5.5","effort":"medium"}}
+{"timestamp":"2026-07-03T09:00:12.000Z","type":"event_msg","payload":{"type":"user_message","message":"Top-level-only linkage"}}

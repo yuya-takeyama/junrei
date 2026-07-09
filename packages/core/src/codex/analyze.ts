@@ -44,6 +44,24 @@ export interface CodexTurnUsage {
   reasoningOutputTokens: number;
 }
 
+/**
+ * One `collab_agent_spawn_end` event on this session's own rollout — this
+ * session spawned a sub-agent thread. `orchestration.ts` matches these
+ * against a candidate child's own `sessionId` (== the sub-agent's own
+ * `session_meta.id`) to recover `toolUseId`/`launchLine`/`launchedAt` for the
+ * `SubagentNode` it builds.
+ */
+export interface CodexSpawnedThread {
+  /** The spawned sub-agent's own thread/session id. */
+  threadId: string;
+  callId?: string;
+  nickname?: string;
+  role?: string;
+  /** Source line of the `collab_agent_spawn_end` event in this session's own rollout. */
+  line: number;
+  timestamp?: string;
+}
+
 /** Codex-only detail, not shared with the Claude Code variant — see `session-analysis.ts`. */
 export interface CodexSessionExtras {
   originator?: string;
@@ -53,6 +71,16 @@ export interface CodexSessionExtras {
   forkedFromId?: string;
   agentRole?: string;
   agentNickname?: string;
+  /**
+   * True when `session_meta` marks this thread as a sub-agent — either
+   * `source.subagent` was present in any variant, or a `parentThreadId` was
+   * resolved (from either location) even without an explicit source marker.
+   */
+  isSubagent: boolean;
+  /** `source.subagent.thread_spawn.depth`, when the wire payload carried one. */
+  subagentDepth?: number;
+  /** Every `collab_agent_spawn_end` this session's own rollout recorded — see `CodexSpawnedThread`. */
+  spawnedThreadIds: CodexSpawnedThread[];
   /** Sum of `reasoning_output_tokens` across every `last_token_usage` delta. */
   reasoningOutputTokens: number;
   /** Latest `token_count` event's `rate_limits` snapshot, passed through as-is. */
@@ -209,6 +237,7 @@ export function analyzeCodexSession(
   const contextTimeline: ContextPoint[] = [];
   const compactions: CompactionEvent[] = [];
   const turns: CodexTurnUsage[] = [];
+  const spawnedThreadIds: CodexSpawnedThread[] = [];
 
   let firstTimestamp: string | undefined;
   let lastTimestamp: string | undefined;
@@ -325,6 +354,17 @@ export function analyzeCodexSession(
             title = event.threadName;
             break;
           }
+          case "collabSpawnEnd": {
+            spawnedThreadIds.push({
+              threadId: event.newThreadId,
+              line: record.line,
+              ...(event.callId !== undefined && { callId: event.callId }),
+              ...(event.newAgentNickname !== undefined && { nickname: event.newAgentNickname }),
+              ...(event.newAgentRole !== undefined && { role: event.newAgentRole }),
+              ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+            });
+            break;
+          }
           case "taskComplete": {
             if (openTurn !== undefined) {
               const active = openTurn;
@@ -399,8 +439,17 @@ export function analyzeCodexSession(
     costIsComplete: usage.total.costIsComplete,
   };
 
+  // A thread counts as a sub-agent when session_meta said so explicitly
+  // (source.subagent, any variant) OR a parentThreadId was resolved from
+  // either location — some schema versions may carry the latter without the
+  // former.
+  const isSubagent =
+    sessionMeta?.isSubagentSource === true || sessionMeta?.parentThreadId !== undefined;
+
   const codex: CodexSessionExtras = {
     archived: ref.archived,
+    isSubagent,
+    spawnedThreadIds,
     reasoningOutputTokens,
     turns,
     toolCallCount,
@@ -409,6 +458,9 @@ export function analyzeCodexSession(
     ...(sessionMeta?.cliVersion !== undefined && { cliVersion: sessionMeta.cliVersion }),
     ...(sessionMeta?.parentThreadId !== undefined && {
       parentThreadId: sessionMeta.parentThreadId,
+    }),
+    ...(sessionMeta?.subagentDepth !== undefined && {
+      subagentDepth: sessionMeta.subagentDepth,
     }),
     ...(sessionMeta?.forkedFromId !== undefined && { forkedFromId: sessionMeta.forkedFromId }),
     ...(sessionMeta?.agentRole !== undefined && { agentRole: sessionMeta.agentRole }),

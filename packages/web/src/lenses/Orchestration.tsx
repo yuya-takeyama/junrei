@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SessionJson } from "../api.js";
+import type { AnySessionJson } from "../api.js";
 import { MAIN_ID, type SelectedId } from "./orchestration/agentTree.js";
 import { FlameView } from "./orchestration/FlameView.js";
 import { ModelMixStrip } from "./orchestration/ModelMixStrip.js";
@@ -7,7 +7,7 @@ import { TreeView } from "./orchestration/TreeView.js";
 import { WaterfallView } from "./orchestration/WaterfallView.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
 }
 
 type ViewDial = "tree" | "waterfall" | "flame";

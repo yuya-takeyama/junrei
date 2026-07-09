@@ -133,12 +133,16 @@ export interface SessionAnalysis extends SessionAnalysisCore {
 export type ClaudeSessionAnalysis = SessionAnalysis;
 
 /**
- * Merge per-model usage summaries from the main transcript and every subagent
- * (recursively), keyed by model id — mirrors how `totalUsage` merges the
- * flat token/cost totals, but preserves the per-model breakdown so the
- * Overview lens's "cost by model" chart reflects delegated spend too.
+ * Merge per-model usage summaries from a main transcript's own usage and
+ * every node of a subagent forest (recursively), keyed by model id — mirrors
+ * how `totalUsage` merges the flat token/cost totals, but preserves the
+ * per-model breakdown so the Overview lens's "cost by model" chart reflects
+ * delegated spend too. Exported (not just used internally by
+ * `analyzeSession`) because Codex's server-side parent aggregation
+ * (`packages/server/src/sessions.ts`) needs the exact same merge over its own
+ * `SubagentNode` forest — see `codex/orchestration.ts`.
  */
-function mergeUsageByModel(
+export function mergeUsageByModel(
   main: readonly ModelUsageSummary[],
   subagents: readonly SubagentNode[],
 ): ModelUsageSummary[] {

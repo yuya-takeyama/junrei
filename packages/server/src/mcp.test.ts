@@ -107,14 +107,35 @@ describe("MCP tools", () => {
     expect(summary.subagents).toBeUndefined();
   });
 
-  it("get_subagent_tree returns a clear, non-throwing error for a Codex session", async () => {
+  it("get_subagent_tree works for a Codex session too (a leaf session with no sub-agents)", async () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_subagent_tree",
       arguments: { project: "codex", sessionId: CODEX_SESSION_ID },
     });
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("not available for Codex sessions");
+    expect(result.isError).not.toBe(true);
+    const body = JSON.parse(textOf(result)) as { subagentCount: number; subagents: unknown[] };
+    expect(body.subagentCount).toBe(0);
+    expect(body.subagents).toEqual([]);
+  });
+
+  it("get_subagent_tree returns a real sub-agent forest for a Codex parent session", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_subagent_tree",
+      arguments: {
+        project: "codex",
+        sessionId: "77777777-7777-7777-7777-777777777777",
+      },
+    });
+    expect(result.isError).not.toBe(true);
+    const body = JSON.parse(textOf(result)) as {
+      subagentCount: number;
+      subagents: Array<{ agentId: string }>;
+    };
+    expect(body.subagentCount).toBe(2);
+    expect(body.subagents).toHaveLength(1);
+    expect(body.subagents[0]?.agentId).toBe("88888888-8888-8888-8888-888888888888");
   });
 
   it("find_repetitions and get_task_executions also reject Codex sessions clearly", async () => {

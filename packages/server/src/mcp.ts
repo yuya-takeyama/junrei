@@ -1,7 +1,12 @@
-import type { CodexSessionAnalysis, SessionAnalysis } from "@junrei/core";
+import type { SessionAnalysis } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getCodexSession, getSession, listSessions } from "./sessions.js";
+import {
+  type CodexSessionAnalysisWithSubagents,
+  getCodexSession,
+  getSession,
+  listSessions,
+} from "./sessions.js";
 
 const CODEX_PROJECT = "codex";
 
@@ -31,15 +36,20 @@ function notFound(project: string, sessionId: string) {
   };
 }
 
-/** Claude-only tools (subagent tree, repetitions, task executions) have no Codex analog. */
+/**
+ * Claude-only tools (repetition detection, task executions) have no Codex
+ * analog. `get_subagent_tree` USED to be Claude-only too, but Codex sub-agent
+ * threads (`codex/orchestration.ts` in `@junrei/core`) now have a real tree
+ * — see `resolveAnalysis`/`get_subagent_tree` below.
+ */
 function notAvailableForCodex() {
   return {
     content: [
       {
         type: "text" as const,
         text:
-          "not available for Codex sessions (source: codex) — Codex CLI has no subagent " +
-          "tree, repetition detection, or task-execution log in Junrei today.",
+          "not available for Codex sessions (source: codex) — Codex CLI has no repetition " +
+          "detection or task-execution log in Junrei today.",
       },
     ],
     isError: true,
@@ -48,7 +58,7 @@ function notAvailableForCodex() {
 
 type ResolvedAnalysis =
   | { source: "claude-code"; analysis: SessionAnalysis }
-  | { source: "codex"; analysis: CodexSessionAnalysis };
+  | { source: "codex"; analysis: CodexSessionAnalysisWithSubagents };
 
 /**
  * Resolve either harness's analysis from the same `{project, sessionId}`
@@ -113,9 +123,15 @@ function toSummary(analysis: SessionAnalysis) {
   };
 }
 
-/** Codex analog of `toSummary` — same "trim the bulky series" shape, over Codex's own fields. */
-function toCodexSummary(analysis: CodexSessionAnalysis) {
-  const { contextTimeline, codex, ...rest } = analysis;
+/**
+ * Codex analog of `toSummary` — same "trim the bulky series" shape, over
+ * Codex's own fields. `subagents` (the full tree) is trimmed the same way
+ * Claude's `toSummary` trims it — `subagentCount` stays in `...rest` for the
+ * cheap "does this session delegate at all" signal; use `get_subagent_tree`
+ * for the full tree.
+ */
+function toCodexSummary(analysis: CodexSessionAnalysisWithSubagents) {
+  const { contextTimeline, codex, subagents, ...rest } = analysis;
   const { turns, ...codexRest } = codex;
   return {
     ...rest,
@@ -228,20 +244,20 @@ export function createMcpServer(): McpServer {
     "get_subagent_tree",
     {
       description:
-        "Subagent execution tree for one session: per-agent type, model, prompt preview, " +
-        "token usage, estimated cost, tool call/error counts, and nesting. Claude Code " +
-        "sessions only — Codex CLI has no subagent concept.",
+        "Subagent/sub-agent execution tree for one session: per-agent type, model, prompt " +
+        "preview, token usage, estimated cost, tool call/error counts, and nesting. Works for " +
+        'both Claude Code sessions and Codex CLI sessions (project: "codex") — a Codex ' +
+        "sub-agent is its own rollout file rather than a sidecar transcript, but resolves " +
+        "into the same tree shape.",
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
-      if (project === CODEX_PROJECT) return notAvailableForCodex();
-      const analysis = await getSession(project, sessionId);
-      return analysis === undefined
-        ? notFound(project, sessionId)
-        : jsonResult({
-            subagentCount: analysis.subagentCount,
-            subagents: analysis.subagents,
-          });
+      const resolved = await resolveAnalysis(project, sessionId);
+      if (resolved === undefined) return notFound(project, sessionId);
+      return jsonResult({
+        subagentCount: resolved.analysis.subagentCount,
+        subagents: resolved.analysis.subagents,
+      });
     },
   );
 

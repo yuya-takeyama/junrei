@@ -2,16 +2,18 @@ import type { ClaudeSessionAnalysis } from "./analyze.js";
 import type { CodexSessionAnalysis } from "./codex/analyze.js";
 
 export type { ClaudeSessionAnalysis, SessionAnalysis, SubagentNode } from "./analyze.js";
-export { analyzeSession } from "./analyze.js";
+export { analyzeSession, mergeUsageByModel } from "./analyze.js";
 export type {
   CodexRecord,
   CodexSessionAnalysis,
   CodexSessionExtras,
+  CodexSpawnedThread,
   CodexTurnUsage,
 } from "./codex/analyze.js";
 export { analyzeCodexSession } from "./codex/analyze.js";
 export type { CodexSessionFileRef } from "./codex/discovery.js";
 export { listCodexSessionFiles, resolveCodexHome } from "./codex/discovery.js";
+export { buildCodexSubagentForest } from "./codex/orchestration.js";
 export type { CodexTranscript } from "./codex/parser.js";
 export { parseCodexTranscriptFile } from "./codex/parser.js";
 export { buildCodexTimeline, getCodexRecordDetail } from "./codex/timeline.js";

@@ -1,4 +1,4 @@
-import type { ModelUsageSummary, SessionJson, SubagentNodeJson } from "../../api.js";
+import type { AnySessionJson, ModelUsageSummary, SubagentNodeJson } from "../../api.js";
 
 /** "main" (the root transcript) or a subagent's `agentId` — the tree's selection unit. */
 export type SelectedId = string;
@@ -154,7 +154,7 @@ export function displayName(node: SubagentNodeJson): string {
 }
 
 /** Session wall-clock span (ms) for positioning waterfall bars — undefined if unusable. */
-export function sessionSpan(session: SessionJson): { start: number; end: number } | undefined {
+export function sessionSpan(session: AnySessionJson): { start: number; end: number } | undefined {
   if (session.startedAt === undefined || session.endedAt === undefined) return undefined;
   const start = Date.parse(session.startedAt);
   const end = Date.parse(session.endedAt);
@@ -163,7 +163,7 @@ export function sessionSpan(session: SessionJson): { start: number; end: number 
 }
 
 /** Cost split by main vs. delegated (every subagent, recursively), rounded to whole percent. */
-export function mainDelegatedSplit(session: SessionJson): {
+export function mainDelegatedSplit(session: AnySessionJson): {
   mainPct: number;
   delegatedPct: number;
 } {

@@ -68,6 +68,44 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
     ),
     1_767_193_999,
   ],
+  // Orchestration fixtures (see the "getCodexSession — sub-agent
+  // orchestration" describe block below for the detailed forest/aggregation
+  // assertions): 77777777 spawns 88888888
+  // (Aquinas, depth 1), which spawns 99999999 (Scout, depth 2). Stamped
+  // NEWER than every fixture above so the parent (77777777, the only one of
+  // the three that's listable — the sub-agents are excluded) sorts first in
+  // "all", without disturbing the interleaving asserted above.
+  [
+    join(
+      CODEX_HOME,
+      "sessions/2026/07/03/rollout-2026-07-03T09-00-00-77777777-7777-7777-7777-777777777777.jsonl",
+    ),
+    1_767_194_100,
+  ],
+  [
+    join(
+      CODEX_HOME,
+      "sessions/2026/07/03/rollout-2026-07-03T09-00-05-88888888-8888-8888-8888-888888888888.jsonl",
+    ),
+    1_767_194_150,
+  ],
+  [
+    join(
+      CODEX_HOME,
+      "sessions/2026/07/03/rollout-2026-07-03T09-00-07-99999999-9999-9999-9999-999999999999.jsonl",
+    ),
+    1_767_194_200,
+  ],
+  // Orphaned sub-agent (thread_spawn parent 55555555 has no rollout in the
+  // pool): must be rescued into the list, not silently dropped. Stamped
+  // OLDEST so it appends to the end of the merged order asserted above.
+  [
+    join(
+      CODEX_HOME,
+      "sessions/2026/07/01/rollout-2026-07-01T08-00-00-66666666-6666-6666-6666-666666666666.jsonl",
+    ),
+    1_767_193_100,
+  ],
 ];
 
 async function stampFixtureMtimes() {
@@ -99,15 +137,37 @@ describe("listSessions (source filter + Codex merge)", () => {
     }
   });
 
-  it("source: 'codex' lists only Codex sessions, skipping the legacy-format fixture", async () => {
+  it("source: 'codex' lists only Codex sessions, skipping the legacy-format fixture and excluding sub-agent sessions", async () => {
     const items = await listSessions(50, "codex");
-    expect(items.length).toBe(3); // 11111111, 22222222, 33333333 (archived) — 44444444 is legacy, skipped.
+    // 11111111, 22222222, 33333333 (archived), 77777777 (parent), 66666666
+    // (orphaned sub-agent, rescued) — 44444444 is legacy, skipped;
+    // 88888888/99999999 (77777777's sub-agents) are excluded from the list —
+    // they surface inside 77777777's own subagentCount/Orchestration data
+    // instead, same as Claude sidecars.
+    expect(items.length).toBe(5);
     for (const item of items) {
       expect(item.source).toBe("codex");
       expect(item.projectDirName).toBe("codex");
-      expect(item.subagentCount).toBe(0);
     }
     expect(items.some((i) => i.sessionId === "44444444-4444-4444-4444-444444444444")).toBe(false);
+    expect(items.some((i) => i.sessionId === "88888888-8888-8888-8888-888888888888")).toBe(false);
+    expect(items.some((i) => i.sessionId === "99999999-9999-9999-9999-999999999999")).toBe(false);
+
+    const leaf = items.find((i) => i.sessionId === "11111111-1111-1111-1111-111111111111");
+    expect(leaf?.subagentCount).toBe(0);
+
+    const parent = items.find((i) => i.sessionId === "77777777-7777-7777-7777-777777777777");
+    expect(parent?.subagentCount).toBe(2); // Aquinas (depth 1) + Scout (depth 2)
+  });
+
+  it("rescues a sub-agent whose parent rollout is missing into the list instead of dropping it", async () => {
+    const items = await listSessions(50, "codex");
+    const orphan = items.find((i) => i.sessionId === "66666666-6666-6666-6666-666666666666");
+    // Its thread_spawn parent (55555555…) has no rollout in the pool, so the
+    // session would otherwise be invisible everywhere and its cost lost.
+    expect(orphan).toBeDefined();
+    expect(orphan?.subagentCount).toBe(0);
+    expect(orphan?.firstUserPrompt).toBe("Orphaned sub-agent prompt");
   });
 
   it("dedups a session present both live and archived — live wins even when archived is newer", async () => {
@@ -136,25 +196,31 @@ describe("listSessions (source filter + Codex merge)", () => {
 
   it('source "all" merges both sets, newest first by file mtime, limit applied after the merge', async () => {
     // Fixture mtimes (see the test setup that touches these files) interleave
-    // Claude and Codex sessions: codex-33333333(archived) > claude-33333333 >
-    // codex-22222222 > claude-22222222 > codex-11111111 > claude-11111111.
+    // Claude and Codex sessions: codex-77777777 (newest — the orchestration
+    // parent fixture) > codex-33333333(archived) > claude-33333333 >
+    // codex-22222222 > claude-22222222 > codex-11111111 > claude-11111111 >
+    // codex-66666666 (oldest — the rescued orphan sub-agent).
+    // 88888888/99999999 don't appear — they're 77777777's sub-agents,
+    // excluded from the list.
     const all = await listSessions(50, "all");
-    expect(all.length).toBe(6);
+    expect(all.length).toBe(8);
     expect(all.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "codex:77777777",
       "codex:33333333",
       "claude-code:33333333",
       "codex:22222222",
       "claude-code:22222222",
       "codex:11111111",
       "claude-code:11111111",
+      "codex:66666666",
     ]);
 
     // limit=3 must cut the *merged* series, not take 3 from each source first.
     const limited = await listSessions(3, "all");
     expect(limited.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "codex:77777777",
       "codex:33333333",
       "claude-code:33333333",
-      "codex:22222222",
     ]);
   });
 
@@ -199,6 +265,9 @@ describe("getCodexSession", () => {
     expect(analysis).toBeDefined();
     expect(analysis?.source).toBe("codex");
     expect(analysis?.codex.originator).toBe("codex_cli_rs");
+    // No sub-agents — this fixture is a leaf session.
+    expect(analysis?.subagents).toEqual([]);
+    expect(analysis?.subagentCount).toBe(0);
   });
 
   it("returns undefined for an unknown session id", async () => {
@@ -209,5 +278,89 @@ describe("getCodexSession", () => {
   it("returns undefined for a legacy-format transcript", async () => {
     const analysis = await getCodexSession("44444444-4444-4444-4444-444444444444");
     expect(analysis).toBeUndefined();
+  });
+});
+
+describe("getCodexSession — sub-agent orchestration (77777777 -> 88888888 -> 99999999)", () => {
+  let previousCodexHome: string | undefined;
+
+  beforeAll(() => {
+    previousCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = CODEX_HOME;
+  });
+
+  afterAll(() => {
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+  });
+
+  it("attaches the direct + nested sub-agent forest to the parent, with recursive subagentCount", async () => {
+    const parent = await getCodexSession("77777777-7777-7777-7777-777777777777");
+    expect(parent).toBeDefined();
+    expect(parent?.subagents).toHaveLength(1);
+    expect(parent?.subagentCount).toBe(2); // Aquinas (direct) + Scout (nested under Aquinas)
+
+    const aquinas = parent?.subagents[0];
+    expect(aquinas?.agentId).toBe("88888888-8888-8888-8888-888888888888");
+    expect(aquinas?.description).toBe("Aquinas");
+    expect(aquinas?.agentType).toBe("explorer");
+    expect(aquinas?.children).toHaveLength(1);
+    expect(aquinas?.children[0]?.agentId).toBe("99999999-9999-9999-9999-999999999999");
+    expect(aquinas?.children[0]?.description).toBe("Scout");
+  });
+
+  it("recursively aggregates totalUsage/cost across the whole tree (Claude parity), without mutating the cached child analysis", async () => {
+    const parent = await getCodexSession("77777777-7777-7777-7777-777777777777");
+    const child = await getCodexSession("88888888-8888-8888-8888-888888888888");
+    const grandchild = await getCodexSession("99999999-9999-9999-9999-999999999999");
+    expect(parent).toBeDefined();
+    expect(child).toBeDefined();
+    expect(grandchild).toBeDefined();
+    if (parent === undefined || child === undefined || grandchild === undefined) return;
+
+    // Parent's recursive total = its own usage + child's own usage +
+    // grandchild's own usage — exactly, not double-counted.
+    const expectedInputTokens =
+      parent.usage.total.inputTokens +
+      child.usage.total.inputTokens +
+      grandchild.usage.total.inputTokens;
+    expect(parent.totalUsage.inputTokens).toBe(expectedInputTokens);
+    expect(parent.totalUsage.costUsd).toBeGreaterThan(parent.usage.total.costUsd);
+
+    // Fetching the parent doesn't mutate the child's OWN cached analysis:
+    // the child's totalUsage independently aggregates only itself +
+    // grandchild (not the parent's usage bleeding in).
+    expect(child.totalUsage.inputTokens).toBe(
+      child.usage.total.inputTokens + grandchild.usage.total.inputTokens,
+    );
+  });
+
+  it("merges totalUsageByModel across the tree, including the sub-agents' own models", async () => {
+    const parent = await getCodexSession("77777777-7777-7777-7777-777777777777");
+    expect(parent).toBeDefined();
+    if (parent === undefined) return;
+
+    const models = parent.totalUsageByModel.map((m) => m.model);
+    expect(models).toContain("gpt-5.5"); // parent's own turn_context model
+    expect(models).toContain("gpt-5.5-explorer"); // Aquinas's model
+    expect(models).toContain("gpt-5.5-mini"); // Scout's model
+  });
+
+  it("a sub-agent fetched directly still shows its OWN nested children (Aquinas -> Scout)", async () => {
+    const aquinas = await getCodexSession("88888888-8888-8888-8888-888888888888");
+    expect(aquinas).toBeDefined();
+    expect(aquinas?.subagents).toHaveLength(1);
+    expect(aquinas?.subagents[0]?.agentId).toBe("99999999-9999-9999-9999-999999999999");
+    expect(aquinas?.subagentCount).toBe(1);
+  });
+
+  it("a leaf sub-agent (Scout, no further delegation) has an empty forest", async () => {
+    const scout = await getCodexSession("99999999-9999-9999-9999-999999999999");
+    expect(scout).toBeDefined();
+    expect(scout?.subagents).toEqual([]);
+    expect(scout?.subagentCount).toBe(0);
   });
 });

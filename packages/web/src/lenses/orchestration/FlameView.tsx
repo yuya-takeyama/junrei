@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 import { formatTokens, formatUsd } from "../../format.js";
 import { MAIN_ID, type SelectedId } from "./agentTree.js";
 import { buildFlameRows, type FlameBlock, type FlameMetric } from "./flame.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
   selected: SelectedId;
   onSelect: (id: SelectedId) => void;
 }

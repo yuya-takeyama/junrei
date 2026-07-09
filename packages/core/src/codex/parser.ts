@@ -7,6 +7,7 @@ import {
   type CodexTokenUsage,
   codexEnvelopeSchema,
   codexEventAgentMessageSchema,
+  codexEventCollabAgentSpawnEndSchema,
   codexEventExecCommandEndSchema,
   codexEventTaskCompleteSchema,
   codexEventTaskStartedSchema,
@@ -28,6 +29,7 @@ import {
   codexResponseReasoningSchema,
   codexResponseWebSearchCallSchema,
   codexSessionMetaPayloadSchema,
+  codexSessionMetaSourceObjectSchema,
   codexTurnContextPayloadSchema,
 } from "./schema.js";
 
@@ -53,13 +55,29 @@ export interface CodexSessionMetaRecord extends CodexRecordBase {
   /** `session_id` when present, else `id`. */
   sessionId: string;
   forkedFromId?: string;
+  /**
+   * Parent thread id, from whichever location the wire payload carries it —
+   * top-level `parent_thread_id`, or (current schema)
+   * `source.subagent.thread_spawn.parent_thread_id` — preferring top-level
+   * when both are present. See `extractSubagentSourceLinkage` below.
+   */
   parentThreadId?: string;
+  /**
+   * True when `source.subagent` is present in any variant (`thread_spawn`,
+   * `review`, `compact`) — marks this thread as a sub-agent even when no
+   * `parentThreadId` could be resolved (the `review`/`compact` variants
+   * carry no parent id).
+   */
+  isSubagentSource: boolean;
+  /** `source.subagent.thread_spawn.depth`, when present. */
+  subagentDepth?: number;
   cwd?: string;
   originator?: string;
   cliVersion?: string;
   source?: unknown;
+  /** `agent_nickname`, from the top level or `source.subagent.thread_spawn`, top-level preferred. */
   agentNickname?: string;
-  /** `agent_role`, falling back to the legacy `agent_type` alias. */
+  /** `agent_role` (or legacy `agent_type`), from the top level or `source.subagent.thread_spawn`, top-level preferred. */
   agentRole?: string;
   agentPath?: string;
   modelProvider?: string;
@@ -140,6 +158,13 @@ export type CodexEventMsgInner =
     }
   | { kind: "execCommandEnd"; callId: string; turnId?: string; exitCode?: number }
   | { kind: "threadNameUpdated"; threadId?: string; threadName: string }
+  | {
+      kind: "collabSpawnEnd";
+      newThreadId: string;
+      callId?: string;
+      newAgentNickname?: string;
+      newAgentRole?: string;
+    }
   | { kind: "other"; rawType: string };
 
 export interface CodexEventMsgRecord extends CodexRecordBase {
@@ -230,6 +255,37 @@ function otherRecord(
 // Envelope-payload normalizers
 // ---------------------------------------------------------------------------
 
+/**
+ * Sub-agent linkage carried in `session_meta.source` when it's the sub-agent
+ * object shape (`{subagent: {thread_spawn: {...}}}` or the parentless
+ * `review`/`compact` variants) — `undefined` fields when `source` is the
+ * plain-string shape most (non-sub-agent) sessions use, which fails this
+ * parse harmlessly.
+ */
+interface SubagentSourceLinkage {
+  isSubagentSource: boolean;
+  parentThreadId?: string;
+  depth?: number;
+  agentPath?: string;
+  agentNickname?: string;
+  agentRole?: string;
+}
+
+function extractSubagentSourceLinkage(source: unknown): SubagentSourceLinkage {
+  const parsed = codexSessionMetaSourceObjectSchema.safeParse(source);
+  const subagent = parsed.success ? parsed.data.subagent : undefined;
+  if (subagent === undefined) return { isSubagentSource: false };
+  const spawn = subagent.thread_spawn;
+  return {
+    isSubagentSource: true,
+    ...(spawn?.parent_thread_id !== undefined && { parentThreadId: spawn.parent_thread_id }),
+    ...(spawn?.depth !== undefined && { depth: spawn.depth }),
+    ...(spawn?.agent_path != null && { agentPath: spawn.agent_path }),
+    ...(spawn?.agent_nickname !== undefined && { agentNickname: spawn.agent_nickname }),
+    ...(spawn?.agent_role !== undefined && { agentRole: spawn.agent_role }),
+  };
+}
+
 function normalizeSessionMeta(
   payload: unknown,
   line: number,
@@ -238,23 +294,32 @@ function normalizeSessionMeta(
   const parsed = codexSessionMetaPayloadSchema.safeParse(payload);
   if (!parsed.success) return otherRecord(line, timestamp, "session_meta");
   const p = parsed.data;
-  const agentRole = p.agent_role ?? p.agent_type;
+  // Top-level fields win when present (the schema Codex Desktop currently
+  // writes); `source.subagent.thread_spawn` is the fallback/duplicate — see
+  // `extractSubagentSourceLinkage`.
+  const subagentSource = extractSubagentSourceLinkage(p.source);
+  const parentThreadId = p.parent_thread_id ?? subagentSource.parentThreadId;
+  const agentNickname = p.agent_nickname ?? subagentSource.agentNickname;
+  const agentRole = p.agent_role ?? p.agent_type ?? subagentSource.agentRole;
+  const agentPath = p.agent_path ?? subagentSource.agentPath;
   const record: CodexSessionMetaRecord = {
     line,
     type: "sessionMeta",
     id: p.id,
     sessionId: p.session_id ?? p.id,
     hasBaseInstructions: p.base_instructions !== undefined,
+    isSubagentSource: subagentSource.isSubagentSource,
     ...(timestamp !== undefined && { timestamp }),
     ...(p.forked_from_id !== undefined && { forkedFromId: p.forked_from_id }),
-    ...(p.parent_thread_id !== undefined && { parentThreadId: p.parent_thread_id }),
+    ...(parentThreadId !== undefined && { parentThreadId }),
+    ...(subagentSource.depth !== undefined && { subagentDepth: subagentSource.depth }),
     ...(p.cwd !== undefined && { cwd: p.cwd }),
     ...(p.originator !== undefined && { originator: p.originator }),
     ...(p.cli_version !== undefined && { cliVersion: p.cli_version }),
     ...(p.source !== undefined && { source: p.source }),
-    ...(p.agent_nickname !== undefined && { agentNickname: p.agent_nickname }),
+    ...(agentNickname !== undefined && { agentNickname }),
     ...(agentRole !== undefined && { agentRole }),
-    ...(p.agent_path !== undefined && { agentPath: p.agent_path }),
+    ...(agentPath !== undefined && { agentPath }),
     ...(p.model_provider !== undefined && { modelProvider: p.model_provider }),
     ...(p.git !== undefined && {
       git: {
@@ -523,6 +588,24 @@ function parseEventMsgInner(payload: unknown, rawType: string): CodexEventMsgInn
         ...(parsed.data.thread_id !== undefined && { threadId: parsed.data.thread_id }),
       };
     }
+    case "collab_agent_spawn_end": {
+      const parsed = codexEventCollabAgentSpawnEndSchema.safeParse(payload);
+      if (!parsed.success) return { kind: "other", rawType };
+      return {
+        kind: "collabSpawnEnd",
+        newThreadId: parsed.data.new_thread_id,
+        ...(parsed.data.call_id !== undefined && { callId: parsed.data.call_id }),
+        ...(parsed.data.new_agent_nickname !== undefined && {
+          newAgentNickname: parsed.data.new_agent_nickname,
+        }),
+        ...(parsed.data.new_agent_role !== undefined && {
+          newAgentRole: parsed.data.new_agent_role,
+        }),
+      };
+    }
+    // collab_agent_spawn_begin, collab_agent_interaction_begin/end,
+    // collab_waiting_begin/end, collab_close_begin/end, sub_agent_activity —
+    // tolerated generically via the default case below.
     default:
       return { kind: "other", rawType };
   }
