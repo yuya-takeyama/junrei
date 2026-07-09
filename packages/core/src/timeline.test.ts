@@ -59,9 +59,15 @@ describe("buildTimeline", () => {
     const data = await loadMainData();
     const entries = await buildTimeline(data);
     const userEntries = entries.filter((e): e is UserEntry => e.kind === "user");
-    // Only 2 genuine human turns; tool_result-only user records are excluded.
-    expect(userEntries).toHaveLength(2);
+    // 3 genuine human turns (the 3rd being a slash-command record, whose raw
+    // `<command-name>...</command-name>` text is a real user record with
+    // `promptText` set — the parser makes no special case for it); tool_result-only
+    // user records are excluded.
+    expect(userEntries).toHaveLength(3);
     expect(userEntries[1]?.text).toBe("continue please");
+    expect(userEntries[2]?.text).toContain(
+      "<command-name>/cost-efficient-delegation</command-name>",
+    );
   });
 
   it("captures thinking blocks by char count only", async () => {
@@ -115,7 +121,9 @@ describe("buildTimeline", () => {
     const assistantTexts = entries.filter(
       (e): e is AssistantTextEntry => e.kind === "assistant-text",
     );
-    expect(assistantTexts).toHaveLength(1);
+    // 2 now: "All done." (line 27) and "Applying delegation guidance." (line 31,
+    // after the appended Skill-invocation turn).
+    expect(assistantTexts).toHaveLength(2);
     const done = assistantTexts[0];
     expect(done?.text).toBe("All done.");
     expect(done?.model).toBe("claude-fable-5");
@@ -203,12 +211,13 @@ describe("buildTimeline", () => {
     // Overridden by the subagent's own observed model (ground truth beats the
     // parent's requested-model alias).
     expect(launch?.model).toBe("claude-haiku-4-5-20251001");
-    expect(launch?.outputTokens).toBe(20 + 30);
+    // 20+30+10 — includes the sidecar's 2nd Read (added for file-access merge coverage).
+    expect(launch?.outputTokens).toBe(20 + 30 + 10);
     expect(launch?.costUsd).toBeGreaterThan(0);
-    expect(launch?.toolCallCount).toBe(1);
+    expect(launch?.toolCallCount).toBe(2);
     expect(launch?.toolErrorCount).toBe(0);
-    // Subagent's own first -> last timestamp (01:02:32 -> 01:02:50).
-    expect(launch?.durationMs).toBe(18_000);
+    // Subagent's own first -> last timestamp (01:02:32 -> 01:02:57).
+    expect(launch?.durationMs).toBe(25_000);
   });
 
   it("keeps correct linkage when a tool_result precedes its tool_use in file order", async () => {
@@ -283,7 +292,8 @@ describe("buildTimeline", () => {
     expect(subData).toBeDefined();
     const entries = await buildTimeline(subData as SessionData, { mainFilePath: SESSION_FILE });
     const kinds = entries.map((e) => e.kind);
-    expect(kinds).toEqual(["user", "tool-call", "assistant-text"]);
+    // A 2nd tool-call (Read /p/foo.ts) was appended for file-access merge coverage.
+    expect(kinds).toEqual(["user", "tool-call", "assistant-text", "tool-call"]);
     const user = entries[0] as UserEntry;
     expect(user.text).toBe("explore stuff");
     const assistantText = entries[2] as AssistantTextEntry;
@@ -336,8 +346,8 @@ describe("getRecordDetail", () => {
     if (detail?.kind !== "subagent-launch") throw new Error("expected subagent-launch");
     expect(detail.agentId).toBe(AGENT_ID);
     expect(detail.model).toBe("claude-haiku-4-5-20251001");
-    expect(detail.toolCallCount).toBe(1);
-    expect(detail.durationMs).toBe(18_000);
+    expect(detail.toolCallCount).toBe(2);
+    expect(detail.durationMs).toBe(25_000);
   });
 
   it("returns compaction detail", async () => {

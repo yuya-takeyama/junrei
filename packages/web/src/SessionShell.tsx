@@ -4,11 +4,12 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { client, type SessionJson } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
 import { ContextCost } from "./lenses/ContextCost.js";
+import { FilesSkills } from "./lenses/FilesSkills.js";
 import { Orchestration } from "./lenses/Orchestration.js";
 import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
-import { LENS_LABEL, normalizeLens, parseRecordParam, recordPath, sessionPath } from "./router.js";
+import { normalizeLens, parseRecordParam, recordPath, sessionPath } from "./router.js";
 import { Band } from "./shell/Band.js";
 import { LensTabs } from "./shell/LensTabs.js";
 import { StatStrip } from "./shell/StatStrip.js";
@@ -164,18 +165,9 @@ export function SessionShell() {
         {error === null && session !== null && lens === "context" && (
           <ContextCost session={session} />
         )}
-        {error === null &&
-          session !== null &&
-          lens !== "overview" &&
-          lens !== "timeline" &&
-          lens !== "orchestration" &&
-          lens !== "context" && (
-            <div className="hpad mt16">
-              <div className="pan tile mut">
-                {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
-              </div>
-            </div>
-          )}
+        {error === null && session !== null && lens === "files" && (
+          <FilesSkills session={session} />
+        )}
       </div>
       {record !== undefined && (
         <RecordDetail project={project} id={id} line={record} closeHref={closeRecordHref} />

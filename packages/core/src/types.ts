@@ -89,6 +89,13 @@ export interface ToolResultInfo {
   isError: boolean;
   /** Extracted text content (truncated), for error classification. */
   text: string;
+  /**
+   * Untruncated character length of the extracted result text, captured
+   * alongside the capped `text` so callers that need "how much actually came
+   * back" (e.g. the Files & skills lens's Skill-invocation `resultChars`)
+   * never mistake the parser's display cap for the tool's true output size.
+   */
+  fullTextLength: number;
 }
 
 export interface AssistantRecord extends RecordBase {

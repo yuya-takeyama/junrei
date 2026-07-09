@@ -5,6 +5,7 @@ import { type AgentJson, client, type SessionJson, type SubagentNodeJson } from 
 import { cacheHitRate, formatDuration, formatTime, formatTokens, formatUsd } from "./format.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
+import { FilesSkills } from "./lenses/FilesSkills.js";
 import { FirstPromptPanel } from "./lenses/FirstPromptPanel.js";
 import {
   displayName,
@@ -404,13 +405,20 @@ export function AgentShell() {
             <ContextCost session={agent} contextHref={agentPath(project, id, agentId, "context")} />
           </div>
         )}
-        {ready && lens !== "overview" && lens !== "timeline" && lens !== "context" && (
-          <div className="hpad mt16">
-            <div className="pan tile mut">
-              {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
-            </div>
-          </div>
+        {session !== null && agent !== null && node !== undefined && lens === "files" && (
+          <FilesSkills session={agent} />
         )}
+        {ready &&
+          lens !== "overview" &&
+          lens !== "timeline" &&
+          lens !== "context" &&
+          lens !== "files" && (
+            <div className="hpad mt16">
+              <div className="pan tile mut">
+                {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
+              </div>
+            </div>
+          )}
       </div>
       {record !== undefined && (
         <RecordDetail

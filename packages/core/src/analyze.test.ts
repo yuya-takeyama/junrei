@@ -23,9 +23,10 @@ describe("analyzeSession", () => {
     expect(analysis.firstUserPrompt).toBe("Fix the bug in foo.ts");
 
     // Turns & messages: msg_1 spans two JSONL records but counts once, and
-    // task-notification records are NOT user turns.
-    expect(analysis.userTurnCount).toBe(2);
-    expect(analysis.apiMessageCount).toBe(11);
+    // task-notification records are NOT user turns. A 3rd turn (line 28) is
+    // opened by a slash-command user record.
+    expect(analysis.userTurnCount).toBe(3);
+    expect(analysis.apiMessageCount).toBe(13);
     expect(analysis.models).toEqual(["claude-fable-5"]);
 
     // A retried api_error mid-session doesn't derail parsing.
@@ -34,27 +35,28 @@ describe("analyzeSession", () => {
     // Malformed trailing line is a warning, not an error.
     expect(analysis.parseWarningCount).toBe(1);
 
-    // Duration from first to last timestamped record.
+    // Duration from first to last timestamped record (now 01:03:12, after the
+    // appended Skill-invocation turn).
     expect(analysis.startedAt).toBe("2026-07-09T01:00:00.000Z");
-    expect(analysis.durationMs).toBe(3 * 60 * 1000);
+    expect(analysis.durationMs).toBe(3 * 60 * 1000 + 12_000);
   });
 
   it("deduplicates usage by message id and prices it", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
     const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
     expect(fable).toBeDefined();
-    // input: 100+120+130+140+150+160+170+175+180+190+200 = 1715 (msg_1 counted once)
-    expect(fable?.inputTokens).toBe(1715);
-    expect(fable?.outputTokens).toBe(370);
+    // input: 100+120+130+140+150+160+170+175+180+190+200+50+40 = 1805 (msg_1 counted once)
+    expect(fable?.inputTokens).toBe(1805);
+    expect(fable?.outputTokens).toBe(405);
     expect(fable?.cacheCreationTokens).toBe(715);
-    expect(fable?.messageCount).toBe(11);
+    expect(fable?.messageCount).toBe(13);
     expect(fable?.costUsd).toBeGreaterThan(0);
     expect(analysis.usage.total.costIsComplete).toBe(true);
   });
 
   it("builds the context timeline and captures compaction", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
-    expect(analysis.contextTimeline).toHaveLength(11);
+    expect(analysis.contextTimeline).toHaveLength(13);
     const first = analysis.contextTimeline[0];
     expect(first?.contextTokens).toBe(100 + 0 + 200);
     expect(analysis.compactions).toHaveLength(1);
@@ -111,7 +113,8 @@ describe("analyzeSession", () => {
     expect(agent?.toolUseId).toBe("toolu_agent1");
     expect(agent?.model).toBe("claude-haiku-4-5-20251001");
     expect(agent?.promptPreview).toBe("explore stuff");
-    expect(agent?.usage.total.inputTokens).toBe(110);
+    // 50+60+45 = 155 (the sidecar's 2nd Read, added for file-access merge coverage).
+    expect(agent?.usage.total.inputTokens).toBe(155);
     expect(agent?.children).toEqual([]);
 
     // Launch-side linkage: the Agent tool_use is at line 21 of the main
@@ -130,7 +133,7 @@ describe("analyzeSession", () => {
     expect(agent?.launchedAt).toBe("2026-07-09T01:02:05.000Z");
 
     // Total usage = main + subagent.
-    expect(analysis.totalUsage.inputTokens).toBe(1715 + 110);
+    expect(analysis.totalUsage.inputTokens).toBe(1805 + 155);
     expect(analysis.totalUsage.costUsd).toBeGreaterThan(analysis.usage.total.costUsd);
   });
 
@@ -148,7 +151,7 @@ describe("analyzeSession", () => {
 
     // Subagent-only model must show up too, with its own priced cost.
     expect(haikuMerged).toBeDefined();
-    expect(haikuMerged?.inputTokens).toBe(110);
+    expect(haikuMerged?.inputTokens).toBe(155);
     expect(haikuMerged?.costUsd).toBeGreaterThan(0);
 
     // Every dollar in totalUsage.costUsd must be attributed to some model.
@@ -163,15 +166,17 @@ describe("analyzeSession", () => {
 
   it("builds per-turn token composition attributed by prompt line", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
-    // 2 user prompts (line 1, line 20) → 2 turns; every api message
-    // (apiMessageCount 11) is attributed to exactly one of them.
-    expect(analysis.turnUsage).toHaveLength(2);
-    const [turn1, turn2] = analysis.turnUsage;
+    // 3 user prompts (line 1, line 20, line 28 — the slash-command record) →
+    // 3 turns; every api message (apiMessageCount 13) is attributed to
+    // exactly one of them.
+    expect(analysis.turnUsage).toHaveLength(3);
+    const [turn1, turn2, turn3] = analysis.turnUsage;
     expect(turn1?.line).toBe(1);
     expect(turn2?.line).toBe(20);
-    expect((turn1?.apiMessageCount ?? 0) + (turn2?.apiMessageCount ?? 0)).toBe(
-      analysis.apiMessageCount,
-    );
+    expect(turn3?.line).toBe(28);
+    expect(
+      (turn1?.apiMessageCount ?? 0) + (turn2?.apiMessageCount ?? 0) + (turn3?.apiMessageCount ?? 0),
+    ).toBe(analysis.apiMessageCount);
 
     // Turn 1 = msg_1..msg_7b (everything between line 1 and line 20).
     expect(turn1?.apiMessageCount).toBe(8);
@@ -180,17 +185,24 @@ describe("analyzeSession", () => {
     expect(turn1?.cacheReadTokens).toBe(0 + 300 + 310 + 320 + 330 + 340 + 350 + 355);
     expect(turn1?.cacheCreationTokens).toBe(200 + 10 + 5);
 
-    // Turn 2 = msg_8, msg_10, msg_9 (everything after line 20).
+    // Turn 2 = msg_8, msg_10, msg_9 (everything between line 20 and line 28).
     expect(turn2?.apiMessageCount).toBe(3);
     expect(turn2?.inputTokens).toBe(180 + 200 + 190);
     expect(turn2?.outputTokens).toBe(60 + 10 + 80);
     expect(turn2?.cacheReadTokens).toBe(9000 + 9200 + 9500);
     expect(turn2?.cacheCreationTokens).toBe(500);
 
+    // Turn 3 = msg_11 (Skill call), msg_12 (everything after line 28).
+    expect(turn3?.apiMessageCount).toBe(2);
+    expect(turn3?.inputTokens).toBe(50 + 40);
+    expect(turn3?.outputTokens).toBe(20 + 15);
+    expect(turn3?.cacheReadTokens).toBe(9600 + 9700);
+    expect(turn3?.cacheCreationTokens).toBe(0);
+
     // Component sums across turns reconcile exactly with the model-level totals.
     const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
     const sumField = (field: "inputTokens" | "outputTokens" | "cacheCreationTokens") =>
-      (turn1?.[field] ?? 0) + (turn2?.[field] ?? 0);
+      (turn1?.[field] ?? 0) + (turn2?.[field] ?? 0) + (turn3?.[field] ?? 0);
     expect(sumField("inputTokens")).toBe(fable?.inputTokens);
     expect(sumField("outputTokens")).toBe(fable?.outputTokens);
     expect(sumField("cacheCreationTokens")).toBe(fable?.cacheCreationTokens);
@@ -256,6 +268,56 @@ describe("analyzeSession", () => {
     expect(foregroundBashes[0]?.name).toBe("pnpm test");
     expect(foregroundBashes[0]?.status).toBe("failed");
     expect(foregroundBashes[0]?.durationMs).toBe(2_000);
+  });
+
+  it("merges file access across the main transcript and its subagent", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    expect(analysis.fileAccessTruncated).toBe(false);
+    expect(analysis.fileAccessOmittedCount).toBeUndefined();
+
+    const byPath = new Map(analysis.fileAccess.map((e) => [e.path, e]));
+
+    // /p/foo.ts: main reads (lines 3, 12, 14, 16) + 1 main edit (line 10),
+    // plus the subagent's own extra Read of the same path — "both" threads,
+    // reads/edits summed, firstTouchLine from the MAIN transcript only.
+    const foo = byPath.get("/p/foo.ts");
+    expect(foo?.threads).toBe("both");
+    expect(foo?.reads).toBe(5);
+    expect(foo?.edits).toBe(1);
+    expect(foo?.firstTouchLine).toBe(3);
+    expect(foo?.firstTouchTimestamp).toBe("2026-07-09T01:00:06.000Z");
+
+    // /p/bar.ts: touched only by the subagent — "subagent" thread, no
+    // firstTouchLine (that field is reserved for main-transcript provenance).
+    const bar = byPath.get("/p/bar.ts");
+    expect(bar?.threads).toBe("subagent");
+    expect(bar?.reads).toBe(1);
+    expect(bar?.edits).toBe(0);
+    expect(bar?.firstTouchLine).toBeUndefined();
+    expect(bar?.firstTouchTimestamp).toBe("2026-07-09T01:02:40.000Z");
+  });
+
+  it("extracts skill and slash-command invocations from the main transcript", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+    expect(analysis.skillInvocations).toHaveLength(2);
+    const [command, skill] = analysis.skillInvocations;
+
+    // The slash-command user record at line 28 opens turn 3.
+    expect(command?.kind).toBe("command");
+    expect(command?.name).toBe("/cost-efficient-delegation");
+    expect(command?.argsPreview).toBe("focus on subagent cost");
+    expect(command?.line).toBe(28);
+    expect(command?.userTurn).toBe(3);
+
+    // The Skill tool_use at line 29, same turn, with its full (uncapped)
+    // result length surfaced via the parser's fullTextLength capture (the
+    // tool_result content is 2200 chars, well past the 2000-char display cap).
+    expect(skill?.kind).toBe("skill");
+    expect(skill?.name).toBe("cost-efficient-delegation");
+    expect(skill?.argsPreview).toBe("focus on subagent cost");
+    expect(skill?.line).toBe(29);
+    expect(skill?.userTurn).toBe(3);
+    expect(skill?.resultChars).toBe(2200);
   });
 });
 
