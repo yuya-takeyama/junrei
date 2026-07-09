@@ -1,10 +1,10 @@
-import type { SessionJson } from "../api.js";
+import type { AnySessionJson } from "../api.js";
 import { ContextGrowthChart } from "./ContextGrowthChart.js";
 import { CostByModelChart } from "./CostByModelChart.js";
 import { FirstPromptPanel } from "./FirstPromptPanel.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
 }
 
 /**
@@ -17,6 +17,10 @@ interface Props {
  * tree that used to live on the legacy SessionDetail screen move to the
  * Files & skills and Orchestration lenses in later PRs — they intentionally
  * don't appear here.
+ *
+ * Reused as-is for Codex sessions (`session.source === "codex"`) — every
+ * child component here already accepts `AnySessionJson` and narrows
+ * internally wherever Claude-only data would otherwise be assumed.
  */
 export function Overview({ session }: Props) {
   return (
