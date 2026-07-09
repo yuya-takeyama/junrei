@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from "react";
 import { client, type SessionJson } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
 import { Overview } from "./lenses/Overview.js";
+import { Timeline } from "./lenses/Timeline.js";
 import type { Lens } from "./router.js";
 import { Band } from "./shell/Band.js";
 import { LensTabs } from "./shell/LensTabs.js";
@@ -133,7 +134,10 @@ export function SessionShell({ project, id, lens }: Props) {
         <div className="hpad mt16 mut">Analyzing session…</div>
       )}
       {error === null && session !== null && lens === "overview" && <Overview session={session} />}
-      {error === null && session !== null && lens !== "overview" && (
+      {error === null && session !== null && lens === "timeline" && (
+        <Timeline project={project} id={id} />
+      )}
+      {error === null && session !== null && lens !== "overview" && lens !== "timeline" && (
         <div className="hpad mt16">
           <div className="pan tile mut">
             {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
