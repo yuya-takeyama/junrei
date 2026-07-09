@@ -234,4 +234,75 @@ describe("MCP tools", () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain("Session not found");
   });
+
+  it("tools/list includes get_repo_overview", async () => {
+    client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain("get_repo_overview");
+  });
+
+  it("get_repo_overview aggregates every Claude session sharing a repoRoot", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_repo_overview",
+      arguments: { repo: "/Users/test/proj" },
+    });
+    expect(result.isError).not.toBe(true);
+    const overview = JSON.parse(textOf(result)) as {
+      repo: string;
+      sessionCount: number;
+      totalCostUsd: number;
+      totalTokens: number;
+      costIsComplete: boolean;
+      topSessions: Array<{ sessionId: string }>;
+    };
+    // Fixture session 11111111... is the only one whose cwd (/Users/test/proj)
+    // has no `.claude/worktrees/` marker and no sibling sharing that exact
+    // repoRoot — same aggregate `computeRepoOverview` (overview.test.ts) would
+    // report for a single-session repo.
+    expect(overview.repo).toBe("/Users/test/proj");
+    expect(overview.sessionCount).toBe(1);
+    expect(overview.totalCostUsd).toBeCloseTo(0.0973225, 6);
+    expect(overview.totalTokens).toBe(55695);
+    expect(overview.costIsComplete).toBe(true);
+    expect(overview.topSessions[0]?.sessionId).toBe(CLAUDE_SESSION_ID);
+  });
+
+  it("get_repo_overview merges Codex sessions sharing a repoRoot and flags incomplete pricing", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_repo_overview",
+      arguments: { repo: "/Users/test/codex-proj" },
+    });
+    expect(result.isError).not.toBe(true);
+    const overview = JSON.parse(textOf(result)) as {
+      sessionCount: number;
+      sourceCounts: { "claude-code": number; codex: number };
+      costIsComplete: boolean;
+    };
+    expect(overview.sessionCount).toBe(4);
+    expect(overview.sourceCounts).toEqual({ "claude-code": 0, codex: 4 });
+    // One of the merged sessions carries an unpriced "unknown" model — see
+    // computeRepoOverview's costIsComplete AND-across-sessions behavior.
+    expect(overview.costIsComplete).toBe(false);
+  });
+
+  it("get_repo_overview rejects a blank repo the same way get_session_summary rejects a missing project", async () => {
+    client = await connect();
+    const result = await client.callTool({ name: "get_repo_overview", arguments: { repo: "" } });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("repo is required");
+  });
+
+  it("get_repo_overview returns a zeroed overview (not an error) for a repo matching no session", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_repo_overview",
+      arguments: { repo: "/no/such/repo" },
+    });
+    expect(result.isError).not.toBe(true);
+    const overview = JSON.parse(textOf(result)) as { sessionCount: number; totalCostUsd: number };
+    expect(overview.sessionCount).toBe(0);
+    expect(overview.totalCostUsd).toBe(0);
+  });
 });

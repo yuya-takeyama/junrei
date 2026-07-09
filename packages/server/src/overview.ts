@@ -1,5 +1,5 @@
 import type { SessionSource } from "@junrei/core";
-import type { AnySessionListItem } from "./sessions.js";
+import { type AnySessionListItem, listSessions, MAX_LIST_LIMIT } from "./sessions.js";
 
 // Fallback-bucket key prefixes for sessions with no `repoRoot` — duplicated
 // (not imported) from `packages/web/src/sessionListHelpers.ts`'s
@@ -224,4 +224,17 @@ export function computeRepoOverview(
     },
     topSessions,
   };
+}
+
+/**
+ * The one listing+aggregation path every repo-overview surface calls through
+ * — `GET /api/overview` (app.ts) and the `get_repo_overview` MCP tool
+ * (mcp.ts) both just forward `repoKey` here, so there's no risk of the two
+ * surfaces silently drifting (e.g. one forgetting the `MAX_LIST_LIMIT`
+ * ceiling or filtering by source). See `computeRepoOverview`'s doc comment
+ * for the accepted `repoKey` forms.
+ */
+export async function getRepoOverview(repoKey: string): Promise<RepoOverview> {
+  const items = await listSessions(MAX_LIST_LIMIT, "all");
+  return computeRepoOverview(items, repoKey);
 }

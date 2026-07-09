@@ -9,6 +9,14 @@ export type AnySessionListItem = ClaudeSessionListItem | CodexSessionListItem;
 export type SessionSourceFilter = SessionSource | "all";
 
 /**
+ * Ceiling shared by every full-repo listing: `/api/sessions`'s own upper
+ * clamp AND `getRepoOverview` (`overview.ts`, called by both `GET
+ * /api/overview` and the `get_repo_overview` MCP tool) — a repo-level rollup
+ * shouldn't silently drop sessions the plain list would still show.
+ */
+export const MAX_LIST_LIMIT = 500;
+
+/**
  * The minimal shape `listSessions` needs from a source adapter — just enough
  * to merge every source's list items into one recency-sorted feed. Each
  * concrete adapter (`claudeAdapter`/`codexAdapter`, in `sources/claude.ts` /

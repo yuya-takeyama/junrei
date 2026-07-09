@@ -1,19 +1,19 @@
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
-import { computeRepoOverview } from "./overview.js";
+import { getRepoOverview } from "./overview.js";
 import {
   claudeAdapter,
   codexAdapter,
   getAgentSession,
   listSessions,
+  MAX_LIST_LIMIT,
   type SessionSourceFilter,
 } from "./sessions.js";
 
 export type { AnySessionListItem } from "./sessions.js";
 
 const DEFAULT_LIST_LIMIT = 50;
-const MAX_LIST_LIMIT = 500;
 
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
@@ -42,17 +42,15 @@ export function createApp() {
       // Repo-level rollup for the session-list's repo filter (see
       // `overview.ts`'s doc comment for the exact `repo` key forms this
       // accepts — a `repoRoot` path or one of the fallback-bucket keys the
-      // web's `repoFilterKey` assigns to a repoRoot-less session). Always
-      // aggregates over both sources, at the same `MAX_LIST_LIMIT` ceiling
-      // `/api/sessions` uses — a repo's overview shouldn't silently drop
-      // sessions the plain list would still show.
+      // web's `repoFilterKey` assigns to a repoRoot-less session).
+      // `getRepoOverview` is the one listing+aggregation path this route and
+      // the `get_repo_overview` MCP tool both call — see its doc comment.
       .get("/api/overview", async (c) => {
         const repo = c.req.query("repo");
         if (repo === undefined || repo === "") {
           return c.json({ error: "repo query param is required" } as const, 400);
         }
-        const items = await listSessions(MAX_LIST_LIMIT, "all");
-        return c.json({ overview: computeRepoOverview(items, repo) });
+        return c.json({ overview: await getRepoOverview(repo) });
       })
       // Source-prefixed routes, symmetric between the two harnesses: Claude
       // scopes by `{project, id}` (a munged project dir plus the session
