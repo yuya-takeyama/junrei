@@ -26,7 +26,16 @@ function notFound(project: string, sessionId: string) {
 
 /** Compact summary: the full analysis minus bulky series (fetch those via dedicated tools). */
 function toSummary(analysis: SessionAnalysis) {
-  const { contextTimeline, subagents, toolStats, repetitions, taskExecutions, ...rest } = analysis;
+  const {
+    contextTimeline,
+    subagents,
+    toolStats,
+    repetitions,
+    taskExecutions,
+    turnUsage,
+    apiErrors,
+    ...rest
+  } = analysis;
   const byKind: Record<string, number> = {};
   const byStatus: Record<string, number> = {};
   for (const task of taskExecutions) {

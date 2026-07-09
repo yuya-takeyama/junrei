@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { type AgentJson, client, type SessionJson, type SubagentNodeJson } from "./api.js";
 import { cacheHitRate, formatDuration, formatTime, formatTokens, formatUsd } from "./format.js";
+import { ContextCost } from "./lenses/ContextCost.js";
 import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
 import { FirstPromptPanel } from "./lenses/FirstPromptPanel.js";
 import {
@@ -398,7 +399,12 @@ export function AgentShell() {
             }}
           />
         )}
-        {ready && lens !== "overview" && lens !== "timeline" && (
+        {session !== null && agent !== null && node !== undefined && lens === "context" && (
+          <div className="hpad mt16">
+            <ContextCost session={agent} contextHref={agentPath(project, id, agentId, "context")} />
+          </div>
+        )}
+        {ready && lens !== "overview" && lens !== "timeline" && lens !== "context" && (
           <div className="hpad mt16">
             <div className="pan tile mut">
               {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
