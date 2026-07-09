@@ -1,5 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import type {
   ContextPoint,
   ExplorationProfile,
@@ -21,6 +20,7 @@ import {
 import { parseTranscriptFile } from "./parser.js";
 import type { CompactionEvent } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
+import { listSubagentRefs } from "./subagents.js";
 
 const PROMPT_PREVIEW_LIMIT = 500;
 
@@ -115,13 +115,6 @@ function mergeUsageByModel(
   return [...totals.values()];
 }
 
-interface SubagentMeta {
-  agentType?: string;
-  description?: string;
-  toolUseId?: string;
-  spawnDepth?: number;
-}
-
 /** Analyze one session file, including its subagent sidecar transcripts. */
 export async function analyzeSession(filePath: string): Promise<SessionAnalysis> {
   const transcript = await parseTranscriptFile(filePath);
@@ -129,7 +122,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
 
-  const { subagents, subagentCount, subagentTotals } = await analyzeSubagents(filePath, sessionId);
+  const { subagents, subagentCount, subagentTotals } = await analyzeSubagents(filePath);
 
   const usage = computeUsage(data);
   const totalUsage = {
@@ -185,15 +178,11 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
   };
 }
 
-async function analyzeSubagents(
-  filePath: string,
-  sessionId: string,
-): Promise<{
+async function analyzeSubagents(filePath: string): Promise<{
   subagents: SubagentNode[];
   subagentCount: number;
   subagentTotals: TokenTotals & { costUsd: number; costIsComplete: boolean };
 }> {
-  const subagentsDir = join(dirname(filePath), sessionId, "subagents");
   const subagentTotals = {
     inputTokens: 0,
     outputTokens: 0,
@@ -203,10 +192,8 @@ async function analyzeSubagents(
     costIsComplete: true,
   };
 
-  let entries: string[];
-  try {
-    entries = await readdir(subagentsDir);
-  } catch {
+  const refs = await listSubagentRefs(filePath);
+  if (refs.length === 0) {
     return { subagents: [], subagentCount: 0, subagentTotals };
   }
 
@@ -214,21 +201,8 @@ async function analyzeSubagents(
   /** toolUseId -> agentId of the transcript that issued that tool call. */
   const toolUseOwner = new Map<string, string>();
 
-  for (const entry of entries) {
-    const match = /^agent-(.+)\.jsonl$/.exec(entry);
-    if (match === null || match[1] === undefined) continue;
-    const agentId = match[1];
-
-    let meta: SubagentMeta = {};
-    try {
-      meta = JSON.parse(
-        await readFile(join(subagentsDir, `agent-${agentId}.meta.json`), "utf8"),
-      ) as SubagentMeta;
-    } catch {
-      // Meta file is optional.
-    }
-
-    const transcript = await parseTranscriptFile(join(subagentsDir, entry));
+  for (const { agentId, jsonlPath, meta } of refs) {
+    const transcript = await parseTranscriptFile(jsonlPath);
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
     for (const call of data.toolCalls) {

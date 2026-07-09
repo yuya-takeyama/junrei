@@ -25,8 +25,11 @@ describe("analyzeSession", () => {
     // Turns & messages: msg_1 spans two JSONL records but counts once, and
     // task-notification records are NOT user turns.
     expect(analysis.userTurnCount).toBe(2);
-    expect(analysis.apiMessageCount).toBe(10);
+    expect(analysis.apiMessageCount).toBe(11);
     expect(analysis.models).toEqual(["claude-fable-5"]);
+
+    // A retried api_error mid-session doesn't derail parsing.
+    expect(analysis.apiErrorCount).toBe(1);
 
     // Malformed trailing line is a warning, not an error.
     expect(analysis.parseWarningCount).toBe(1);
@@ -40,18 +43,18 @@ describe("analyzeSession", () => {
     const analysis = await analyzeSession(SESSION_FILE);
     const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
     expect(fable).toBeDefined();
-    // input: 100+120+130+140+150+160+170+180+190+200 = 1540 (msg_1 counted once)
-    expect(fable?.inputTokens).toBe(1540);
-    expect(fable?.outputTokens).toBe(355);
+    // input: 100+120+130+140+150+160+170+175+180+190+200 = 1715 (msg_1 counted once)
+    expect(fable?.inputTokens).toBe(1715);
+    expect(fable?.outputTokens).toBe(370);
     expect(fable?.cacheCreationTokens).toBe(715);
-    expect(fable?.messageCount).toBe(10);
+    expect(fable?.messageCount).toBe(11);
     expect(fable?.costUsd).toBeGreaterThan(0);
     expect(analysis.usage.total.costIsComplete).toBe(true);
   });
 
   it("builds the context timeline and captures compaction", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
-    expect(analysis.contextTimeline).toHaveLength(10);
+    expect(analysis.contextTimeline).toHaveLength(11);
     const first = analysis.contextTimeline[0];
     expect(first?.contextTokens).toBe(100 + 0 + 200);
     expect(analysis.compactions).toHaveLength(1);
@@ -112,7 +115,7 @@ describe("analyzeSession", () => {
     expect(agent?.children).toEqual([]);
 
     // Total usage = main + subagent.
-    expect(analysis.totalUsage.inputTokens).toBe(1540 + 110);
+    expect(analysis.totalUsage.inputTokens).toBe(1715 + 110);
     expect(analysis.totalUsage.costUsd).toBeGreaterThan(analysis.usage.total.costUsd);
   });
 

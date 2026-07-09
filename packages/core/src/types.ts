@@ -106,6 +106,10 @@ export interface ApiErrorRecord extends RecordBase {
   type: "system";
   subtype: "api_error";
   retryAttempt?: number;
+  /** Short human-readable summary (`error.formatted`, falling back to `error.message`). */
+  message?: string;
+  /** HTTP status code, when the error came from the API rather than the network. */
+  status?: number;
 }
 
 export interface OtherSystemRecord extends RecordBase {

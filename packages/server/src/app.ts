@@ -1,7 +1,7 @@
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
-import { getSession, listSessions } from "./sessions.js";
+import { getSession, getSessionRecordDetail, getTimeline, listSessions } from "./sessions.js";
 
 export type { SessionListItem } from "./sessions.js";
 
@@ -31,6 +31,33 @@ export function createApp() {
         return c.json({ error: "session not found" } as const, 404);
       }
       return c.json(analysis);
+    })
+    .get("/api/sessions/:project/:id/timeline", async (c) => {
+      const entries = await getTimeline(
+        c.req.param("project"),
+        c.req.param("id"),
+        c.req.query("agent"),
+      );
+      if (entries === undefined) {
+        return c.json({ error: "session not found" } as const, 404);
+      }
+      return c.json({ entries });
+    })
+    .get("/api/sessions/:project/:id/record/:line", async (c) => {
+      const line = Number.parseInt(c.req.param("line"), 10);
+      if (!Number.isInteger(line) || line < 1) {
+        return c.json({ error: "record not found" } as const, 404);
+      }
+      const detail = await getSessionRecordDetail(
+        c.req.param("project"),
+        c.req.param("id"),
+        line,
+        c.req.query("agent"),
+      );
+      if (detail === undefined) {
+        return c.json({ error: "record not found" } as const, 404);
+      }
+      return c.json(detail);
     });
 }
 

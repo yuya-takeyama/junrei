@@ -33,6 +33,31 @@ export type {
   UserPrompt,
 } from "./session-data.js";
 export { buildSessionData } from "./session-data.js";
+export type { SubagentMeta, SubagentRef } from "./subagents.js";
+export { listSubagentRefs, loadSubagentSessionData, subagentsDirFor } from "./subagents.js";
+export type {
+  ApiErrorEntry,
+  ApiErrorRecordDetail,
+  AssistantTextEntry,
+  AssistantTextRecordDetail,
+  CompactionEntry,
+  CompactionRecordDetail,
+  RecordDetail,
+  SubagentLaunchEntry,
+  SubagentLaunchRecordDetail,
+  TaskNotificationEntry,
+  TaskNotificationRecordDetail,
+  ThinkingEntry,
+  ThinkingRecordDetail,
+  TimelineEntry,
+  TimelineOptions,
+  ToolCallEntry,
+  ToolCallRecordDetail,
+  ToolCallStatus,
+  UserEntry,
+  UserRecordDetail,
+} from "./timeline.js";
+export { buildTimeline, getRecordDetail } from "./timeline.js";
 export type {
   AssistantRecord,
   ParseWarning,
