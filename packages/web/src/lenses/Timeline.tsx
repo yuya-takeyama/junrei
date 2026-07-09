@@ -194,9 +194,11 @@ export function Timeline({ project, id, agent, onOpenRecord }: Props) {
             <div className="mut">No entries match the current filters.</div>
           ) : (
             <>
-              {displayedEntries.map((entry) => (
+              {displayedEntries.map((entry, i) => (
                 <TimelineRow
-                  key={`${entry.kind}-${entry.line}`}
+                  // kind+line alone can collide: two subagent launches from one
+                  // assistant message share a source line.
+                  key={`${entry.kind}-${entry.line}-${String(i)}`}
                   entry={entry}
                   project={project}
                   id={id}

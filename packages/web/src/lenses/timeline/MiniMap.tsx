@@ -26,7 +26,9 @@ export const MiniMap = memo(function MiniMap({ entries, onSelect }: Props) {
       <div className="mmap-track">
         {entries.map((entry, i) => (
           <button
-            key={`${entry.kind}-${entry.line}`}
+            // kind+line alone can collide: two subagent launches from one
+            // assistant message share a source line.
+            key={`${entry.kind}-${entry.line}-${String(i)}`}
             type="button"
             className={bandClass(entry)}
             onClick={() => onSelect(i)}

@@ -172,6 +172,81 @@ describe("Codex routes", () => {
     expect(await res.json()).toEqual({ error: "session not found" });
   });
 
+  it("GET /api/sessions/codex/:id/timeline returns ordered entries built from the rollout transcript", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/codex/${CODEX_SESSION_ID}/timeline`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { entries: Array<{ kind: string; line: number }> };
+    expect(body.entries.map((e) => [e.kind, e.line])).toEqual([
+      ["user", 4],
+      ["thinking", 5],
+      ["tool-call", 6],
+      ["tool-call", 10],
+      ["tool-call", 12],
+      ["user", 17],
+      ["compaction", 22],
+    ]);
+    // No Claude-only kind is ever emitted for a Codex transcript.
+    expect(body.entries.some((e) => e.kind === "subagent-launch")).toBe(false);
+    expect(body.entries.some((e) => e.kind === "api-error")).toBe(false);
+  });
+
+  it("GET /api/sessions/codex/:id/timeline 404s for an unknown id", async () => {
+    const app = createApp();
+    const res = await app.request("/api/sessions/codex/does-not-exist/timeline");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "session not found" });
+  });
+
+  it("GET /api/sessions/codex/:id/timeline 404s for a legacy-format transcript", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "/api/sessions/codex/44444444-4444-4444-4444-444444444444/timeline",
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "session not found" });
+  });
+
+  it("GET /api/sessions/codex/:id/record/:line returns full tool-call detail", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/codex/${CODEX_SESSION_ID}/record/6`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kind: string;
+      toolUseId: string;
+      input: unknown;
+      status: string;
+      resultLine: number;
+    };
+    expect(body.kind).toBe("tool-call");
+    expect(body.toolUseId).toBe("call-1");
+    expect(body.input).toEqual({ command: ["pytest", "foo.spec.ts"] });
+    expect(body.status).toBe("error");
+    expect(body.resultLine).toBe(7);
+  });
+
+  it("GET .../codex/:id/record/:line 404s for a non-numeric line", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/codex/${CODEX_SESSION_ID}/record/not-a-number`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "record not found" });
+  });
+
+  it("GET .../codex/:id/record/:line 404s for a line with no addressable record", async () => {
+    const app = createApp();
+    // Line 2 is a turn_context — never independently addressable.
+    const res = await app.request(`/api/sessions/codex/${CODEX_SESSION_ID}/record/2`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "record not found" });
+  });
+
+  it("GET .../codex/:id/record/:line 404s for an unknown session id", async () => {
+    const app = createApp();
+    const res = await app.request("/api/sessions/codex/does-not-exist/record/1");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "record not found" });
+  });
+
   it("the literal 'codex' segment never collides with a real munged project dir (always starts with '-')", async () => {
     // Regression guard for the route-registration-order invariant documented
     // in app.ts: a request for the Claude route shaped identically except

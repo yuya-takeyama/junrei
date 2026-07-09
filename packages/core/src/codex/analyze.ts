@@ -24,7 +24,8 @@ const SYNTHETIC_USER_TEXT_PREFIXES = [
   "<ENVIRONMENT_CONTEXT>",
 ];
 
-function isSyntheticUserText(text: string): boolean {
+/** Exported for reuse by `codex/timeline.ts`'s user-prompt fallback (same injected-context rule). */
+export function isSyntheticUserText(text: string): boolean {
   const trimmed = text.trimStart();
   return SYNTHETIC_USER_TEXT_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
@@ -134,6 +135,17 @@ function buildUsageSummary(accumulators: ReadonlyMap<string, ModelAccumulator>):
 const ERROR_OUTPUT_PATTERN = /exited with code [1-9]/i;
 
 /**
+ * Whether a `function_call_output` / `custom_tool_call_output` text reads as
+ * an error: a structured `{success:false}` flag, or output text matching
+ * "exited with code <nonzero>". Exported so `codex/timeline.ts` applies the
+ * exact same rule when linking a tool-call entry to its result, rather than
+ * re-deriving the heuristic.
+ */
+export function isCodexToolOutputError(success: boolean | undefined, text: string): boolean {
+  return success === false || ERROR_OUTPUT_PATTERN.test(text);
+}
+
+/**
  * Best-effort tool-call linkage: `function_call` / `custom_tool_call` /
  * `local_shell_call` response items opened by `call_id`, resolved by their
  * matching `*_output` response item or (for shell calls) `exec_command_end`
@@ -159,7 +171,7 @@ function linkToolCalls(records: readonly CodexRecord[]): { callCount: number; er
           break;
         case "functionCallOutput":
         case "customToolCallOutput":
-          if (item.success === false || ERROR_OUTPUT_PATTERN.test(item.text)) {
+          if (isCodexToolOutputError(item.success, item.text)) {
             erroredCallIds.add(item.callId);
           }
           break;
