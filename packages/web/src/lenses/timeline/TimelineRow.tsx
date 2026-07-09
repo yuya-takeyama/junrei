@@ -10,6 +10,8 @@ export interface TimelineRowProps {
   expanded: boolean;
   onToggleExpand: (line: number) => void;
   registerRef: (line: number, el: HTMLDivElement | null) => void;
+  /** Opens the record slide-over (L3, screen 8) for a given source line. */
+  onOpenRecord: (line: number) => void;
 }
 
 function ModelBadge({ model }: { model: string | undefined }) {
@@ -22,30 +24,60 @@ function ModelBadge({ model }: { model: string | undefined }) {
   );
 }
 
-/** Source-line ref — always in the DOM (accessibility), amber only on `.blk:hover` (CSS). */
-function SourceLine({ line, auto = false }: { line: number; auto?: boolean }) {
+/**
+ * Source-line ref — always in the DOM (accessibility), amber only on
+ * `.blk:hover` (CSS). Doubles as the affordance that opens the record
+ * slide-over (design-spec/17-record-detail.md) for this block's source line.
+ */
+function SourceLine({
+  line,
+  auto = false,
+  onOpenRecord,
+}: {
+  line: number;
+  auto?: boolean;
+  onOpenRecord: (line: number) => void;
+}) {
   return (
-    <span className="ln" style={auto ? { marginLeft: "auto" } : undefined}>
+    <button
+      type="button"
+      className="ln lnbtn"
+      style={auto ? { marginLeft: "auto" } : undefined}
+      onClick={() => onOpenRecord(line)}
+      title="Open record detail"
+    >
       L{line}
-    </span>
+    </button>
   );
 }
 
-function UserBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "user" }> }) {
+function UserBlock({
+  entry,
+  onOpenRecord,
+}: {
+  entry: Extract<TimelineEntry, { kind: "user" }>;
+  onOpenRecord: (line: number) => void;
+}) {
   return (
     <div className="blk blk-q">
       <div className="bhd">
         <span className="lbl" style={{ color: "var(--amb)" }}>
           User
         </span>
-        <SourceLine line={entry.line} />
+        <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
       </div>
       <div className="btxt">{entry.text}</div>
     </div>
   );
 }
 
-function AssistantBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "assistant-text" }> }) {
+function AssistantBlock({
+  entry,
+  onOpenRecord,
+}: {
+  entry: Extract<TimelineEntry, { kind: "assistant-text" }>;
+  onOpenRecord: (line: number) => void;
+}) {
   // apiDurationMs is never populated by the API today — omit rather than fake a duration.
   const metaParts: string[] = [];
   if (entry.outputTokens !== undefined) metaParts.push(`${formatTokens(entry.outputTokens)} out`);
@@ -57,21 +89,27 @@ function AssistantBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "assi
         <span className="lbl">Assistant</span>
         <ModelBadge model={entry.model} />
         {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
-        <SourceLine line={entry.line} auto />
+        <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
       <div className="btxt">{entry.text}</div>
     </div>
   );
 }
 
-function ThinkingBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "thinking" }> }) {
+function ThinkingBlock({
+  entry,
+  onOpenRecord,
+}: {
+  entry: Extract<TimelineEntry, { kind: "thinking" }>;
+  onOpenRecord: (line: number) => void;
+}) {
   return (
     <div className="blk dim">
       <div className="bhd">
         <span className="mut">▸</span>
         <span className="lbl">Thinking</span>
         <span className="mono fs10 mut">{formatTokens(entry.charCount)} chars · collapsed</span>
-        <SourceLine line={entry.line} auto />
+        <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
     </div>
   );
@@ -81,10 +119,12 @@ function ToolBlock({
   entry,
   expanded,
   onToggleExpand,
+  onOpenRecord,
 }: {
   entry: Extract<TimelineEntry, { kind: "tool-call" }>;
   expanded: boolean;
   onToggleExpand: (line: number) => void;
+  onOpenRecord: (line: number) => void;
 }) {
   const isError = entry.status === "error";
   const metaParts: string[] = [];
@@ -99,34 +139,38 @@ function ToolBlock({
 
   return (
     <div className="blk" style={isError ? { borderColor: "var(--err)" } : undefined}>
-      <button
-        type="button"
-        className="bhd tool-hd"
-        onClick={() => onToggleExpand(entry.line)}
-        aria-expanded={expanded}
-      >
-        <span className={isError ? "errtx" : expanded ? "amb" : "mut"}>{expanded ? "▾" : "▸"}</span>
-        <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
-          {isError ? "Tool · error" : "Tool"}
-        </span>
-        <span className="mono fs12">
-          {entry.name} {entry.inputSummary}
-        </span>
-        {meta !== undefined && (
-          <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
-        )}
-        <SourceLine line={entry.line} auto />
-      </button>
+      <div className="bhd">
+        <button
+          type="button"
+          className="tool-hd"
+          onClick={() => onToggleExpand(entry.line)}
+          aria-expanded={expanded}
+        >
+          <span className={isError ? "errtx" : expanded ? "amb" : "mut"}>
+            {expanded ? "▾" : "▸"}
+          </span>
+          <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
+            {isError ? "Tool · error" : "Tool"}
+          </span>
+          <span className="mono fs12">
+            {entry.name} {entry.inputSummary}
+          </span>
+          {meta !== undefined && (
+            <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
+          )}
+        </button>
+        <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
+      </div>
       {isError && entry.resultSummary !== undefined && (
         <div className="btxt mono fs11 errtx" style={{ opacity: 0.85 }}>
           {entry.resultSummary}
         </div>
       )}
       {expanded && (
-        // resultLine is kept as data-line for the record-detail slide-over landing in the next PR.
-        <div className="code" data-line={entry.resultLine ?? entry.line}>
-          {codeLines.join("\n")}
-        </div>
+        // Note: resultLine (the tool_result carrier line) isn't independently
+        // addressable by the record API — record detail is always keyed by
+        // the tool_use's own line, which SourceLine above already opens.
+        <div className="code">{codeLines.join("\n")}</div>
       )}
     </div>
   );
@@ -136,10 +180,12 @@ function SubagentBlock({
   entry,
   project,
   id,
+  onOpenRecord,
 }: {
   entry: Extract<TimelineEntry, { kind: "subagent-launch" }>;
   project: string;
   id: string;
+  onOpenRecord: (line: number) => void;
 }) {
   const displayName = entry.name ?? entry.agentType ?? "subagent";
   const metaParts: string[] = [];
@@ -163,6 +209,7 @@ function SubagentBlock({
         <span className="mono fs12">{displayName}</span>
         <ModelBadge model={entry.model} />
         {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
+        <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
         {detailHref !== undefined ? (
           <a className="linkc mono fs10" style={{ marginLeft: "auto" }} href={detailHref}>
             open detail →
@@ -188,12 +235,17 @@ function SubagentBlock({
   );
 }
 
-function TaskBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "task-notification" }> }) {
+function TaskBlock({
+  entry,
+  onOpenRecord,
+}: {
+  entry: Extract<TimelineEntry, { kind: "task-notification" }>;
+  onOpenRecord: (line: number) => void;
+}) {
   const metaParts: string[] = [];
   if (entry.status !== undefined) metaParts.push(entry.status);
   if (entry.exitCode !== undefined) metaParts.push(`exit ${entry.exitCode}`);
   if (entry.durationMs !== undefined) metaParts.push(formatDuration(entry.durationMs));
-  metaParts.push(`L${entry.line}`);
 
   return (
     <div className="blk dim" style={{ background: "transparent" }}>
@@ -204,20 +256,27 @@ function TaskBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "task-noti
           {entry.taskId} <span className="mut">background</span>
           {entry.name !== undefined && ` · ${entry.name}`}
         </span>
-        <span className="mono fs10 mut">{metaParts.join(" · ")}</span>
+        {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
+        <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
     </div>
   );
 }
 
-function ApiErrorBlock({ entry }: { entry: Extract<TimelineEntry, { kind: "api-error" }> }) {
+function ApiErrorBlock({
+  entry,
+  onOpenRecord,
+}: {
+  entry: Extract<TimelineEntry, { kind: "api-error" }>;
+  onOpenRecord: (line: number) => void;
+}) {
   return (
     <div className="blk" style={{ borderColor: "var(--err)" }}>
       <div className="bhd">
         <span className="lbl" style={{ color: "var(--err)" }}>
           API error
         </span>
-        <SourceLine line={entry.line} auto />
+        <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
       {entry.message !== undefined && (
         <div className="btxt mono fs11 errtx" style={{ opacity: 0.85 }}>
@@ -268,6 +327,7 @@ export const TimelineRow = memo(function TimelineRow({
   expanded,
   onToggleExpand,
   registerRef,
+  onOpenRecord,
 }: TimelineRowProps) {
   if (entry.kind === "compaction") {
     return <CompactionBreak entry={entry} registerRef={registerRef} />;
@@ -278,17 +338,26 @@ export const TimelineRow = memo(function TimelineRow({
       <span className="gut">
         {entry.timestamp !== undefined ? formatTime(entry.timestamp) : ""}
       </span>
-      {entry.kind === "user" && <UserBlock entry={entry} />}
-      {entry.kind === "assistant-text" && <AssistantBlock entry={entry} />}
-      {entry.kind === "thinking" && <ThinkingBlock entry={entry} />}
+      {entry.kind === "user" && <UserBlock entry={entry} onOpenRecord={onOpenRecord} />}
+      {entry.kind === "assistant-text" && (
+        <AssistantBlock entry={entry} onOpenRecord={onOpenRecord} />
+      )}
+      {entry.kind === "thinking" && <ThinkingBlock entry={entry} onOpenRecord={onOpenRecord} />}
       {entry.kind === "tool-call" && (
-        <ToolBlock entry={entry} expanded={expanded} onToggleExpand={onToggleExpand} />
+        <ToolBlock
+          entry={entry}
+          expanded={expanded}
+          onToggleExpand={onToggleExpand}
+          onOpenRecord={onOpenRecord}
+        />
       )}
       {entry.kind === "subagent-launch" && (
-        <SubagentBlock entry={entry} project={project} id={id} />
+        <SubagentBlock entry={entry} project={project} id={id} onOpenRecord={onOpenRecord} />
       )}
-      {entry.kind === "task-notification" && <TaskBlock entry={entry} />}
-      {entry.kind === "api-error" && <ApiErrorBlock entry={entry} />}
+      {entry.kind === "task-notification" && (
+        <TaskBlock entry={entry} onOpenRecord={onOpenRecord} />
+      )}
+      {entry.kind === "api-error" && <ApiErrorBlock entry={entry} onOpenRecord={onOpenRecord} />}
     </div>
   );
 });

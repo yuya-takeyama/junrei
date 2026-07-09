@@ -480,6 +480,16 @@ a.l0g:hover {
   opacity: 0.7;
   flex: none;
 }
+.lnbtn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.lnbtn:hover {
+  color: var(--amb);
+  opacity: 1;
+}
 
 /* ---------------------------------------------------------------------
    Timeline (L2) — detail dial, filter chips, transcript blocks, mini-map.
@@ -542,11 +552,15 @@ a.l0g:hover {
   gap: 10px;
   font-size: 11px;
 }
-button.bhd.tool-hd {
+button.tool-hd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
   background: transparent;
   border: none;
   padding: 0;
-  width: 100%;
   text-align: left;
   font: inherit;
   color: inherit;
@@ -642,4 +656,80 @@ button.bhd.tool-hd {
 .mmap-band-err {
   background: var(--err);
   opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------
+   Record-detail slide-over (L3, screen 8). See design-spec/17-record-detail.md
+   and 99-components.md's `.so`/`.kv`/`.cp`/`.code` component specs.
+   --------------------------------------------------------------------- */
+
+.posrel {
+  position: relative;
+}
+
+/* Invisible click-to-close layer behind the panel, above the dimmed lens
+   (which is itself `pointer-events:none` so it can't be interacted with). */
+.so-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Spec positions `.so` with `position:absolute` relative to a fixed-height
+   mockup canvas (`.scr{height:560px}`); the real app scrolls a full page, so
+   `.so` is viewport-fixed instead — same 520px/full-height/amber-border
+   look, but anchored to the browser window rather than a canvas frame. */
+.so {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 520px;
+  max-width: 100vw;
+  background: var(--pan);
+  border-left: 1px solid var(--amb);
+  padding: 20px 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  z-index: 50;
+}
+@media (max-width: 600px) {
+  .so {
+    width: 100%;
+  }
+}
+
+.so-close {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.so-close:hover {
+  color: var(--tx);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 5px 14px;
+  font-size: 12px;
+}
+
+.cp-inline {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+  color: inherit;
+}
+.cp-inline:hover {
+  color: var(--tx);
 }
