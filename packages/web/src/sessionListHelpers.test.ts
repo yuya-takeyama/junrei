@@ -27,6 +27,8 @@ const claudeItem: ClaudeSessionListItem = {
   toolErrorCount: 0,
   sizeBytes: 4096,
   modelMix: [],
+  usageByModel: [],
+  delegation: { main: { tokens: 0 }, subagents: { tokens: 0 } },
 };
 
 const codexItem: CodexSessionListItem = {
@@ -45,6 +47,8 @@ const codexItem: CodexSessionListItem = {
   toolErrorCount: 0,
   sizeBytes: 2048,
   modelMix: [],
+  usageByModel: [],
+  delegation: { main: { tokens: 0 }, subagents: { tokens: 0 } },
 };
 
 describe("sessionsListQuery", () => {

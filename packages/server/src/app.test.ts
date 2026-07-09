@@ -339,3 +339,60 @@ describe("Codex routes", () => {
     expect(omittedBody.sessions.some((s) => s.source === "claude-code")).toBe(true);
   });
 });
+
+describe("GET /api/overview", () => {
+  let previousConfigDir: string | undefined;
+  let previousCodexHome: string | undefined;
+
+  beforeAll(() => {
+    previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    previousCodexHome = process.env.CODEX_HOME;
+    process.env.CLAUDE_CONFIG_DIR = FIXTURES_DIR;
+    process.env.CODEX_HOME = CODEX_HOME;
+  });
+
+  afterAll(() => {
+    if (previousConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+  });
+
+  it("200s with a repo-level rollup when `repo` is given", async () => {
+    const app = createApp();
+    // Fixture session 11111111 has cwd "/Users/test/proj" with no worktree
+    // marker, so its repoRoot is that same path (see deriveRepoIdentity).
+    const res = await app.request("/api/overview?repo=%2FUsers%2Ftest%2Fproj");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      overview: {
+        repo: string;
+        sessionCount: number;
+        sourceCounts: Record<string, number>;
+        totalCostUsd: number;
+      };
+    };
+    expect(body.overview.repo).toBe("/Users/test/proj");
+    expect(body.overview.sessionCount).toBeGreaterThan(0);
+    expect(body.overview.sourceCounts["claude-code"]).toBeGreaterThan(0);
+  });
+
+  it("400s when `repo` is missing", async () => {
+    const app = createApp();
+    const res = await app.request("/api/overview");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "repo query param is required" });
+  });
+
+  it("400s when `repo` is the empty string", async () => {
+    const app = createApp();
+    const res = await app.request("/api/overview?repo=");
+    expect(res.status).toBe(400);
+  });
+});

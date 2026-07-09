@@ -1,6 +1,7 @@
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
+import { computeRepoOverview } from "./overview.js";
 import {
   claudeAdapter,
   codexAdapter,
@@ -37,6 +38,21 @@ export function createApp() {
         // Omitted `source` means "all" — see `listSessions`'s doc comment.
         const source = parseSourceFilter(c.req.query("source"));
         return c.json({ sessions: await listSessions(limit, source) });
+      })
+      // Repo-level rollup for the session-list's repo filter (see
+      // `overview.ts`'s doc comment for the exact `repo` key forms this
+      // accepts — a `repoRoot` path or one of the fallback-bucket keys the
+      // web's `repoFilterKey` assigns to a repoRoot-less session). Always
+      // aggregates over both sources, at the same `MAX_LIST_LIMIT` ceiling
+      // `/api/sessions` uses — a repo's overview shouldn't silently drop
+      // sessions the plain list would still show.
+      .get("/api/overview", async (c) => {
+        const repo = c.req.query("repo");
+        if (repo === undefined || repo === "") {
+          return c.json({ error: "repo query param is required" } as const, 400);
+        }
+        const items = await listSessions(MAX_LIST_LIMIT, "all");
+        return c.json({ overview: computeRepoOverview(items, repo) });
       })
       // Source-prefixed routes, symmetric between the two harnesses: Claude
       // scopes by `{project, id}` (a munged project dir plus the session

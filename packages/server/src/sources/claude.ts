@@ -16,7 +16,13 @@ import {
   subagentsDirFor,
   type TimelineEntry,
 } from "@junrei/core";
-import { type ModelMixEntry, mixFromUsageTree, type SessionListItemBase } from "./shared.js";
+import {
+  type ModelMixEntry,
+  mixFromUsageTree,
+  type SessionListItemBase,
+  sliceDelegation,
+  sliceUsageByModel,
+} from "./shared.js";
 
 /** Key identifying one Claude Code session — a munged project dir plus the session UUID. */
 export interface ClaudeSessionKey {
@@ -82,6 +88,8 @@ function toListItem(
     toolErrorCount,
     sizeBytes: ref.sizeBytes,
     modelMix: computeModelMix(analysis),
+    usageByModel: sliceUsageByModel(analysis.totalUsageByModel),
+    delegation: sliceDelegation(analysis.delegation),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(analysis.repoRoot !== undefined && { repoRoot: analysis.repoRoot }),
     ...(analysis.worktreeName !== undefined && { worktreeName: analysis.worktreeName }),

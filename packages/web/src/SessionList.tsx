@@ -5,6 +5,7 @@ import { client } from "./api.js";
 import { formatDateTime, formatDuration, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel } from "./modelClass.js";
+import { RepoOverviewBand } from "./RepoOverviewBand.js";
 import {
   ALL_REPOS,
   parseRepoParam,
@@ -213,6 +214,8 @@ export function SessionList() {
           </span>
         </div>
       </div>
+
+      {repoFilter !== ALL_REPOS && <RepoOverviewBand repo={repoFilter} />}
 
       {error !== null && <div className="mut hpad">Failed to load sessions: {error}</div>}
       {error === null && sessions === null && <div className="mut hpad">Analyzing sessions…</div>}
