@@ -35,6 +35,7 @@ in Workflow scripts:
 | Web research, doc summarization, log analysis | `sonnet` | medium |
 | Mechanical edits, codemods, test scaffolding | `sonnet` | low |
 | Feature implementation with clear spec | `sonnet` | high |
+| UI/preview verification of a change | `sonnet` via `preview-verifier` agent | medium |
 | Hard implementation, tricky debugging | `opus` | high/xhigh |
 | Adversarial verification, independent review | `opus` (fresh context matters more than tier) | high |
 | Architecture decisions, ambiguous planning | keep on orchestrator (or `opus` xhigh) | — |
@@ -52,6 +53,12 @@ Rules of thumb:
   cheaper than starting everything on the top tier.
 - **Keep judgment at the top.** Final review of merged results, correctness
   claims, and anything user-facing stays with the orchestrator.
+- **Keep images out of the orchestrator context.** Screenshots and DOM dumps
+  taken in the main loop are re-read (at top-tier cache prices) by every
+  subsequent message. Delegate preview/UI verification to the
+  `preview-verifier` agent (`.claude/agents/preview-verifier.md`, pinned to
+  Sonnet) and consume its text verdict; in the acca8a8c session, main-loop
+  preview driving contributed to a $58 orchestrator bill on a $94 session.
 
 ## Session-level setup (for the human, not the agent)
 
