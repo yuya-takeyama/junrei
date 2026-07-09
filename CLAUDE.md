@@ -7,8 +7,11 @@ The main session often runs on an expensive orchestrator model (Claude Fable 5).
 skill** and pass an explicit `model` (+ `effort`) per delegated call — exploration
 → `haiku`, research/implementation → `sonnet`, hard debugging/verification →
 `opus`. Omitting `model` inherits the expensive session model; only do that when
-the subtask genuinely needs orchestrator-tier reasoning. Keep planning, judging,
-and final verification in the main loop.
+the subtask genuinely needs orchestrator-tier reasoning. Keep planning and
+judging in the main loop, but delegate routine preview/UI verification to the
+`preview-verifier` agent (`.claude/agents/preview-verifier.md`) — screenshots
+and DOM dumps must not accumulate in the orchestrator context; judge its text
+verdict instead.
 
 After significant multi-agent work, check the real spend with Junrei itself
 (session detail → Cost by model / Subagent tree, or the `get_subagent_tree` MCP
