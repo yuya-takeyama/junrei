@@ -42,6 +42,11 @@ function toSummary(analysis: SessionAnalysis) {
     byKind[task.kind] = (byKind[task.kind] ?? 0) + 1;
     byStatus[task.status] = (byStatus[task.status] ?? 0) + 1;
   }
+  const errorsByStatus: Record<string, number> = {};
+  for (const error of apiErrors) {
+    const key = error.status === undefined ? "unknown" : String(error.status);
+    errorsByStatus[key] = (errorsByStatus[key] ?? 0) + 1;
+  }
   return {
     ...rest,
     toolStats,
@@ -52,6 +57,15 @@ function toSummary(analysis: SessionAnalysis) {
       peakContextTokens: Math.max(0, ...contextTimeline.map((p) => p.contextTokens)),
       lastContextTokens: contextTimeline.at(-1)?.contextTokens ?? 0,
     },
+    turnUsage: {
+      turns: turnUsage.length,
+      totalApiMessages: turnUsage.reduce((sum, t) => sum + t.apiMessageCount, 0),
+      peakOutputTokens: Math.max(0, ...turnUsage.map((t) => t.outputTokens)),
+      peakApiMessages: Math.max(0, ...turnUsage.map((t) => t.apiMessageCount)),
+    },
+    // apiErrorCount (in ...rest) keeps counting past the list cap; this
+    // histogram covers only the listed entries.
+    apiErrors: { listed: apiErrors.length, byStatus: errorsByStatus },
   };
 }
 
