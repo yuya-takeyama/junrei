@@ -1,4 +1,5 @@
-import { buildHash, type Lens } from "../router.js";
+import { Link } from "react-router";
+import { type Lens, sessionPath } from "../router.js";
 
 const TABS: ReadonlyArray<{ lens: Lens; label: string }> = [
   { lens: "overview", label: "Overview" },
@@ -19,13 +20,13 @@ export function LensTabs({ project, id, active }: LensTabsProps) {
   return (
     <div className="b-tabs">
       {TABS.map((tab) => (
-        <a
+        <Link
           key={tab.lens}
-          href={buildHash(project, id, tab.lens)}
+          to={sessionPath(project, id, tab.lens)}
           className={tab.lens === active ? "b-tab on" : "b-tab"}
         >
           {tab.label}
-        </a>
+        </Link>
       ))}
     </div>
   );

@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 import type { SessionJson } from "../api.js";
 import { formatTokens, formatUsd } from "../format.js";
-import { buildHash } from "../router.js";
+import { sessionPath } from "../router.js";
 
 interface Props {
   session: SessionJson;
@@ -21,7 +22,7 @@ export function StatStrip({ session }: Props) {
   const cacheHitRate =
     cacheDenominator > 0 ? session.totalUsage.cacheReadTokens / cacheDenominator : 0;
   const nestedSubagents = Math.max(0, session.subagentCount - session.subagents.length);
-  const contextHref = buildHash(session.projectDirName, session.sessionId, "context");
+  const contextHref = sessionPath(session.projectDirName, session.sessionId, "context");
 
   return (
     <div className="b-strip mt16">
@@ -34,7 +35,7 @@ export function StatStrip({ session }: Props) {
       </Cell>
       <Cell
         label="Turns / msgs"
-        href={buildHash(session.projectDirName, session.sessionId, "timeline")}
+        href={sessionPath(session.projectDirName, session.sessionId, "timeline")}
       >
         <div className="big mt8">
           {session.userTurnCount}
@@ -65,7 +66,7 @@ export function StatStrip({ session }: Props) {
       </Cell>
       <Cell
         label="Subagents"
-        href={buildHash(session.projectDirName, session.sessionId, "orchestration")}
+        href={sessionPath(session.projectDirName, session.sessionId, "orchestration")}
         last
       >
         <div className={session.subagentCount === 0 ? "big mt8 mut" : "big mt8"}>
@@ -89,9 +90,9 @@ function Cell({
   children: ReactNode;
 }) {
   return (
-    <a className="b-cell" href={href} style={last ? { borderRight: 0 } : undefined}>
+    <Link className="b-cell" to={href} style={last ? { borderRight: 0 } : undefined}>
       <div className="lbl">{label}</div>
       {children}
-    </a>
+    </Link>
   );
 }

@@ -1,23 +1,16 @@
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { client, type SessionJson } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
 import { Orchestration } from "./lenses/Orchestration.js";
 import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
-import { buildHash, buildRecordHash, type Lens } from "./router.js";
+import { type Lens, normalizeLens, parseRecordParam, recordPath, sessionPath } from "./router.js";
 import { Band } from "./shell/Band.js";
 import { LensTabs } from "./shell/LensTabs.js";
 import { StatStrip } from "./shell/StatStrip.js";
-
-interface Props {
-  project: string;
-  id: string;
-  lens: Lens;
-  /** Source line of the record slide-over (L3, screen 8) to show over this lens, if any. */
-  record?: number;
-}
 
 const LENS_LABEL: Record<Lens, string> = {
   overview: "Overview",
@@ -75,13 +68,30 @@ function MetaLine({ session }: { session: SessionJson }) {
  * persistent lens tab bar, then the active lens's content — see
  * design-spec/01-shell.md. Only "overview" renders real content in this PR;
  * the rest are placeholders for later PRs.
+ *
+ * Rendered directly as the `session/:project/:id/:lens?` route element (see
+ * main.tsx) — project/id/lens/record all come from the router rather than
+ * props, so opening/closing the record slide-over is a plain navigation and
+ * never remounts this component or its active lens.
  */
-export function SessionShell({ project, id, lens, record }: Props) {
+export function SessionShell() {
+  const {
+    project: projectParam,
+    id: idParam,
+    lens: lensParam,
+  } = useParams<"project" | "id" | "lens">();
+  const project = projectParam ?? "";
+  const id = idParam ?? "";
+  const lens = normalizeLens(lensParam);
+  const [searchParams] = useSearchParams();
+  const record = parseRecordParam(searchParams);
+  const navigate = useNavigate();
+
   const [session, setSession] = useState<SessionJson | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const recordOpen = record !== undefined;
-  const closeRecordHref = buildHash(project, id, lens);
+  const closeRecordHref = sessionPath(project, id, lens);
 
   useEffect(() => {
     setSession(null);
@@ -116,7 +126,7 @@ export function SessionShell({ project, id, lens, record }: Props) {
         <Band
           left={
             <span className="mono fs11 mut nowrap">
-              <a href="#/">Sessions</a> / {project} / {title}
+              <Link to="/">Sessions</Link> / {project} / {title}
             </span>
           }
           right={
@@ -151,7 +161,7 @@ export function SessionShell({ project, id, lens, record }: Props) {
             project={project}
             id={id}
             onOpenRecord={(line) => {
-              window.location.hash = buildRecordHash(project, id, lens, line);
+              navigate(recordPath(project, id, lens, line));
             }}
           />
         )}

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 import { ThemeToggle } from "./ThemeToggle.js";
 
 interface BandProps {
@@ -13,9 +14,9 @@ export function Band({ left, right }: BandProps) {
   return (
     <div className="band">
       <div className="fx ac gap12">
-        <a href="#/" className="wm mono fs12">
+        <Link to="/" className="wm mono fs12">
           JUNREI
-        </a>
+        </Link>
         {left}
       </div>
       <div className="fx ac gap12">

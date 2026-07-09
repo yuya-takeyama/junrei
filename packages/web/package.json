@@ -15,7 +15,8 @@
     "@junrei/server": "workspace:*",
     "hono": "^4.11.9",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-router": "^7.18.1"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
