@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
 import { formatDateTime, formatDuration, formatProject, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel } from "./modelClass.js";
-import { buildHash } from "./router.js";
+import { sessionPath } from "./router.js";
 import { Band } from "./shell/Band.js";
 
 const LIST_LIMIT = "200";
@@ -160,10 +161,10 @@ export function SessionList() {
             <span className="lbl cellr">Cmp</span>
           </div>
           {filtered.map((s) => (
-            <a
+            <Link
               key={`${s.projectDirName}/${s.sessionId}`}
               className="l0g"
-              href={buildHash(s.projectDirName, s.sessionId)}
+              to={sessionPath(s.projectDirName, s.sessionId)}
             >
               <span className="mono fs11 mut nowrap" title={s.projectDirName}>
                 {formatProject(s.projectDirName, s.cwd)}
@@ -184,7 +185,7 @@ export function SessionList() {
               <NumCell value={s.subagentCount} />
               <NumCell value={s.toolErrorCount} errorish />
               <NumCell value={s.compactionCount} />
-            </a>
+            </Link>
           ))}
         </div>
       )}

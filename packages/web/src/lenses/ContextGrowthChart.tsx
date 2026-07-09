@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import type { SessionJson } from "../api.js";
 import { formatTime, formatTokens } from "../format.js";
-import { buildHash } from "../router.js";
+import { sessionPath } from "../router.js";
 
 interface Props {
   session: SessionJson;
@@ -146,7 +147,7 @@ function buildGeometry(session: SessionJson): Geometry | null {
 export function ContextGrowthChart({ session }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(session), [session]);
-  const contextHref = buildHash(session.projectDirName, session.sessionId, "context");
+  const contextHref = sessionPath(session.projectDirName, session.sessionId, "context");
   const hovered =
     hoverIndex !== null && geometry !== null ? geometry.hoverNodes[hoverIndex] : undefined;
 
@@ -155,9 +156,9 @@ export function ContextGrowthChart({ session }: Props) {
       <div className="pan" style={{ padding: "18px 20px" }}>
         <div className="chartcap">
           <span className="lbl">Context growth · tokens in window</span>
-          <a className="linkc mono fs11" href={contextHref}>
+          <Link className="linkc mono fs11" to={contextHref}>
             → context &amp; cost
-          </a>
+          </Link>
         </div>
         {geometry === null ? (
           <p className="mut fs12">No usage records in this session.</p>

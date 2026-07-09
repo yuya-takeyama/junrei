@@ -1,7 +1,8 @@
+import { Link } from "react-router";
 import type { SessionJson } from "../api.js";
 import { formatUsd } from "../format.js";
 import { classifyModel, modelShortLabel } from "../modelClass.js";
-import { buildHash } from "../router.js";
+import { sessionPath } from "../router.js";
 
 interface Props {
   session: SessionJson;
@@ -17,7 +18,7 @@ export function CostByModelChart({ session }: Props) {
   const totalCost = session.totalUsage.costUsd;
   const mainCost = session.usage.total.costUsd;
   const delegatedCost = Math.max(0, totalCost - mainCost);
-  const orchestrationHref = buildHash(session.projectDirName, session.sessionId, "orchestration");
+  const orchestrationHref = sessionPath(session.projectDirName, session.sessionId, "orchestration");
 
   return (
     <div className="hpad mt16">
@@ -28,9 +29,9 @@ export function CostByModelChart({ session }: Props) {
             <span className="mono fs11 mut">
               main {formatUsd(mainCost)} · delegated {formatUsd(delegatedCost)}
             </span>
-            <a className="linkc mono fs11" href={orchestrationHref}>
+            <Link className="linkc mono fs11" to={orchestrationHref}>
               → orchestration
-            </a>
+            </Link>
           </span>
         </div>
         {rows.length === 0 ? (

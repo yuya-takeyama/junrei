@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { client, type RecordDetail as RecordDetailData } from "../api.js";
 import { formatDuration, formatTimeMs, formatTokens, formatUsd } from "../format.js";
 import { CopyButton, InlineCopyValue } from "./recordDetail/CopyButton.js";
@@ -18,7 +19,7 @@ interface Props {
   /** Subagent id to scope the fetch to, when opened from an agent-scoped timeline (unused today —
    *  the Timeline lens only ever shows the main session — but the API already supports it). */
   agent?: string;
-  /** Hash to navigate to on close (the current session/lens with no `?record=` param). */
+  /** Path to navigate to on close (the current session/lens with no `?record=` param). */
   closeHref: string;
 }
 
@@ -368,13 +369,14 @@ function RecordBody({ detail, agent }: { detail: RecordDetailData; agent: string
  * Record-detail slide-over (L3, screen 8) — see design-spec/17-record-detail.md.
  * Opens over the current lens (dimmed via the `.dim` wrapper the caller renders
  * around lens content), `esc`/backdrop-click/close-button all navigate back to
- * `closeHref`. See router.ts's `buildRecordHash` doc comment for why this is
+ * `closeHref`. See router.ts's `recordPath` doc comment for why this is
  * hash-addressed rather than component-local state.
  */
 export function RecordDetail({ project, id, line, agent, closeHref }: Props) {
   const [detail, setDetail] = useState<RecordDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     setDetail(null);
@@ -397,16 +399,16 @@ export function RecordDetail({ project, id, line, agent, closeHref }: Props) {
   }, [project, id, line, agent]);
 
   const close = () => {
-    window.location.hash = closeHref;
+    navigate(closeHref);
   };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") window.location.hash = closeHref;
+      if (e.key === "Escape") navigate(closeHref);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeHref]);
+  }, [closeHref, navigate]);
 
   const name = detail !== null ? headerName(detail) : undefined;
 
