@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import type { SessionJson } from "../api.js";
+import type { AnySessionJson } from "../api.js";
 import { formatTime, formatTokens } from "../format.js";
 import { sessionPath } from "../router.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
   /**
    * Overrides the "→ context & cost" link target — used by the agent detail
    * shell (L3) to point at its own (placeholder) context lens instead of the
@@ -52,7 +52,7 @@ function niceCeil(v: number): number {
   return 10 * magnitude;
 }
 
-function buildGeometry(session: SessionJson): Geometry | null {
+function buildGeometry(session: AnySessionJson): Geometry | null {
   const rawPoints = session.contextTimeline
     .filter((p) => p.timestamp !== undefined)
     .map((p) => ({
@@ -160,8 +160,17 @@ function buildGeometry(session: SessionJson): Geometry | null {
 export function ContextGrowthChart({ session, contextHref, bare = false }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(session), [session]);
+  // Codex sessions have no `projectDirName` field (that's a Claude-only
+  // concept — see session-analysis.ts) but always route through the literal
+  // "codex" project segment (matches sessionPath usage everywhere else a
+  // Codex session id is turned into a URL).
   const resolvedContextHref =
-    contextHref ?? sessionPath(session.projectDirName, session.sessionId, "context");
+    contextHref ??
+    sessionPath(
+      session.source === "claude-code" ? session.projectDirName : "codex",
+      session.sessionId,
+      "context",
+    );
   const hovered =
     hoverIndex !== null && geometry !== null ? geometry.hoverNodes[hoverIndex] : undefined;
 

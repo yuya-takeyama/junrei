@@ -97,8 +97,13 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   `gpt-5*` family pricing (LiteLLM snapshot), MCP tools accept
   `project: "codex"` for session-scoped lookups (Claude-only tools reject
   Codex sessions with a clear error) — this PR
-- ⬜ Web UI: session-list source tabs (Claude Code / Codex / all), Codex
-  detail screen (turns, tool calls, reasoning tokens, rate limits) — next
+- ✅ Web UI: session-list source tabs (All / Claude Code / Codex, persisted
+  in `?source=`), Codex detail screen reusing the Overview/Context & cost
+  lenses (branched on `source` where Claude-only data — subagents, per-turn
+  cache-write composition, API errors — doesn't exist) plus a Codex-only
+  Turns lens (per-turn model/duration/tokens/reasoning, provenance chips),
+  "est." cost markers wherever a Codex figure is API-list-price estimated
+  rather than billed (#30 — this PR)
 
 ## Later (post-v1)
 

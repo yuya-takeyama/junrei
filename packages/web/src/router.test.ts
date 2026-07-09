@@ -6,6 +6,7 @@ import {
   agentRecordPath,
   normalizeLens,
   parseRecordParam,
+  parseSourceTab,
   recordPath,
   SESSION_ROUTE_PATH,
   sessionPath,
@@ -119,5 +120,28 @@ describe("parseRecordParam", () => {
   it("returns undefined when the param is absent or non-numeric", () => {
     expect(parseRecordParam(new URLSearchParams())).toBeUndefined();
     expect(parseRecordParam(new URLSearchParams("record=abc"))).toBeUndefined();
+  });
+});
+
+describe("parseSourceTab", () => {
+  it("passes through known source tabs", () => {
+    expect(parseSourceTab("all")).toBe("all");
+    expect(parseSourceTab("claude-code")).toBe("claude-code");
+    expect(parseSourceTab("codex")).toBe("codex");
+  });
+
+  it("falls back to 'all' for missing or unrecognized values", () => {
+    expect(parseSourceTab(null)).toBe("all");
+    expect(parseSourceTab("bogus")).toBe("all");
+  });
+
+  it("round-trips through a URLSearchParams the way the session-list URL does", () => {
+    const params = new URLSearchParams();
+    params.set("source", "codex");
+    expect(parseSourceTab(params.get("source"))).toBe("codex");
+
+    // The "All" tab omits the param entirely (see SessionList's tab click handler).
+    params.delete("source");
+    expect(parseSourceTab(params.get("source"))).toBe("all");
   });
 });

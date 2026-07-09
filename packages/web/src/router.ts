@@ -1,7 +1,20 @@
-/** Lens tabs shown inside a session shell (the persistent "band" + tab bar). */
-export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files";
+/**
+ * Lens tabs shown inside a session shell (the persistent "band" + tab bar).
+ * "turns" is Codex-only (per-turn model/duration/token table — Codex has no
+ * subagent tree, timeline, files/skills, or orchestration concept, so a
+ * Codex session shell shows only overview/context/turns — see
+ * `CLAUDE_LENSES`/`CODEX_LENSES` below).
+ */
+export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "turns";
 
-const LENSES: readonly Lens[] = ["overview", "timeline", "orchestration", "context", "files"];
+const LENSES: readonly Lens[] = [
+  "overview",
+  "timeline",
+  "orchestration",
+  "context",
+  "files",
+  "turns",
+];
 
 /** Human label per lens — shared by SessionShell (L1) and AgentShell (L3) for the tab bar and placeholders. */
 export const LENS_LABEL: Record<Lens, string> = {
@@ -10,7 +23,20 @@ export const LENS_LABEL: Record<Lens, string> = {
   orchestration: "Orchestration",
   context: "Context & cost",
   files: "Files & skills",
+  turns: "Turns",
 };
+
+/** Tab bar for a Claude Code session shell — unchanged from the pre-Codex lineup. */
+export const CLAUDE_LENSES: readonly Lens[] = [
+  "overview",
+  "timeline",
+  "orchestration",
+  "context",
+  "files",
+];
+
+/** Tab bar for a Codex session shell — no subagent tree, timeline, or files/skills data exists to show. */
+export const CODEX_LENSES: readonly Lens[] = ["overview", "context", "turns"];
 
 function isLens(value: string | undefined): value is Lens {
   return value !== undefined && (LENSES as readonly string[]).includes(value);
@@ -103,4 +129,23 @@ export function agentRecordPath(
   line: number,
 ): string {
   return `${agentPath(project, id, agentId, lens)}?record=${line}`;
+}
+
+/** Session-list source filter tab — mirrors the server's `SessionSourceFilter` minus omission (the web always passes one explicitly). */
+export type SourceTab = "all" | "claude-code" | "codex";
+
+const SOURCE_TABS: readonly SourceTab[] = ["all", "claude-code", "codex"];
+
+function isSourceTab(value: string | null): value is SourceTab {
+  return value !== null && (SOURCE_TABS as readonly string[]).includes(value);
+}
+
+/**
+ * Normalizes the `?source=` query param on the session list to a valid
+ * `SourceTab`, defaulting to "all" for anything missing or unrecognized —
+ * same fallback shape as `normalizeLens` above, so a stale/invalid `source`
+ * value never breaks the page, it just falls back to the merged view.
+ */
+export function parseSourceTab(value: string | null): SourceTab {
+  return isSourceTab(value) ? value : "all";
 }

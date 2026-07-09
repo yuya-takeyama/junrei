@@ -1,14 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
 import { formatDateTime, formatDuration, formatProject, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel } from "./modelClass.js";
-import { sessionPath } from "./router.js";
+import { parseSourceTab, type SourceTab, sessionPath } from "./router.js";
+import {
+  isEstimatedCost,
+  sessionsListQuery,
+  sourceBadgeLabel,
+  subagentCellText,
+} from "./sessionListHelpers.js";
 import { Band } from "./shell/Band.js";
+import { EstBadge } from "./shell/EstBadge.js";
 
 const LIST_LIMIT = "200";
+
+const SOURCE_TAB_LABEL: Record<SourceTab, string> = {
+  all: "All",
+  "claude-code": "Claude Code",
+  codex: "Codex",
+};
+const SOURCE_TAB_ORDER: readonly SourceTab[] = ["all", "claude-code", "codex"];
 
 type DateFilter = "14" | "30" | "all";
 const DATE_FILTER_CYCLE: readonly DateFilter[] = ["all", "14", "30"];
@@ -62,17 +76,36 @@ export function SessionList() {
   const [project, setProject] = useState("all");
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Persisted in the URL (`?source=`) rather than component state so a
+  // reload or shared link keeps the selected tab — same pattern as the lens
+  // segment / `?record=` param elsewhere in the router (see router.ts).
+  const sourceTab = parseSourceTab(searchParams.get("source"));
 
   useEffect(() => {
+    setSessions(null);
+    setError(null);
+    // A rapid tab switch leaves the previous request in flight; without this
+    // flag its late response would clobber the newer tab's list.
+    let stale = false;
+    // Always pass `source` explicitly: an omitted `source` defaults to
+    // Claude-only on the server (back-compat for pre-Codex clients — see
+    // `listSessions` in sessions.ts), which would silently hide Codex rows
+    // even on the "All" tab.
     client.api.sessions
-      .$get({ query: { limit: LIST_LIMIT } })
+      .$get({ query: sessionsListQuery(sourceTab, LIST_LIMIT) })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
         const body = await res.json();
-        setSessions(body.sessions);
+        if (!stale) setSessions(body.sessions);
       })
-      .catch((e: unknown) => setError(String(e)));
-  }, []);
+      .catch((e: unknown) => {
+        if (!stale) setError(String(e));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sourceTab]);
 
   const projects = useMemo(() => {
     if (sessions === null) return [];
@@ -111,6 +144,23 @@ export function SessionList() {
         <h1 className="ttl" style={{ fontSize: "20px" }}>
           Sessions
         </h1>
+        <div className="fx ac gap8">
+          {SOURCE_TAB_ORDER.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={tab === sourceTab ? "chip on" : "chip"}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                if (tab === "all") next.delete("source");
+                else next.set("source", tab);
+                setSearchParams(next);
+              }}
+            >
+              {SOURCE_TAB_LABEL[tab]}
+            </button>
+          ))}
+        </div>
         <div className="fx ac gap8" style={{ flexWrap: "wrap" }}>
           <select
             className="chip on"
@@ -169,7 +219,19 @@ export function SessionList() {
               <span className="mono fs11 mut nowrap" title={s.projectDirName}>
                 {formatProject(s.projectDirName, s.cwd)}
               </span>
-              <span className="nowrap">{s.title ?? s.firstUserPrompt ?? s.sessionId}</span>
+              <span className="fx ac gap8 nowrap">
+                {sourceTab === "all" && (
+                  <span className="mbdg" title={sourceBadgeLabel(s.source)}>
+                    {sourceBadgeLabel(s.source)}
+                  </span>
+                )}
+                <span className="nowrap">{s.title ?? s.firstUserPrompt ?? s.sessionId}</span>
+                {s.source === "codex" && s.archived && (
+                  <span className="mut fs10" title="archived Codex rollout">
+                    archived
+                  </span>
+                )}
+              </span>
               <span className="num fs12 mut">
                 {s.startedAt !== undefined ? formatDateTime(s.startedAt) : "—"}
               </span>
@@ -180,9 +242,14 @@ export function SessionList() {
               <span className={s.totalCostUsd === 0 ? "num fs12 cellr mut" : "num fs12 cellr"}>
                 {formatUsd(s.totalCostUsd)}
                 {s.costIsComplete ? "" : "*"}
+                {isEstimatedCost(s) && <EstBadge />}
               </span>
               <ModelMixBar mix={s.modelMix} />
-              <NumCell value={s.subagentCount} />
+              {s.source === "codex" ? (
+                <span className="num fs12 cellr mut">{subagentCellText(s)}</span>
+              ) : (
+                <NumCell value={s.subagentCount} />
+              )}
               <NumCell value={s.toolErrorCount} errorish />
               <NumCell value={s.compactionCount} />
             </Link>

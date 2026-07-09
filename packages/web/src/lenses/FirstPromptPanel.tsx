@@ -1,8 +1,8 @@
 import { useState } from "react";
-import type { SessionJson } from "../api.js";
+import type { AnySessionJson } from "../api.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
   /**
    * Overrides the `.lbl` text — the agent detail shell (L3) reuses this
    * component verbatim for its "Launch prompt" strip (design-spec/16), same
