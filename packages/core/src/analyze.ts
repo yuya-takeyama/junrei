@@ -1,6 +1,5 @@
 import { basename, dirname } from "node:path";
 import type {
-  ContextPoint,
   ExplorationProfile,
   FileAccessAgg,
   FileAccessEntry,
@@ -27,7 +26,8 @@ import {
   mergeFileAccess,
 } from "./metrics.js";
 import { parseTranscriptFile } from "./parser.js";
-import type { ApiErrorLogEntry, CompactionEvent, SessionData, ToolCall } from "./session-data.js";
+import type { SessionAnalysisCore } from "./session-analysis.js";
+import type { ApiErrorLogEntry, SessionData, ToolCall } from "./session-data.js";
 import {
   agentLaunchToolUseIds,
   asyncAgentLaunchToolUseIds,
@@ -97,28 +97,17 @@ export interface SubagentNode {
   children: SubagentNode[];
 }
 
-export interface SessionAnalysis {
-  sessionId: string;
-  filePath: string;
+/**
+ * Claude Code session analysis — `SessionAnalysisCore` plus everything that
+ * only makes sense for a Claude Code transcript (subagent trees, per-tool
+ * breakdowns, skill invocations, ...). See `session-analysis.ts` for the
+ * shared-core rationale and `CodexSessionAnalysis` for the other variant.
+ */
+export interface SessionAnalysis extends SessionAnalysisCore {
+  source: "claude-code";
   projectDirName: string;
-  cwd?: string;
-  gitBranch?: string;
   version?: string;
-  title?: string;
-  startedAt?: string;
-  endedAt?: string;
-  durationMs?: number;
-  userTurnCount: number;
   apiMessageCount: number;
-  models: string[];
-  /** Main transcript only. */
-  usage: UsageSummary;
-  /** Main + all subagents. */
-  totalUsage: TokenTotals & { costUsd: number; costIsComplete: boolean };
-  /** Per-model usage, main session + all subagents merged (recursively) by model id. */
-  totalUsageByModel: ModelUsageSummary[];
-  contextTimeline: ContextPoint[];
-  compactions: CompactionEvent[];
   apiErrorCount: number;
   /** Capped list backing apiErrorCount — see `ApiErrorLogEntry`. Main transcript only. */
   apiErrors: ApiErrorLogEntry[];
@@ -138,11 +127,10 @@ export interface SessionAnalysis {
   skillInvocations: SkillInvocation[];
   subagents: SubagentNode[];
   subagentCount: number;
-  firstUserPrompt?: string;
-  /** Source line of the first user prompt (provenance for the Overview lens's "L<n>" ref). */
-  firstUserPromptLine?: number;
-  parseWarningCount: number;
 }
+
+/** Alias matching the `Claude*` naming used by the Codex counterpart — same type as `SessionAnalysis`. */
+export type ClaudeSessionAnalysis = SessionAnalysis;
 
 /**
  * Merge per-model usage summaries from the main transcript and every subagent
@@ -225,6 +213,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
   const firstUserPromptLine = data.userPrompts[0]?.line;
 
   return {
+    source: "claude-code",
     sessionId,
     filePath,
     projectDirName,

@@ -1,5 +1,19 @@
-export type { SessionAnalysis, SubagentNode } from "./analyze.js";
+import type { ClaudeSessionAnalysis } from "./analyze.js";
+import type { CodexSessionAnalysis } from "./codex/analyze.js";
+
+export type { ClaudeSessionAnalysis, SessionAnalysis, SubagentNode } from "./analyze.js";
 export { analyzeSession } from "./analyze.js";
+export type {
+  CodexRecord,
+  CodexSessionAnalysis,
+  CodexSessionExtras,
+  CodexTurnUsage,
+} from "./codex/analyze.js";
+export { analyzeCodexSession } from "./codex/analyze.js";
+export type { CodexSessionFileRef } from "./codex/discovery.js";
+export { listCodexSessionFiles, resolveCodexHome } from "./codex/discovery.js";
+export type { CodexTranscript } from "./codex/parser.js";
+export { parseCodexTranscriptFile } from "./codex/parser.js";
 export type { SessionFileRef } from "./discovery.js";
 export { listSessionFiles, resolveProjectsDirs } from "./discovery.js";
 export { parseJsonlLine } from "./jsonl.js";
@@ -42,6 +56,7 @@ export {
   findModelPricing,
   pricingSnapshotInfo,
 } from "./pricing/pricing.js";
+export type { SessionAnalysisCore, SessionSource } from "./session-analysis.js";
 export type {
   ApiErrorLogEntry,
   ApiMessage,
@@ -51,6 +66,8 @@ export type {
   UserPrompt,
 } from "./session-data.js";
 export { buildSessionData } from "./session-data.js";
+/** Either harness's analysis, discriminated on `source`. */
+export type AnySessionAnalysis = ClaudeSessionAnalysis | CodexSessionAnalysis;
 export type { SubagentMeta, SubagentRef } from "./subagents.js";
 export { listSubagentRefs, loadSubagentSessionData, subagentsDirFor } from "./subagents.js";
 export type {
