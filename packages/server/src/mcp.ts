@@ -1,4 +1,4 @@
-import type { SessionAnalysis } from "@junrei/core";
+import type { ClaudeSessionAnalysis } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -8,28 +8,40 @@ import {
   listSessions,
 } from "./sessions.js";
 
-const CODEX_PROJECT = "codex";
-
 const sessionRef = {
+  source: z.enum(["claude-code", "codex"]).describe("Which harness the session came from"),
+  sessionId: z.string().describe("Session UUID (from list_sessions)"),
   project: z
     .string()
+    .optional()
     .describe(
-      'Munged project directory name (from list_sessions), or the literal "codex" for a ' +
-        "Codex CLI session (sessionId still comes from list_sessions).",
+      "Munged project directory name (from list_sessions) — required for claude-code " +
+        "sessions, ignored for codex.",
     ),
-  sessionId: z.string().describe("Session UUID (from list_sessions)"),
 };
 
 function jsonResult(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
-function notFound(project: string, sessionId: string) {
+function notFound(sessionId: string) {
   return {
     content: [
       {
         type: "text" as const,
-        text: `Session not found: ${project}/${sessionId}. Use list_sessions to discover sessions.`,
+        text: `Session not found: ${sessionId}. Use list_sessions to discover sessions.`,
+      },
+    ],
+    isError: true,
+  };
+}
+
+function missingProject() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: "project is required for claude-code sessions (from list_sessions).",
       },
     ],
     isError: true,
@@ -56,30 +68,39 @@ function notAvailableForCodex() {
   };
 }
 
+type SessionRefArgs = {
+  source: "claude-code" | "codex";
+  sessionId: string;
+  project?: string | undefined;
+};
+
 type ResolvedAnalysis =
-  | { source: "claude-code"; analysis: SessionAnalysis }
-  | { source: "codex"; analysis: CodexSessionAnalysisWithSubagents };
+  | { source: "claude-code"; analysis: ClaudeSessionAnalysis }
+  | { source: "codex"; analysis: CodexSessionAnalysisWithSubagents }
+  | { error: ReturnType<typeof notFound> | ReturnType<typeof missingProject> };
 
 /**
- * Resolve either harness's analysis from the same `{project, sessionId}`
- * pair the tools take: `project === "codex"` routes to the Codex lookup
- * (which is keyed by sessionId alone — Codex has no project-dir concept),
- * anything else is a Claude Code lookup exactly as before.
+ * Resolve either harness's analysis from `{source, sessionId, project?}`:
+ * `source: "codex"` looks up by `sessionId` alone (Codex has no project-dir
+ * concept); `source: "claude-code"` requires `project` and errors clearly
+ * when it's missing rather than silently guessing.
  */
-async function resolveAnalysis(
-  project: string,
-  sessionId: string,
-): Promise<ResolvedAnalysis | undefined> {
-  if (project === CODEX_PROJECT) {
-    const analysis = await getCodexSession(sessionId);
-    return analysis === undefined ? undefined : { source: "codex", analysis };
+async function resolveAnalysis(args: SessionRefArgs): Promise<ResolvedAnalysis> {
+  if (args.source === "codex") {
+    const analysis = await getCodexSession(args.sessionId);
+    return analysis === undefined
+      ? { error: notFound(args.sessionId) }
+      : { source: "codex", analysis };
   }
-  const analysis = await getSession(project, sessionId);
-  return analysis === undefined ? undefined : { source: "claude-code", analysis };
+  if (args.project === undefined) return { error: missingProject() };
+  const analysis = await getSession(args.project, args.sessionId);
+  return analysis === undefined
+    ? { error: notFound(args.sessionId) }
+    : { source: "claude-code", analysis };
 }
 
 /** Compact summary: the full analysis minus bulky series (fetch those via dedicated tools). */
-function toSummary(analysis: SessionAnalysis) {
+function toSummary(analysis: ClaudeSessionAnalysis) {
   const {
     contextTimeline,
     subagents,
@@ -174,9 +195,8 @@ export function createMcpServer(): McpServer {
           .describe("Restrict to one harness; omit for both, merged and sorted by recency"),
       },
     },
-    // MCP defaults to the merged view (items self-describe via `source`),
-    // unlike the HTTP API whose omitted-source default stays Claude-only for
-    // pre-Codex web clients.
+    // Omitted source = merged view, same default as the HTTP API — items
+    // self-describe via `source`.
     async ({ limit, source }) => jsonResult(await listSessions(limit ?? 20, source ?? "all")),
   );
 
@@ -186,13 +206,13 @@ export function createMcpServer(): McpServer {
       description:
         "Full quantitative summary of one session: usage/cost per model (main + subagents), " +
         "tool stats with error categories, exploration profile, compactions, and counts. " +
-        'Works for both Claude Code sessions and Codex CLI sessions (project: "codex"). ' +
+        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex"). ' +
         "Use get_context_timeline / find_repetitions / get_subagent_tree for the detailed series.",
       inputSchema: sessionRef,
     },
-    async ({ project, sessionId }) => {
-      const resolved = await resolveAnalysis(project, sessionId);
-      if (resolved === undefined) return notFound(project, sessionId);
+    async (args) => {
+      const resolved = await resolveAnalysis(args);
+      if ("error" in resolved) return resolved.error;
       return jsonResult(
         resolved.source === "codex"
           ? toCodexSummary(resolved.analysis)
@@ -208,12 +228,12 @@ export function createMcpServer(): McpServer {
         "Context-size series for one session: effective context tokens " +
         "(input + cache_read + cache_creation) per API message, plus compaction events " +
         "with pre/post token counts. Each point carries its source line number for provenance. " +
-        'Works for both Claude Code sessions and Codex CLI sessions (project: "codex").',
+        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex").',
       inputSchema: sessionRef,
     },
-    async ({ project, sessionId }) => {
-      const resolved = await resolveAnalysis(project, sessionId);
-      if (resolved === undefined) return notFound(project, sessionId);
+    async (args) => {
+      const resolved = await resolveAnalysis(args);
+      if ("error" in resolved) return resolved.error;
       return jsonResult({
         contextTimeline: resolved.analysis.contextTimeline,
         compactions: resolved.analysis.compactions,
@@ -231,11 +251,12 @@ export function createMcpServer(): McpServer {
         "depends on the task. Claude Code sessions only.",
       inputSchema: sessionRef,
     },
-    async ({ project, sessionId }) => {
-      if (project === CODEX_PROJECT) return notAvailableForCodex();
+    async ({ source, project, sessionId }) => {
+      if (source === "codex") return notAvailableForCodex();
+      if (project === undefined) return missingProject();
       const analysis = await getSession(project, sessionId);
       return analysis === undefined
-        ? notFound(project, sessionId)
+        ? notFound(sessionId)
         : jsonResult({ repetitions: analysis.repetitions });
     },
   );
@@ -246,14 +267,14 @@ export function createMcpServer(): McpServer {
       description:
         "Subagent/sub-agent execution tree for one session: per-agent type, model, prompt " +
         "preview, token usage, estimated cost, tool call/error counts, and nesting. Works for " +
-        'both Claude Code sessions and Codex CLI sessions (project: "codex") — a Codex ' +
+        'both Claude Code sessions and Codex CLI sessions (source: "codex") — a Codex ' +
         "sub-agent is its own rollout file rather than a sidecar transcript, but resolves " +
         "into the same tree shape.",
       inputSchema: sessionRef,
     },
-    async ({ project, sessionId }) => {
-      const resolved = await resolveAnalysis(project, sessionId);
-      if (resolved === undefined) return notFound(project, sessionId);
+    async (args) => {
+      const resolved = await resolveAnalysis(args);
+      if ("error" in resolved) return resolved.error;
       return jsonResult({
         subagentCount: resolved.analysis.subagentCount,
         subagents: resolved.analysis.subagents,
@@ -271,11 +292,12 @@ export function createMcpServer(): McpServer {
         "Claude Code sessions only.",
       inputSchema: sessionRef,
     },
-    async ({ project, sessionId }) => {
-      if (project === CODEX_PROJECT) return notAvailableForCodex();
+    async ({ source, project, sessionId }) => {
+      if (source === "codex") return notAvailableForCodex();
+      if (project === undefined) return missingProject();
       const analysis = await getSession(project, sessionId);
       return analysis === undefined
-        ? notFound(project, sessionId)
+        ? notFound(sessionId)
         : jsonResult({ taskExecutions: analysis.taskExecutions });
     },
   );
@@ -286,12 +308,12 @@ export function createMcpServer(): McpServer {
       description:
         "The first user prompt of a session (truncated preview) — the original task " +
         "the quantitative data should be interpreted against. Works for both Claude Code " +
-        'sessions and Codex CLI sessions (project: "codex").',
+        'sessions and Codex CLI sessions (source: "codex").',
       inputSchema: sessionRef,
     },
-    async ({ project, sessionId }) => {
-      const resolved = await resolveAnalysis(project, sessionId);
-      if (resolved === undefined) return notFound(project, sessionId);
+    async (args) => {
+      const resolved = await resolveAnalysis(args);
+      if ("error" in resolved) return resolved.error;
       return jsonResult({
         firstUserPrompt: resolved.analysis.firstUserPrompt ?? null,
         title: resolved.analysis.title ?? null,

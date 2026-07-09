@@ -2,7 +2,7 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
-export interface SessionFileRef {
+export interface ClaudeSessionFileRef {
   /** Session UUID (the JSONL file basename). */
   sessionId: string;
   filePath: string;
@@ -40,8 +40,8 @@ export async function resolveProjectsDirs(
 }
 
 /** List all session JSONL files across projects, newest first. */
-export async function listSessionFiles(projectsDirs: string[]): Promise<SessionFileRef[]> {
-  const refs: SessionFileRef[] = [];
+export async function listSessionFiles(projectsDirs: string[]): Promise<ClaudeSessionFileRef[]> {
+  const refs: ClaudeSessionFileRef[] = [];
   for (const projectsDir of projectsDirs) {
     let projectDirs: string[];
     try {

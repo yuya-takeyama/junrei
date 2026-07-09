@@ -7,7 +7,7 @@ import {
   type FileAccessAgg,
   mergeFileAccess,
 } from "./metrics.js";
-import { parseTranscriptFile } from "./parser.js";
+import { parseClaudeTranscriptFile } from "./parser.js";
 import type { SessionData, ToolCall } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
 
@@ -18,7 +18,7 @@ const SESSION_FILE = join(
 );
 
 async function loadMainData(): Promise<SessionData> {
-  const transcript = await parseTranscriptFile(SESSION_FILE);
+  const transcript = await parseClaudeTranscriptFile(SESSION_FILE);
   return buildSessionData(transcript);
 }
 

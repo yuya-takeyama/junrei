@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeSession, type SessionAnalysis } from "@junrei/core";
+import { analyzeSession, type ClaudeSessionAnalysis } from "@junrei/core";
 import { describe, expect, it } from "vitest";
 import { computeModelMix } from "./sessions.js";
 
@@ -46,7 +46,7 @@ describe("computeModelMix", () => {
         },
       },
       subagents: [],
-    } as unknown as SessionAnalysis;
+    } as unknown as ClaudeSessionAnalysis;
     expect(computeModelMix(analysis)).toEqual([]);
   });
 });

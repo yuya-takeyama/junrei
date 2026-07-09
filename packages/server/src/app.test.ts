@@ -13,7 +13,7 @@ const PROJECT = "-Users-test-proj";
 const SESSION_ID = "11111111-1111-1111-1111-111111111111";
 const AGENT_ID = "aaaa111122223333f";
 
-describe("timeline + record routes", () => {
+describe("Claude Code timeline + record routes", () => {
   let previousConfigDir: string | undefined;
 
   beforeAll(() => {
@@ -29,9 +29,18 @@ describe("timeline + record routes", () => {
     }
   });
 
-  it("GET /api/sessions/:project/:id/timeline returns ordered entries", async () => {
+  it("GET /api/sessions/claude-code/:project/:id returns { analysis: ClaudeSessionAnalysis }", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/timeline`);
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { analysis: { sessionId: string; source?: string } };
+    expect(body.analysis.sessionId).toBe(SESSION_ID);
+    expect(body.analysis.source).toBe("claude-code");
+  });
+
+  it("GET /api/sessions/claude-code/:project/:id/timeline returns ordered entries", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/timeline`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { entries: Array<{ kind: string; line: number }> };
     expect(body.entries[0]).toMatchObject({ kind: "user", line: 1 });
@@ -43,7 +52,7 @@ describe("timeline + record routes", () => {
   it("GET .../timeline?agent=<id> scopes the timeline to that subagent", async () => {
     const app = createApp();
     const res = await app.request(
-      `/api/sessions/${PROJECT}/${SESSION_ID}/timeline?agent=${AGENT_ID}`,
+      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/timeline?agent=${AGENT_ID}`,
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { entries: Array<{ kind: string }> };
@@ -57,14 +66,14 @@ describe("timeline + record routes", () => {
 
   it("GET .../timeline 404s for an unknown session", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/${PROJECT}/does-not-exist/timeline`);
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/does-not-exist/timeline`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "session not found" });
   });
 
-  it("GET /api/sessions/:project/:id/record/:line returns full tool-call detail", async () => {
+  it("GET /api/sessions/claude-code/:project/:id/record/:line returns full tool-call detail", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/record/3`);
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/record/3`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       kind: string;
@@ -80,7 +89,9 @@ describe("timeline + record routes", () => {
 
   it("GET .../record/:line 404s for a non-numeric line", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/record/not-a-number`);
+    const res = await app.request(
+      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/record/not-a-number`,
+    );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "record not found" });
   });
@@ -88,35 +99,41 @@ describe("timeline + record routes", () => {
   it("GET .../record/:line 404s for a line with no addressable record", async () => {
     const app = createApp();
     // Line 4 is a tool_result-only carrier — not independently addressable.
-    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/record/4`);
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/record/4`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "record not found" });
   });
 
-  it("GET /api/sessions/:project/:id/agents/:agentId analyzes the sidecar transcript", async () => {
+  it("GET /api/sessions/claude-code/:project/:id/agents/:agentId returns { analysis } for the sidecar transcript", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/agents/${AGENT_ID}`);
+    const res = await app.request(
+      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/agents/${AGENT_ID}`,
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      sessionId: string;
-      usage: { total: { inputTokens: number } };
-      apiMessageCount: number;
-      subagents: unknown[];
+      analysis: {
+        sessionId: string;
+        usage: { total: { inputTokens: number } };
+        apiMessageCount: number;
+        subagents: unknown[];
+      };
     };
-    // Same SessionAnalysis shape as the main session endpoint, applied to the
+    // Same ClaudeSessionAnalysis shape as the main session endpoint, applied to the
     // agent's own sidecar transcript instead — sessionId is the sidecar's
     // filename stem (agent-<id>), it has its own usage/apiMessageCount, and
     // (this fixture agent has no nested children of its own) an empty
     // subagent forest.
-    expect(body.sessionId).toBe(`agent-${AGENT_ID}`);
-    expect(body.usage.total.inputTokens).toBeGreaterThan(0);
-    expect(body.apiMessageCount).toBeGreaterThan(0);
-    expect(body.subagents).toEqual([]);
+    expect(body.analysis.sessionId).toBe(`agent-${AGENT_ID}`);
+    expect(body.analysis.usage.total.inputTokens).toBeGreaterThan(0);
+    expect(body.analysis.apiMessageCount).toBeGreaterThan(0);
+    expect(body.analysis.subagents).toEqual([]);
   });
 
   it("GET .../agents/:agentId 404s for an unknown agent id", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}/agents/does-not-exist`);
+    const res = await app.request(
+      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/agents/does-not-exist`,
+    );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "session not found" });
   });
@@ -247,17 +264,14 @@ describe("Codex routes", () => {
     expect(await res.json()).toEqual({ error: "record not found" });
   });
 
-  it("the literal 'codex' segment never collides with a real munged project dir (always starts with '-')", async () => {
-    // Regression guard for the route-registration-order invariant documented
-    // in app.ts: a request for the Claude route shaped identically except
-    // for the project segment must still resolve as a Claude lookup, not
-    // fall through to the Codex handler.
+  it("the old unprefixed detail route is gone (clean break, no legacy alias) and 404s", async () => {
+    // Regression guard for the source-symmetry refactor: `/api/sessions/:project/:id`
+    // (pre-refactor, Claude-only, no source prefix) must not resolve at all anymore —
+    // Hono returns a bare 404 (no matching route), distinct from the app's own
+    // `{ error: "session not found" }` JSON 404 for a *known* route with an unknown id.
     const app = createApp();
     const res = await app.request(`/api/sessions/${PROJECT}/${SESSION_ID}`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { sessionId: string; source?: string };
-    expect(body.sessionId).toBe(SESSION_ID);
-    expect(body.source).toBe("claude-code"); // not routed to the Codex handler's { analysis: ... } envelope.
+    expect(res.status).toBe(404);
   });
 
   it("GET /api/sessions?source=... filters, and merging both sources includes Codex items", async () => {
@@ -278,11 +292,12 @@ describe("Codex routes", () => {
     expect(mergedBody.sessions.some((s) => s.source === "claude-code")).toBe(true);
     expect(mergedBody.sessions.length).toBe(codexBody.sessions.length + claudeBody.sessions.length);
 
-    // Omitted source stays Claude-only so the pre-Codex web UI is unaffected
-    // until it opts in with ?source=all.
+    // Omitted source now means "all" (no more back-compat Claude-only default —
+    // see sessions.ts's listSessions), so it must match the explicit ?source=all result.
     const omitted = await app.request("/api/sessions");
     const omittedBody = (await omitted.json()) as { sessions: Array<{ source: string }> };
-    expect(omittedBody.sessions.length).toBe(claudeBody.sessions.length);
-    expect(omittedBody.sessions.every((s) => s.source === "claude-code")).toBe(true);
+    expect(omittedBody.sessions.length).toBe(mergedBody.sessions.length);
+    expect(omittedBody.sessions.some((s) => s.source === "codex")).toBe(true);
+    expect(omittedBody.sessions.some((s) => s.source === "claude-code")).toBe(true);
   });
 });

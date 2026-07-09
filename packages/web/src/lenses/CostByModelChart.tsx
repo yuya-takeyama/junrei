@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import type { AnySessionJson } from "../api.js";
 import { formatUsd } from "../format.js";
 import { classifyModel, modelShortLabel } from "../modelClass.js";
-import { sessionPath } from "../router.js";
+import { sessionPath, sessionRefOf } from "../router.js";
 import { EstBadge } from "../shell/EstBadge.js";
 
 interface Props {
@@ -24,7 +24,7 @@ export function CostByModelChart({ session }: Props) {
   // there — both are Claude-only.
   const isClaudeCode = session.source === "claude-code";
   const orchestrationHref = isClaudeCode
-    ? sessionPath(session.projectDirName, session.sessionId, "orchestration")
+    ? sessionPath(sessionRefOf(session), "orchestration")
     : undefined;
 
   return (

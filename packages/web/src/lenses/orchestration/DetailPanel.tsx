@@ -89,12 +89,12 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySe
   // Claude subagents get their own dedicated shell (agent/:agentId — a
   // sidecar transcript, not a session in its own right). A Codex sub-agent
   // IS a full session (its own rollout file), so its "full detail" is just
-  // its own session page — `sessionPath("codex", agentId)` — rather than a
-  // separate agent route.
+  // its own session page — `sessionPath({source: "codex", id: agentId})` —
+  // rather than a separate agent route.
   const detailHref =
     session.source === "claude-code"
       ? agentPath(session.projectDirName, session.sessionId, node.agentId)
-      : sessionPath("codex", node.agentId);
+      : sessionPath({ source: "codex", id: node.agentId });
 
   return (
     <>

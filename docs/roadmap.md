@@ -158,6 +158,24 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   task-execution row stay Claude-only (no honest Codex equivalent) and are
   skipped for Codex, same pattern `ContextCost` uses for its own Claude-only
   panels — this PR
+- ✅ Source-symmetric API/naming refactor: routes are now source-prefixed and
+  parallel — `/api/sessions/claude-code/:project/:id` (+ `/timeline`,
+  `/record/:line`, `/agents/:agentId`) vs. `/api/sessions/codex/:id` (+
+  `/timeline`, `/record/:line`); old unprefixed routes are gone (clean break,
+  no redirects). `source` query param omitted now means "all" (was a
+  Claude-only pre-Codex back-compat shim); both detail routes return the same
+  `{ analysis }` envelope. `sessions.ts` split into a thin registry/merge
+  module plus `sources/claude.ts`/`sources/codex.ts` adapters
+  (`claudeAdapter`/`codexAdapter`), dropping the `projectDirName: "codex"`
+  sentinel. Core renames (clean break, no aliases): `SessionAnalysis` →
+  `ClaudeSessionAnalysis`, `SessionFileRef` → `ClaudeSessionFileRef`,
+  `parseTranscriptFile` → `parseClaudeTranscriptFile`. Web routes:
+  `session/claude-code/:project/:id/:lens?` and `session/codex/:id/:lens?`;
+  new `sourceCaps.ts` (`capsFor`) replaces some `session.source === "..."`
+  checks. MCP `sessionRef` is now `{source: "claude-code" | "codex",
+  sessionId, project?}` (was `{project, sessionId}` with a `project: "codex"`
+  convention). Pure plumbing/naming refactor — no analysis/metrics/cost logic
+  changed — this PR
 - ⬜ Fork lineage (`forked_from_id`): parsed and retained on
   `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
   fork-tree UI exists, unlike the sub-agent forest above

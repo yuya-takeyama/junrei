@@ -62,17 +62,47 @@ export function normalizeLens(value: string | undefined): Lens {
   return isLens(value) ? value : "overview";
 }
 
-/** react-router path pattern for the session shell route, registered with `createHashRouter`. */
-export const SESSION_ROUTE_PATH = "session/:project/:id/:lens?";
+/**
+ * Identifies one session to link/fetch — mirrors the server's per-source key
+ * shapes (`ClaudeSessionKey`/`CodexSessionKey` in `@junrei/server`): Claude
+ * scopes by `{project, id}`, Codex by `{id}` alone. `sessionPath`/`recordPath`
+ * below take this instead of a bare `project`/`id` pair (the pre-refactor
+ * shape, back when a `projectDirName: "codex"` sentinel let Codex sessions
+ * pretend to have a project) so a caller can never build a URL for the wrong
+ * source by accident.
+ */
+export type SessionRef =
+  | { source: "claude-code"; project: string; id: string }
+  | { source: "codex"; id: string };
+
+/** Builds a `SessionRef` from a session-list row (`AnySessionListItem` on the server) — see `SessionRef`. */
+export function sessionRefOf(item: {
+  source: "claude-code" | "codex";
+  sessionId: string;
+  projectDirName?: string;
+}): SessionRef {
+  return item.source === "codex"
+    ? { source: "codex", id: item.sessionId }
+    : { source: "claude-code", project: item.projectDirName ?? "", id: item.sessionId };
+}
+
+/** react-router path pattern for the Claude Code session shell route, registered with `createHashRouter`. */
+export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:project/:id/:lens?";
+
+/** react-router path pattern for the Codex session shell route — no `:project` segment (Codex has none). */
+export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?";
 
 /**
  * Build the path for a session route (no leading `#` — `createHashRouter`
  * prepends it, and `<Link to>` targets are always plain pathnames). Omits the
  * lens segment for "overview" to match the historical hash shape
- * (`#/session/p/id` rather than `#/session/p/id/overview`).
+ * (`#/session/.../id` rather than `#/session/.../id/overview`).
  */
-export function sessionPath(project: string, id: string, lens: Lens = "overview"): string {
-  const base = `/session/${encodeURIComponent(project)}/${encodeURIComponent(id)}`;
+export function sessionPath(ref: SessionRef, lens: Lens = "overview"): string {
+  const base =
+    ref.source === "codex"
+      ? `/session/codex/${encodeURIComponent(ref.id)}`
+      : `/session/claude-code/${encodeURIComponent(ref.project)}/${encodeURIComponent(ref.id)}`;
   return lens === "overview" ? base : `${base}/${lens}`;
 }
 
@@ -81,7 +111,7 @@ export function sessionPath(project: string, id: string, lens: Lens = "overview"
  * (L3, screen 8) for a given source line — see `RecordDetail.tsx`.
  *
  * The record slide-over is addressed with a `?record=<line>` query segment
- * appended to the session path (e.g. `#/session/proj/id/timeline?record=42`)
+ * appended to the session path (e.g. `#/session/claude-code/proj/id/timeline?record=42`)
  * rather than component-local state. Reasons: (1) it makes a specific record
  * shareable/bookmarkable, matching how every other drill-down in this app is
  * a real URL; (2) opening the panel pushes a history entry, so the browser
@@ -89,8 +119,8 @@ export function sessionPath(project: string, id: string, lens: Lens = "overview"
  * underlying lens component never unmounts and its scroll position survives
  * open/close, satisfying "without losing place".
  */
-export function recordPath(project: string, id: string, lens: Lens, line: number): string {
-  return `${sessionPath(project, id, lens)}?record=${line}`;
+export function recordPath(ref: SessionRef, lens: Lens, line: number): string {
+  return `${sessionPath(ref, lens)}?record=${line}`;
 }
 
 /**
@@ -104,17 +134,22 @@ export function parseRecordParam(searchParams: URLSearchParams): number | undefi
 
 /**
  * react-router path pattern for the agent (subagent detail, L3) shell route,
- * registered with `createHashRouter` alongside `SESSION_ROUTE_PATH`. The
- * static `agent` segment disambiguates it from `SESSION_ROUTE_PATH`'s
+ * registered with `createHashRouter` alongside `CLAUDE_SESSION_ROUTE_PATH`.
+ * Claude-only — Codex sub-agent threads are full sessions in their own right
+ * (see `sources/codex.ts` on the server), not sidecar transcripts scoped
+ * under a parent session, so there's no Codex equivalent of this route. The
+ * static `agent` segment disambiguates it from `CLAUDE_SESSION_ROUTE_PATH`'s
  * optional `:lens?` — react-router ranks a route with more static segments
- * higher, so `/session/p/id/agent/x` matches this pattern rather than being
- * parsed as `SESSION_ROUTE_PATH` with `lens="agent"` (see router.test.ts).
+ * higher, so `/session/claude-code/p/id/agent/x` matches this pattern rather
+ * than being parsed as `CLAUDE_SESSION_ROUTE_PATH` with `lens="agent"` (see
+ * router.test.ts).
  */
-export const AGENT_ROUTE_PATH = "session/:project/:id/agent/:agentId/:lens?";
+export const AGENT_ROUTE_PATH = "session/claude-code/:project/:id/agent/:agentId/:lens?";
 
 /**
  * Build the path for an agent (subagent detail, L3) route — mirrors
- * `sessionPath`, omitting the lens segment for "overview".
+ * `sessionPath`, omitting the lens segment for "overview". Claude-only, see
+ * `AGENT_ROUTE_PATH`.
  */
 export function agentPath(
   project: string,
@@ -122,13 +157,13 @@ export function agentPath(
   agentId: string,
   lens: Lens = "overview",
 ): string {
-  const base = `/session/${encodeURIComponent(project)}/${encodeURIComponent(id)}/agent/${encodeURIComponent(agentId)}`;
+  const base = `/session/claude-code/${encodeURIComponent(project)}/${encodeURIComponent(id)}/agent/${encodeURIComponent(agentId)}`;
   return lens === "overview" ? base : `${base}/${lens}`;
 }
 
 /**
  * Build the path (+ `record` search param) that opens the record slide-over
- * scoped to one agent's own transcript — mirrors `recordPath`.
+ * scoped to one agent's own transcript — mirrors `recordPath`. Claude-only.
  */
 export function agentRecordPath(
   project: string,

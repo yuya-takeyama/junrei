@@ -77,11 +77,11 @@ describe("MCP tools", () => {
     expect(sessions.some((s) => s.source === "claude-code")).toBe(true);
   });
 
-  it("get_session_summary works for a Codex session via project: 'codex'", async () => {
+  it("get_session_summary works for a Codex session via source: 'codex'", async () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_session_summary",
-      arguments: { project: "codex", sessionId: CODEX_SESSION_ID },
+      arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
     const summary = JSON.parse(textOf(result)) as {
@@ -95,11 +95,11 @@ describe("MCP tools", () => {
     expect(summary.contextTimeline.points).toBeGreaterThan(0);
   });
 
-  it("get_session_summary still works for a Claude session (unchanged behavior)", async () => {
+  it("get_session_summary still works for a Claude session (source: 'claude-code' + project)", async () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_session_summary",
-      arguments: { project: CLAUDE_PROJECT, sessionId: CLAUDE_SESSION_ID },
+      arguments: { source: "claude-code", project: CLAUDE_PROJECT, sessionId: CLAUDE_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
     const summary = JSON.parse(textOf(result)) as { subagents?: unknown };
@@ -107,11 +107,21 @@ describe("MCP tools", () => {
     expect(summary.subagents).toBeUndefined();
   });
 
+  it("get_session_summary errors clearly when source: 'claude-code' omits project", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_session_summary",
+      arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("project is required");
+  });
+
   it("get_subagent_tree works for a Codex session too (a leaf session with no sub-agents)", async () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_subagent_tree",
-      arguments: { project: "codex", sessionId: CODEX_SESSION_ID },
+      arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
     const body = JSON.parse(textOf(result)) as { subagentCount: number; subagents: unknown[] };
@@ -124,7 +134,7 @@ describe("MCP tools", () => {
     const result = await client.callTool({
       name: "get_subagent_tree",
       arguments: {
-        project: "codex",
+        source: "codex",
         sessionId: "77777777-7777-7777-7777-777777777777",
       },
     });
@@ -143,7 +153,7 @@ describe("MCP tools", () => {
     for (const name of ["find_repetitions", "get_task_executions"]) {
       const result = await client.callTool({
         name,
-        arguments: { project: "codex", sessionId: CODEX_SESSION_ID },
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
       });
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain("not available for Codex sessions");
@@ -154,7 +164,7 @@ describe("MCP tools", () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_first_prompt",
-      arguments: { project: "codex", sessionId: CODEX_SESSION_ID },
+      arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
     const body = JSON.parse(textOf(result)) as { firstUserPrompt: string | null };
@@ -165,7 +175,7 @@ describe("MCP tools", () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_context_timeline",
-      arguments: { project: "codex", sessionId: CODEX_SESSION_ID },
+      arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
     const body = JSON.parse(textOf(result)) as {
@@ -179,7 +189,7 @@ describe("MCP tools", () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_session_summary",
-      arguments: { project: "codex", sessionId: "does-not-exist" },
+      arguments: { source: "codex", sessionId: "does-not-exist" },
     });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain("Session not found");

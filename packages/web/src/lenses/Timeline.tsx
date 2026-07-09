@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { client, type TimelineEntry } from "../api.js";
+import { fetchTimeline, type SessionRef, type TimelineEntry } from "../api.js";
 import { MiniMap } from "./timeline/MiniMap.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
 import {
@@ -12,9 +12,8 @@ import {
 } from "./timeline/timelineFilters.js";
 
 interface Props {
-  project: string;
-  id: string;
-  /** Scopes the timeline to one subagent's own transcript, when set (see AgentShell.tsx). */
+  sessionRef: SessionRef;
+  /** Scopes the timeline to one subagent's own transcript, when set (see AgentShell.tsx). Claude-only. */
   agent?: string;
   /** Opens the record slide-over (L3, screen 8) for a given source line. */
   onOpenRecord: (line: number) => void;
@@ -48,7 +47,7 @@ const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "e
  * is wrapped in `memo` so toggling one tool-call's expansion doesn't
  * re-render its siblings.
  */
-export function Timeline({ project, id, agent, onOpenRecord }: Props) {
+export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
   const [entries, setEntries] = useState<TimelineEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dial, setDial] = useState<DetailDial>("full");
@@ -59,18 +58,21 @@ export function Timeline({ project, id, agent, onOpenRecord }: Props) {
 
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
 
+  // `sessionRef` is rebuilt fresh (a new object) on every caller render —
+  // depend on its primitive parts instead so this effect doesn't re-fire
+  // every render just because the caller re-rendered for an unrelated reason.
+  const refSource = sessionRef.source;
+  const refProject = refSource === "claude-code" ? sessionRef.project : undefined;
+  const refId = sessionRef.id;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depend on sessionRef's primitive parts (see comment above), not the object itself.
   useEffect(() => {
     setEntries(null);
     setError(null);
-    client.api.sessions[":project"][":id"].timeline
-      .$get({ param: { project, id }, ...(agent !== undefined && { query: { agent } }) })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-        const body = (await res.json()) as { entries: TimelineEntry[] };
-        setEntries(body.entries);
-      })
+    fetchTimeline(sessionRef, agent)
+      .then(setEntries)
       .catch((e: unknown) => setError(String(e)));
-  }, [project, id, agent]);
+  }, [refSource, refProject, refId, agent]);
 
   const counts = useMemo(() => computeChipCounts(entries ?? []), [entries]);
 
@@ -200,8 +202,7 @@ export function Timeline({ project, id, agent, onOpenRecord }: Props) {
                   // assistant message share a source line.
                   key={`${entry.kind}-${entry.line}-${String(i)}`}
                   entry={entry}
-                  project={project}
-                  id={id}
+                  sessionRef={sessionRef}
                   expanded={expandedLines.has(entry.line)}
                   onToggleExpand={onToggleExpand}
                   registerRef={registerRef}

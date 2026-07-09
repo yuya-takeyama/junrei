@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseTranscriptFile } from "./parser.js";
+import { parseClaudeTranscriptFile } from "./parser.js";
 import type { SessionData } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
 import { loadSubagentSessionData } from "./subagents.js";
@@ -29,7 +29,7 @@ const OUT_OF_ORDER_FILE = join(
 const AGENT_ID = "aaaa111122223333f";
 
 async function loadMainData(): Promise<SessionData> {
-  const transcript = await parseTranscriptFile(SESSION_FILE);
+  const transcript = await parseClaudeTranscriptFile(SESSION_FILE);
   return buildSessionData(transcript);
 }
 
@@ -221,7 +221,7 @@ describe("buildTimeline", () => {
   });
 
   it("keeps correct linkage when a tool_result precedes its tool_use in file order", async () => {
-    const transcript = await parseTranscriptFile(OUT_OF_ORDER_FILE);
+    const transcript = await parseClaudeTranscriptFile(OUT_OF_ORDER_FILE);
     const data = buildSessionData(transcript);
     const entries = await buildTimeline(data);
     const toolCalls = entries.filter((e): e is ToolCallEntry => e.kind === "tool-call");
@@ -230,7 +230,7 @@ describe("buildTimeline", () => {
   });
 
   it("captures returnedChars for a SYNCHRONOUS subagent launch", async () => {
-    const transcript = await parseTranscriptFile(OUT_OF_ORDER_FILE);
+    const transcript = await parseClaudeTranscriptFile(OUT_OF_ORDER_FILE);
     const data = buildSessionData(transcript);
     const entries = await buildTimeline(data);
     const launch = entries.find(

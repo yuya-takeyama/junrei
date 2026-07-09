@@ -1,5 +1,6 @@
 import type { SessionListItem } from "./api.js";
 import type { SourceTab } from "./router.js";
+import { capsFor } from "./sourceCaps.js";
 
 /**
  * Query params for `GET /api/sessions` given the active source tab — pulled
@@ -34,7 +35,20 @@ export function sourceBadgeLabel(source: SessionListItem["source"]): string {
   return source === "codex" ? "Codex" : "Claude";
 }
 
+/**
+ * Project-filter grouping key for one row. Claude rows group by their real
+ * `projectDirName`; Codex rows (which have no project-dir concept — see
+ * `CodexSessionListItem` on the server, which dropped the `projectDirName:
+ * "codex"` sentinel it used to carry) group under the fixed label `"codex"`
+ * instead, preserving the same dropdown entry ("project: codex") and filter
+ * behavior the old sentinel produced, just via an explicit source-branch
+ * here rather than a fake data field on the list item.
+ */
+export function projectFilterKey(item: SessionListItem): string {
+  return item.source === "codex" ? "codex" : item.projectDirName;
+}
+
 /** Whether a session-list row's cost figure is a Codex API-list-price estimate rather than a billed amount. */
 export function isEstimatedCost(item: SessionListItem): boolean {
-  return item.source === "codex";
+  return capsFor(item).costIsEstimated;
 }

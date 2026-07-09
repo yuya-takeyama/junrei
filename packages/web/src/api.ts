@@ -1,8 +1,11 @@
 import type { AppType } from "@junrei/server";
 import type { InferResponseType } from "hono/client";
 import { hc } from "hono/client";
+import type { SessionRef } from "./router.js";
 
 export const client = hc<AppType>("/");
+
+export type { SessionRef } from "./router.js";
 
 /**
  * JSON-serialized shapes as the API actually returns them (via Hono RPC
@@ -19,33 +22,16 @@ export type ClaudeSessionListItem = Extract<SessionListItem, { source: "claude-c
 export type CodexSessionListItem = Extract<SessionListItem, { source: "codex" }>;
 export type ModelMixEntry = SessionListItem["modelMix"][number];
 
-type SessionResponse = InferResponseType<(typeof client.api.sessions)[":project"][":id"]["$get"]>;
-export type SessionJson = Extract<SessionResponse, { sessionId: string }>;
+type ClaudeSessionResponse = InferResponseType<
+  (typeof client.api.sessions)["claude-code"][":project"][":id"]["$get"]
+>;
+type CodexSessionResponse = InferResponseType<(typeof client.api.sessions.codex)[":id"]["$get"]>;
+type AnySessionResponseBody = ClaudeSessionResponse | CodexSessionResponse;
+
+export type SessionJson = Extract<ClaudeSessionResponse, { analysis: unknown }>["analysis"];
+export type CodexSessionJson = Extract<CodexSessionResponse, { analysis: unknown }>["analysis"];
 export type SubagentNodeJson = SessionJson["subagents"][number];
 export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
-
-type CodexSessionResponse = InferResponseType<(typeof client.api.sessions.codex)[":id"]["$get"]>;
-/** Unwraps the `{ analysis }` envelope `GET /api/sessions/codex/:id` returns (unlike the bare Claude detail route). */
-export type CodexSessionJson = Extract<CodexSessionResponse, { analysis: unknown }>["analysis"];
-/** The raw (still-wrapped) response body from `GET /api/sessions/codex/:id` — either shape the route can send. */
-export type CodexSessionResponseBody = CodexSessionResponse;
-
-/**
- * Unwraps the `{ analysis }` envelope from `GET /api/sessions/codex/:id`
- * (distinct from the Claude detail route, which returns the analysis JSON
- * bare — see `sessions.ts`/`app.ts` on the server) into the analysis itself,
- * or `undefined` for the `{ error }` shape. In practice the route only ever
- * sends `{ error }` alongside a non-2xx status (already handled by the
- * `res.ok` check before this runs), but keeping the unwrap as its own pure
- * function — rather than inlining a property-presence check at the call
- * site — makes it independently testable and defends against a body that
- * doesn't match the expected shape.
- */
-export function unwrapCodexSessionResponse(
-  body: CodexSessionResponseBody,
-): CodexSessionJson | undefined {
-  return "analysis" in body ? body.analysis : undefined;
-}
 
 /**
  * Either harness's full session analysis, discriminated on `source` — shared
@@ -56,26 +42,125 @@ export function unwrapCodexSessionResponse(
 export type AnySessionJson = SessionJson | CodexSessionJson;
 
 /**
- * A subagent's own analysis (`GET .../agents/:agentId`) — deliberately the
- * same `SessionAnalysis` JSON shape as `SessionJson` (just analyzed from the
- * agent's sidecar transcript instead of the main one), so every session-level
- * component (ContextGrowthChart, FirstPromptPanel, ...) is directly reusable
- * for the agent detail shell (L3) with no separate DTO.
+ * Unwraps the shared `{ analysis }` envelope both detail routes return, or
+ * `undefined` for the `{ error }` shape. In practice a caller only ever sees
+ * `{ error }` alongside a non-2xx status (already handled by the `res.ok`
+ * check before this runs), but keeping the unwrap as its own pure function —
+ * rather than inlining a property-presence check at the call site — makes it
+ * independently testable and defends against a body that doesn't match the
+ * expected shape.
  */
-type AgentResponse = InferResponseType<
-  (typeof client.api.sessions)[":project"][":id"]["agents"][":agentId"]["$get"]
->;
-export type AgentJson = Extract<AgentResponse, { sessionId: string }>;
+export function unwrapSessionResponse(body: AnySessionResponseBody): AnySessionJson | undefined {
+  return "analysis" in body ? body.analysis : undefined;
+}
 
-type TimelineResponse = InferResponseType<
-  (typeof client.api.sessions)[":project"][":id"]["timeline"]["$get"]
+/**
+ * Fetch a session's full analysis for either source, dispatching to that
+ * source's own route shape. Overloaded on `ref.source` so a caller that
+ * already knows which source it's fetching (SessionShell's two routes,
+ * AgentShell's Claude-only fetch) gets back the narrow analysis type without
+ * an `as`-cast — only a caller holding a generic `SessionRef` (of unknown
+ * source) sees the `AnySessionJson` union.
+ */
+export async function fetchSessionDetail(
+  ref: Extract<SessionRef, { source: "claude-code" }>,
+): Promise<SessionJson>;
+export async function fetchSessionDetail(
+  ref: Extract<SessionRef, { source: "codex" }>,
+): Promise<CodexSessionJson>;
+export async function fetchSessionDetail(ref: SessionRef): Promise<AnySessionJson>;
+export async function fetchSessionDetail(ref: SessionRef): Promise<AnySessionJson> {
+  const res =
+    ref.source === "codex"
+      ? await client.api.sessions.codex[":id"].$get({ param: { id: ref.id } })
+      : await client.api.sessions["claude-code"][":project"][":id"].$get({
+          param: { project: ref.project, id: ref.id },
+        });
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  const body = (await res.json()) as AnySessionResponseBody;
+  const analysis = unwrapSessionResponse(body);
+  if (analysis === undefined) throw new Error("malformed session response");
+  return analysis;
+}
+
+type ClaudeTimelineResponse = InferResponseType<
+  (typeof client.api.sessions)["claude-code"][":project"][":id"]["timeline"]["$get"]
 >;
-export type TimelineEntry = Extract<TimelineResponse, { entries: unknown[] }>["entries"][number];
+export type TimelineEntry = Extract<
+  ClaudeTimelineResponse,
+  { entries: unknown[] }
+>["entries"][number];
+
+/** Fetch the full-transcript timeline (L2) for either source. `agentId` scopes a Claude fetch to one subagent. */
+export async function fetchTimeline(ref: SessionRef, agentId?: string): Promise<TimelineEntry[]> {
+  const res =
+    ref.source === "codex"
+      ? await client.api.sessions.codex[":id"].timeline.$get({ param: { id: ref.id } })
+      : await client.api.sessions["claude-code"][":project"][":id"].timeline.$get({
+          param: { project: ref.project, id: ref.id },
+          ...(agentId !== undefined && { query: { agent: agentId } }),
+        });
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  const body = (await res.json()) as { entries: TimelineEntry[] };
+  return body.entries;
+}
 
 type RecordResponse = InferResponseType<
-  (typeof client.api.sessions)[":project"][":id"]["record"][":line"]["$get"]
+  (typeof client.api.sessions)["claude-code"][":project"][":id"]["record"][":line"]["$get"]
 >;
 /** Discriminated union of every record kind the slide-over (L3, screen 8) can render. */
 export type RecordDetail = Exclude<RecordResponse, { error: string }>;
 export type ToolCallRecordDetail = Extract<RecordDetail, { kind: "tool-call" }>;
 export type SubagentLaunchRecordDetail = Extract<RecordDetail, { kind: "subagent-launch" }>;
+
+/** `fetchRecordDetail`'s result — a 404 is a normal outcome (line has no record), surfaced distinctly rather than thrown. */
+export type RecordFetchResult = { detail: RecordDetail } | { notFound: true };
+
+/** Fetch full detail for one source line (L3 slide-over) for either source. `agentId` scopes a Claude fetch to one subagent. */
+export async function fetchRecordDetail(
+  ref: SessionRef,
+  line: number,
+  agentId?: string,
+): Promise<RecordFetchResult> {
+  const res =
+    ref.source === "codex"
+      ? await client.api.sessions.codex[":id"].record[":line"].$get({
+          param: { id: ref.id, line: String(line) },
+        })
+      : await client.api.sessions["claude-code"][":project"][":id"].record[":line"].$get({
+          param: { project: ref.project, id: ref.id, line: String(line) },
+          ...(agentId !== undefined && { query: { agent: agentId } }),
+        });
+  if (res.status === 404) return { notFound: true };
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  return { detail: (await res.json()) as RecordDetail };
+}
+
+type AgentResponse = InferResponseType<
+  (typeof client.api.sessions)["claude-code"][":project"][":id"]["agents"][":agentId"]["$get"]
+>;
+/**
+ * A subagent's own analysis (`GET .../claude-code/:project/:id/agents/:agentId`)
+ * — deliberately the same `ClaudeSessionAnalysis` JSON shape as `SessionJson`
+ * (just analyzed from the agent's sidecar transcript instead of the main
+ * one), so every session-level component (ContextGrowthChart,
+ * FirstPromptPanel, ...) is directly reusable for the agent detail shell (L3)
+ * with no separate DTO. Claude-only — Codex sub-agents are full sessions,
+ * fetched via `fetchSessionDetail` like any other Codex session.
+ */
+export type AgentJson = Extract<AgentResponse, { analysis: unknown }>["analysis"];
+
+/** Fetch a subagent's own analysis. Claude-only — see `AgentJson`. */
+export async function fetchAgentSession(
+  project: string,
+  id: string,
+  agentId: string,
+): Promise<AgentJson> {
+  const res = await client.api.sessions["claude-code"][":project"][":id"].agents[":agentId"].$get({
+    param: { project, id, agentId },
+  });
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  const body = await res.json();
+  if (!("analysis" in body)) throw new Error("malformed agent response");
+  return body.analysis;
+}
