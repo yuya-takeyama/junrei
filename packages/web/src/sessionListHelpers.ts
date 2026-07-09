@@ -1,4 +1,5 @@
 import type { SessionListItem } from "./api.js";
+import { formatProject } from "./format.js";
 import type { SourceTab } from "./router.js";
 import { capsFor } from "./sourceCaps.js";
 
@@ -51,4 +52,116 @@ export function projectFilterKey(item: SessionListItem): string {
 /** Whether a session-list row's cost figure is a Codex API-list-price estimate rather than a billed amount. */
 export function isEstimatedCost(item: SessionListItem): boolean {
   return capsFor(item).costIsEstimated;
+}
+
+// Fallback-bucket key prefixes for sessions with no `repoRoot` (pre-#36 data,
+// or a `cwd` the `.claude/worktrees/<name>` heuristic never matched). Real
+// `repoRoot` values are always absolute paths (start with "/"), so a
+// non-path prefix here can never collide with one.
+const CLAUDE_FALLBACK_PREFIX = "claude-project:";
+const CODEX_FALLBACK_PREFIX = "codex-cwd:";
+const UNKNOWN_CWD = "(unknown cwd)";
+
+/**
+ * Repo-level grouping/filter key for one session-list row — the replacement
+ * for `projectFilterKey` now that sessions carry `repoRoot`/`worktreeName`
+ * (see `@junrei/core`'s `deriveRepoIdentity`). A worktree session's
+ * `repoRoot` points at its *parent* repo, so it collapses into the same key
+ * as sessions run at the repo root itself — that collapsing is the entire
+ * point of the repo filter (dogfooding showed one repo splintering into a
+ * dropdown entry per worktree). Sessions with no `repoRoot` at all fall back
+ * to a distinct bucket per `projectDirName` (Claude) or `cwd` (Codex, with a
+ * fixed sentinel when even `cwd` is missing) so they still surface as a
+ * filterable option instead of silently disappearing from the dropdown.
+ */
+export function repoFilterKey(item: SessionListItem): string {
+  if (item.repoRoot !== undefined) return item.repoRoot;
+  return item.source === "codex"
+    ? `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`
+    : `${CLAUDE_FALLBACK_PREFIX}${item.projectDirName}`;
+}
+
+/** One entry in the session-list repo dropdown — see `repoOptionsFor`. */
+export interface RepoOption {
+  /** Filter key (see `repoFilterKey`) and `?repo=` URL param value. */
+  key: string;
+  /** Short display label — a disambiguated basename for a real repo, the best available identifier otherwise. */
+  label: string;
+  /** Full identifier (repoRoot / cwd / projectDirName) shown as a tooltip. */
+  title: string;
+}
+
+/** Last non-empty `/`-segment of `path`, or `path` itself if it has none (e.g. empty string). */
+function lastPathSegment(path: string): string {
+  const parts = path.split("/").filter((p) => p !== "");
+  return parts[parts.length - 1] ?? path;
+}
+
+/**
+ * Assigns each of `paths` (assumed pairwise distinct) a short unique label:
+ * its basename, extended one leading path segment at a time until it no
+ * longer collides with any other input's same-depth tail. Two repos that
+ * happen to share a basename (e.g. `/Users/a/junrei` and
+ * `/Users/b/junrei`) disambiguate to `a/junrei` and `b/junrei` instead of
+ * both showing the bare, ambiguous `junrei`.
+ */
+export function disambiguateBasenames(paths: readonly string[]): Map<string, string> {
+  const segmented = paths.map((p) => p.split("/").filter((seg) => seg !== ""));
+  const tailAt = (segs: readonly string[], depth: number): string => segs.slice(-depth).join("/");
+
+  const labels = new Map<string, string>();
+  paths.forEach((path, i) => {
+    const segs = segmented[i] ?? [];
+    let depth = 1;
+    while (
+      depth < segs.length &&
+      segmented.some((other, j) => j !== i && tailAt(other, depth) === tailAt(segs, depth))
+    ) {
+      depth += 1;
+    }
+    labels.set(path, tailAt(segs, depth) || path);
+  });
+  return labels;
+}
+
+/**
+ * Derives the session-list repo dropdown's options from the currently loaded
+ * sessions — one entry per distinct `repoFilterKey`, sorted by label. Real
+ * repos get a disambiguated basename label (see `disambiguateBasenames`);
+ * fallback buckets (no `repoRoot`) get the best identifier they have, via the
+ * same "shorten a path/dir-name" logic `formatProject` already uses for the
+ * row display.
+ */
+export function repoOptionsFor(sessions: readonly SessionListItem[]): RepoOption[] {
+  const representative = new Map<string, SessionListItem>();
+  for (const s of sessions) {
+    const key = repoFilterKey(s);
+    if (!representative.has(key)) representative.set(key, s);
+  }
+
+  const repoRoots = [...representative.values()]
+    .map((s) => s.repoRoot)
+    .filter((r): r is string => r !== undefined);
+  const disambiguated = disambiguateBasenames(repoRoots);
+
+  const options = [...representative.entries()].map(([key, item]): RepoOption => {
+    if (item.repoRoot !== undefined) {
+      return {
+        key,
+        label: disambiguated.get(item.repoRoot) ?? lastPathSegment(item.repoRoot),
+        title: item.repoRoot,
+      };
+    }
+    if (item.source === "codex") {
+      const cwd = item.cwd;
+      return {
+        key,
+        label: cwd !== undefined ? formatProject("", cwd) : UNKNOWN_CWD,
+        title: cwd ?? UNKNOWN_CWD,
+      };
+    }
+    return { key, label: formatProject(item.projectDirName), title: item.projectDirName };
+  });
+
+  return options.sort((a, b) => a.label.localeCompare(b.label));
 }

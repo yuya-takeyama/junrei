@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ClaudeSessionListItem, CodexSessionListItem } from "./api.js";
 import {
+  disambiguateBasenames,
   isEstimatedCost,
   projectFilterKey,
+  repoFilterKey,
+  repoOptionsFor,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -94,5 +97,119 @@ describe("projectFilterKey", () => {
 
   it("returns the fixed 'codex' label for a Codex row (no project-dir concept)", () => {
     expect(projectFilterKey(codexItem)).toBe("codex");
+  });
+});
+
+describe("repoFilterKey", () => {
+  it("uses repoRoot directly when present, for either source", () => {
+    expect(repoFilterKey({ ...claudeItem, repoRoot: "/Users/me/proj" })).toBe("/Users/me/proj");
+    expect(repoFilterKey({ ...codexItem, repoRoot: "/Users/me/proj" })).toBe("/Users/me/proj");
+  });
+
+  it("collapses a worktree session's repoRoot to the same key as the repo-root session — the whole point of the repo filter", () => {
+    const rootSession = { ...claudeItem, repoRoot: "/Users/me/proj" };
+    const worktreeSession = {
+      ...claudeItem,
+      sessionId: "s1-wt",
+      repoRoot: "/Users/me/proj",
+      worktreeName: "feat-x",
+    };
+    expect(repoFilterKey(worktreeSession)).toBe(repoFilterKey(rootSession));
+  });
+
+  it("falls back to a bucket keyed by projectDirName for a Claude row with no repoRoot", () => {
+    expect(repoFilterKey(claudeItem)).toBe("claude-project:-Users-me-proj");
+  });
+
+  it("falls back to a bucket keyed by cwd for a Codex row with no repoRoot", () => {
+    expect(repoFilterKey({ ...codexItem, cwd: "/Users/me/other" })).toBe(
+      "codex-cwd:/Users/me/other",
+    );
+  });
+
+  it("groups Codex rows with neither repoRoot nor cwd into one fixed 'unknown' bucket", () => {
+    expect(repoFilterKey(codexItem)).toBe(repoFilterKey({ ...codexItem, sessionId: "s3" }));
+  });
+
+  it("never collides a fallback bucket key with a real repoRoot (fallback prefixes aren't absolute paths)", () => {
+    expect(repoFilterKey(claudeItem)).not.toBe("-Users-me-proj");
+  });
+});
+
+describe("disambiguateBasenames", () => {
+  it("labels a single path with its bare basename", () => {
+    expect(disambiguateBasenames(["/Users/me/junrei"])).toEqual(
+      new Map([["/Users/me/junrei", "junrei"]]),
+    );
+  });
+
+  it("uses bare basenames when they don't collide", () => {
+    const result = disambiguateBasenames(["/Users/me/junrei", "/Users/me/other-repo"]);
+    expect(result.get("/Users/me/junrei")).toBe("junrei");
+    expect(result.get("/Users/me/other-repo")).toBe("other-repo");
+  });
+
+  it("extends the label by one path segment when two repos share a basename", () => {
+    const result = disambiguateBasenames([
+      "/Users/yuya-takeyama/junrei",
+      "/Users/someone-else/junrei",
+    ]);
+    expect(result.get("/Users/yuya-takeyama/junrei")).toBe("yuya-takeyama/junrei");
+    expect(result.get("/Users/someone-else/junrei")).toBe("someone-else/junrei");
+  });
+
+  it("extends as far as needed for a three-way basename collision", () => {
+    const result = disambiguateBasenames([
+      "/Users/a/org/junrei",
+      "/Users/b/org/junrei",
+      "/Users/c/other/junrei",
+    ]);
+    expect(result.get("/Users/a/org/junrei")).toBe("a/org/junrei");
+    expect(result.get("/Users/b/org/junrei")).toBe("b/org/junrei");
+    expect(result.get("/Users/c/other/junrei")).toBe("other/junrei");
+  });
+});
+
+describe("repoOptionsFor", () => {
+  it("returns one option per repo, grouping a worktree session under its repo root", () => {
+    const rootSession = { ...claudeItem, repoRoot: "/Users/me/junrei" };
+    const worktreeSession = {
+      ...claudeItem,
+      sessionId: "s1-wt",
+      repoRoot: "/Users/me/junrei",
+      worktreeName: "feat-x",
+    };
+    const options = repoOptionsFor([rootSession, worktreeSession]);
+    expect(options).toEqual([
+      { key: "/Users/me/junrei", label: "junrei", title: "/Users/me/junrei" },
+    ]);
+  });
+
+  it("includes a fallback option for sessions with no repoRoot, labeled with their available identifier", () => {
+    const options = repoOptionsFor([claudeItem]);
+    expect(options).toEqual([
+      {
+        key: "claude-project:-Users-me-proj",
+        label: "me-proj",
+        title: "-Users-me-proj",
+      },
+    ]);
+  });
+
+  it("disambiguates two repoRoots that share a basename", () => {
+    const a = { ...claudeItem, sessionId: "s1", repoRoot: "/Users/yuya-takeyama/junrei" };
+    const b = { ...claudeItem, sessionId: "s2", repoRoot: "/Users/someone-else/junrei" };
+    const options = repoOptionsFor([a, b]);
+    expect(options.map((o) => o.label).sort()).toEqual([
+      "someone-else/junrei",
+      "yuya-takeyama/junrei",
+    ]);
+  });
+
+  it("sorts options by label", () => {
+    const a = { ...claudeItem, sessionId: "s1", repoRoot: "/x/zeta" };
+    const b = { ...claudeItem, sessionId: "s2", repoRoot: "/x/alpha" };
+    const options = repoOptionsFor([a, b]);
+    expect(options.map((o) => o.label)).toEqual(["alpha", "zeta"]);
   });
 });

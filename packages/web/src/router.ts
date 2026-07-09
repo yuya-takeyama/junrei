@@ -193,3 +193,20 @@ function isSourceTab(value: string | null): value is SourceTab {
 export function parseSourceTab(value: string | null): SourceTab {
   return isSourceTab(value) ? value : "all";
 }
+
+/** Sentinel `?repo=` value (and absence thereof) meaning "no repo filter" — see `parseRepoParam`. */
+export const ALL_REPOS = "all";
+
+/**
+ * Normalizes the `?repo=` query param on the session list to a filter value.
+ * Unlike `parseSourceTab`, valid values aren't a fixed enum — they're
+ * whatever `repoFilterKey` (see `sessionListHelpers.ts`) produces for the
+ * sessions currently loaded, which is normally a `repoRoot` path — so this
+ * only normalizes "param absent" to the `"all"` sentinel and passes anything
+ * else through verbatim. A stale/unrecognized value just matches zero rows
+ * until the user picks again, the same failure mode as any other filter
+ * param pointing at data that no longer exists.
+ */
+export function parseRepoParam(value: string | null): string {
+  return value ?? ALL_REPOS;
+}
