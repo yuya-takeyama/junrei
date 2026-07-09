@@ -172,3 +172,21 @@ export function mainDelegatedSplit(session: AnySessionJson): {
   const mainPct = Math.round((session.usage.total.costUsd / total) * 100);
   return { mainPct, delegatedPct: 100 - mainPct };
 }
+
+/**
+ * Token split by main vs. delegated, same shape as `mainDelegatedSplit` but
+ * over token volume (via `session.delegation`) rather than cost — the two
+ * are compared side by side in the Orchestration header because they often
+ * rank in opposite directions (main can spend most of the DOLLARS while
+ * subagents move most of the TOKENS, or vice versa).
+ */
+export function mainDelegatedTokenSplit(session: AnySessionJson): {
+  mainPct: number;
+  delegatedPct: number;
+} {
+  const { main, subagents } = session.delegation;
+  const total = main.tokens + subagents.tokens;
+  if (total <= 0) return { mainPct: 0, delegatedPct: 0 };
+  const mainPct = Math.round((main.tokens / total) * 100);
+  return { mainPct, delegatedPct: 100 - mainPct };
+}

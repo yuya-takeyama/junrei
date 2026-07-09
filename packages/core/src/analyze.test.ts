@@ -159,6 +159,44 @@ describe("analyzeSession", () => {
     expect(summedCost).toBeCloseTo(analysis.totalUsage.costUsd, 6);
   });
 
+  it("computes the delegation summary (main vs. subagents split)", async () => {
+    const analysis = await analyzeSession(SESSION_FILE);
+
+    // Main slice mirrors `usage.total` exactly.
+    expect(analysis.delegation.main.costUsd).toBe(analysis.usage.total.costUsd);
+    expect(analysis.delegation.main.outputTokens).toBe(analysis.usage.total.outputTokens);
+
+    // Subagent (haiku) tokens/cost show up as the delegated slice.
+    expect(analysis.delegation.subagents.tokens).toBeGreaterThan(0);
+    expect(analysis.delegation.subagents.costUsd).toBeGreaterThan(0);
+    expect(analysis.delegation.costIsComplete).toBe(true);
+
+    // haiku ran only on the subagent — absent from main's byModel entirely.
+    const haikuSlice = analysis.delegation.byModel.find(
+      (m) => m.model === "claude-haiku-4-5-20251001",
+    );
+    const haikuMerged = analysis.totalUsageByModel.find(
+      (m) => m.model === "claude-haiku-4-5-20251001",
+    );
+    expect(haikuSlice?.main).toEqual({ tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 });
+    expect(haikuSlice?.subagents.tokens).toBe(
+      (haikuMerged?.inputTokens ?? 0) +
+        (haikuMerged?.outputTokens ?? 0) +
+        (haikuMerged?.cacheReadTokens ?? 0) +
+        (haikuMerged?.cacheCreationTokens ?? 0),
+    );
+
+    // fable ran on both — its subagent slice is 0 since only the sidecar
+    // fixture ran haiku (fable's totalUsageByModel entry == its main entry).
+    const fableSlice = analysis.delegation.byModel.find((m) => m.model === "claude-fable-5");
+    expect(fableSlice?.subagents).toEqual({
+      tokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      messageCount: 0,
+    });
+  });
+
   it("records the first user prompt's source line", async () => {
     const analysis = await analyzeSession(SESSION_FILE);
     expect(analysis.firstUserPromptLine).toBe(1);

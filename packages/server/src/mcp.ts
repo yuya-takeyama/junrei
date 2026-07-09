@@ -205,9 +205,12 @@ export function createMcpServer(): McpServer {
     {
       description:
         "Full quantitative summary of one session: usage/cost per model (main + subagents), " +
-        "tool stats with error categories, exploration profile, compactions, and counts. " +
-        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex"). ' +
-        "Use get_context_timeline / find_repetitions / get_subagent_tree for the detailed series.",
+        "a `delegation` split (main-thread vs. subagents share of tokens and cost — overall and " +
+        "per model, e.g. to spot a session where the main model took most of the DOLLARS but " +
+        "subagents moved most of the TOKENS), tool stats with error categories, exploration " +
+        "profile, compactions, and counts. Works for both Claude Code sessions and Codex CLI " +
+        'sessions (source: "codex"). Use get_context_timeline / find_repetitions / ' +
+        "get_subagent_tree for the detailed series.",
       inputSchema: sessionRef,
     },
     async (args) => {
@@ -266,10 +269,11 @@ export function createMcpServer(): McpServer {
     {
       description:
         "Subagent/sub-agent execution tree for one session: per-agent type, model, prompt " +
-        "preview, token usage, estimated cost, tool call/error counts, and nesting. Works for " +
-        'both Claude Code sessions and Codex CLI sessions (source: "codex") — a Codex ' +
-        "sub-agent is its own rollout file rather than a sidecar transcript, but resolves " +
-        "into the same tree shape.",
+        "preview, token usage, estimated cost, tool call/error counts, and nesting. Each node's " +
+        "`usage.byModel` breaks that agent's own tokens/cost down per model, same shape as the " +
+        "session-level `totalUsageByModel`. Works for both Claude Code sessions and Codex CLI " +
+        'sessions (source: "codex") — a Codex sub-agent is its own rollout file rather than a ' +
+        "sidecar transcript, but resolves into the same tree shape.",
       inputSchema: sessionRef,
     },
     async (args) => {

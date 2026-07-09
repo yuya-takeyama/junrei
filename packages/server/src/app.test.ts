@@ -33,9 +33,18 @@ describe("Claude Code timeline + record routes", () => {
     const app = createApp();
     const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { analysis: { sessionId: string; source?: string } };
+    const body = (await res.json()) as {
+      analysis: {
+        sessionId: string;
+        source?: string;
+        delegation?: { main: { tokens: number }; subagents: { tokens: number } };
+      };
+    };
     expect(body.analysis.sessionId).toBe(SESSION_ID);
     expect(body.analysis.source).toBe("claude-code");
+    // The fixture session has one subagent — both slices carry real tokens.
+    expect(body.analysis.delegation?.main.tokens).toBeGreaterThan(0);
+    expect(body.analysis.delegation?.subagents.tokens).toBeGreaterThan(0);
   });
 
   it("GET /api/sessions/claude-code/:project/:id/timeline returns ordered entries", async () => {
@@ -170,9 +179,22 @@ describe("Codex routes", () => {
     const app = createApp();
     const res = await app.request(`/api/sessions/codex/${CODEX_SESSION_ID}`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { analysis: { source: string; sessionId: string } };
+    const body = (await res.json()) as {
+      analysis: {
+        source: string;
+        sessionId: string;
+        delegation?: { subagents: { tokens: number; outputTokens: number; costUsd?: number } };
+      };
+    };
     expect(body.analysis.source).toBe("codex");
     expect(body.analysis.sessionId).toBe(CODEX_SESSION_ID);
+    // A leaf Codex session (no sub-agent forest) — honest all-zero slice.
+    expect(body.analysis.delegation?.subagents).toEqual({
+      tokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      messageCount: 0,
+    });
   });
 
   it("GET /api/sessions/codex/:id 404s for an unknown id", async () => {

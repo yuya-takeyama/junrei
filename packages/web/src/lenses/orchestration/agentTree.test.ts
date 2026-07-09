@@ -4,6 +4,7 @@ import {
   findAgentPath,
   flattenSubagents,
   mainDelegatedSplit,
+  mainDelegatedTokenSplit,
   spawnedByLabel,
   subtreeCost,
 } from "./agentTree.js";
@@ -94,6 +95,48 @@ describe("mainDelegatedSplit", () => {
       totalUsage: { costUsd: 0 },
     } as never;
     expect(mainDelegatedSplit(session)).toEqual({ mainPct: 0, delegatedPct: 0 });
+  });
+});
+
+describe("mainDelegatedTokenSplit", () => {
+  it("computes the main/delegated TOKEN share by percent, complementary", () => {
+    const session = {
+      delegation: {
+        main: { tokens: 2260, outputTokens: 0 },
+        subagents: { tokens: 7740, outputTokens: 0 },
+      },
+    } as never;
+    const { mainPct, delegatedPct } = mainDelegatedTokenSplit(session);
+    expect(mainPct).toBe(23);
+    expect(delegatedPct).toBe(77);
+  });
+
+  it("reports 0/0 rather than dividing by zero when there are no tokens at all", () => {
+    const session = {
+      delegation: {
+        main: { tokens: 0, outputTokens: 0 },
+        subagents: { tokens: 0, outputTokens: 0 },
+      },
+    } as never;
+    expect(mainDelegatedTokenSplit(session)).toEqual({ mainPct: 0, delegatedPct: 0 });
+  });
+
+  it("can rank in the opposite direction from the cost split (the inversion the header surfaces)", () => {
+    // Same shape as the dogfooding example: main did 55.9% of cost but only
+    // 22.6% of tokens — cost and token shares disagree about who did "most"
+    // of the work.
+    const costSession = {
+      usage: { total: { costUsd: 63.18 } },
+      totalUsage: { costUsd: 113.02 },
+    } as never;
+    const tokenSession = {
+      delegation: {
+        main: { tokens: 2260, outputTokens: 0 },
+        subagents: { tokens: 7740, outputTokens: 0 },
+      },
+    } as never;
+    expect(mainDelegatedSplit(costSession).mainPct).toBe(56);
+    expect(mainDelegatedTokenSplit(tokenSession).mainPct).toBe(23);
   });
 });
 

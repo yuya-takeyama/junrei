@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { AnySessionJson } from "../api.js";
-import { cacheHitRate, formatTokens, formatUsd } from "../format.js";
+import { cacheHitRate, formatDelegatedShare, formatTokens, formatUsd } from "../format.js";
 import { sessionPath, sessionRefOf } from "../router.js";
 import { capsFor } from "../sourceCaps.js";
 import { EstBadge } from "./EstBadge.js";
@@ -26,6 +26,9 @@ interface Props {
 export function StatStrip({ session }: Props) {
   const ref = sessionRefOf(session);
   const contextHref = sessionPath(ref, "context");
+  // Both sources now carry `delegation` (Codex: all-zero `subagents` when it
+  // has no sub-agent forest) — see `@junrei/core`'s `delegation.ts`.
+  const delegatedShare = formatDelegatedShare(session.delegation);
 
   const cells: ReactNode[] = [
     <Cell key="cost" label="Total cost" href={contextHref}>
@@ -36,8 +39,8 @@ export function StatStrip({ session }: Props) {
       </div>
       {session.source === "claude-code" ? (
         <div className="sub num">
-          {formatUsd(Math.max(0, session.totalUsage.costUsd - session.usage.total.costUsd))}{" "}
-          delegated
+          {formatUsd(session.delegation.subagents.costUsd ?? 0)} delegated
+          {delegatedShare !== undefined && ` — ${delegatedShare}`}
         </div>
       ) : (
         <div className="sub">this session</div>
