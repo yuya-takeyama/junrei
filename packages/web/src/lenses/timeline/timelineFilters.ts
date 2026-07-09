@@ -1,0 +1,135 @@
+import type { TimelineEntry } from "../../api.js";
+
+/** The three fixed detail-dial stops — see design-spec/12-timeline.md. */
+export type DetailDial = "user-only" | "minimal" | "full";
+
+export const DIAL_STOPS: readonly DetailDial[] = ["user-only", "minimal", "full"];
+
+/** One toggle per filter chip; chips further narrow whatever the dial already allows. */
+export interface ChipState {
+  user: boolean;
+  assistant: boolean;
+  tool: boolean;
+  subagent: boolean;
+  error: boolean;
+  compaction: boolean;
+}
+
+export const DEFAULT_CHIPS: ChipState = {
+  user: true,
+  assistant: true,
+  tool: true,
+  subagent: true,
+  error: true,
+  compaction: true,
+};
+
+/**
+ * Kinds included at the "minimal" dial stop — narrative-only: user turns,
+ * assistant prose, subagent launches, and compaction breaks. Tool calls and
+ * thinking are hidden. "user-only" further restricts to just `user`; "full"
+ * lifts every kind-level restriction (chips still apply).
+ */
+const MINIMAL_KINDS = new Set<TimelineEntry["kind"]>([
+  "user",
+  "assistant-text",
+  "subagent-launch",
+  "compaction",
+]);
+
+function kindAllowedByDial(kind: TimelineEntry["kind"], dial: DetailDial): boolean {
+  if (dial === "user-only") return kind === "user";
+  if (dial === "minimal") return MINIMAL_KINDS.has(kind);
+  return true;
+}
+
+/**
+ * Chip visibility per entry. Only 6 chips exist (user/assistant/tool/
+ * subagent/error/compaction) — `thinking` and `task-notification` have no
+ * dedicated chip and are gated by the dial alone. A `tool-call` in error
+ * status belongs to the "error" chip's domain, not "tool"'s, so toggling
+ * "tool" off still leaves failed calls visible until "error" is also off.
+ */
+export function chipAllows(entry: TimelineEntry, chips: ChipState): boolean {
+  switch (entry.kind) {
+    case "user":
+      return chips.user;
+    case "assistant-text":
+      return chips.assistant;
+    case "tool-call":
+      return entry.status === "error" ? chips.error : chips.tool;
+    case "subagent-launch":
+      return chips.subagent;
+    case "compaction":
+      return chips.compaction;
+    case "api-error":
+      return chips.error;
+    default:
+      return true;
+  }
+}
+
+export function isEntryVisible(entry: TimelineEntry, dial: DetailDial, chips: ChipState): boolean {
+  return kindAllowedByDial(entry.kind, dial) && chipAllows(entry, chips);
+}
+
+export interface ChipCounts {
+  user: number;
+  assistant: number;
+  tool: number;
+  subagent: number;
+  error: number;
+  compaction: number;
+}
+
+/**
+ * Live per-chip counts — computed over the *whole* session regardless of the
+ * current dial/chip state, so the chip row always reads as "how many of
+ * these exist in this session", not "how many currently pass the filter".
+ */
+export function computeChipCounts(entries: readonly TimelineEntry[]): ChipCounts {
+  const counts: ChipCounts = {
+    user: 0,
+    assistant: 0,
+    tool: 0,
+    subagent: 0,
+    error: 0,
+    compaction: 0,
+  };
+  for (const entry of entries) {
+    switch (entry.kind) {
+      case "user":
+        counts.user += 1;
+        break;
+      case "assistant-text":
+        counts.assistant += 1;
+        break;
+      case "tool-call":
+        if (entry.status === "error") counts.error += 1;
+        else counts.tool += 1;
+        break;
+      case "subagent-launch":
+        counts.subagent += 1;
+        break;
+      case "compaction":
+        counts.compaction += 1;
+        break;
+      case "api-error":
+        counts.error += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  return counts;
+}
+
+/** Whether an entry should read as an "error" location for the mini-map. */
+export function isErrorEntry(entry: TimelineEntry): boolean {
+  return entry.kind === "api-error" || (entry.kind === "tool-call" && entry.status === "error");
+}
+
+/** Whether an entry should read as an amber marker (turn/boundary) for the mini-map. */
+export function isMarkerEntry(entry: TimelineEntry): boolean {
+  return entry.kind === "user" || entry.kind === "compaction";
+}

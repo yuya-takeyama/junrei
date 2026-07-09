@@ -13,3 +13,8 @@ export type ModelMixEntry = SessionListItem["modelMix"][number];
 type SessionResponse = InferResponseType<(typeof client.api.sessions)[":project"][":id"]["$get"]>;
 export type SessionJson = Extract<SessionResponse, { sessionId: string }>;
 export type SubagentNodeJson = SessionJson["subagents"][number];
+
+type TimelineResponse = InferResponseType<
+  (typeof client.api.sessions)[":project"][":id"]["timeline"]["$get"]
+>;
+export type TimelineEntry = Extract<TimelineResponse, { entries: unknown[] }>["entries"][number];

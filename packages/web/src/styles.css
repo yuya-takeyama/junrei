@@ -480,3 +480,166 @@ a.l0g:hover {
   opacity: 0.7;
   flex: none;
 }
+
+/* ---------------------------------------------------------------------
+   Timeline (L2) — detail dial, filter chips, transcript blocks, mini-map.
+   See design-spec/12-timeline.md and 99-components.md.
+   --------------------------------------------------------------------- */
+
+.dial {
+  display: flex;
+  border: 1px dotted var(--bd);
+}
+.dseg {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 5px 11px;
+  color: var(--mut);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.dseg.on {
+  color: var(--bg);
+  background: var(--amb);
+}
+
+.tlrow {
+  display: flex;
+  gap: 12px;
+}
+.gut {
+  width: 42px;
+  flex: none;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--mut);
+  padding-top: 13px;
+  line-height: 1.3;
+}
+.blk {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--bd);
+  background: var(--pan);
+  padding: 10px 14px;
+  position: relative;
+}
+.blk-q {
+  background: transparent;
+  border: 1px dotted var(--amb);
+}
+.blk:hover .ln {
+  color: var(--amb);
+  opacity: 1;
+}
+.bhd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+}
+button.bhd.tool-hd {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.btxt {
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 6px;
+}
+.dim {
+  opacity: 0.6;
+}
+.mbdg {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 7px;
+  border: 1px solid var(--bd);
+  color: var(--mut);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.mdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.code {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  background: var(--bg);
+  border: 1px dotted var(--bd);
+  padding: 10px 12px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  margin-top: 8px;
+}
+.cbreak {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--amb);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+.cbline {
+  flex: 1;
+  border-top: 1px dashed var(--amb);
+  opacity: 0.45;
+}
+
+.mmap {
+  width: 16px;
+  flex: none;
+  border: 1px dotted var(--bd);
+  position: sticky;
+  top: 16px;
+  align-self: flex-start;
+  max-height: calc(100vh - 160px);
+  overflow: hidden;
+}
+.mmap-track {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+.mmap-band {
+  display: block;
+  width: 100%;
+  flex: 1 1 0;
+  min-height: 1px;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.mmap-band-amb {
+  background: var(--amb);
+  opacity: 0.8;
+}
+.mmap-band-mut {
+  background: var(--mut);
+  opacity: 0.35;
+}
+.mmap-band-err {
+  background: var(--err);
+  opacity: 0.85;
+}
