@@ -115,7 +115,7 @@ with provenance (line numbers / record UUIDs). ✅ shipped in v1 · ⬜ planned.
 | --- | --- | --- |
 | ✅ Cost / tokens by model | Per-model token & USD rollup, incl. subagents | Model mix = routing quality |
 | ✅ Subagent tree | Nested agents with model, prompt, usage, depth | Orchestration shape at a glance |
-| ⬜ Delegation share | % of total tokens spent in subagents vs. main thread, by model tier | Is expensive-model work orchestration-only? |
+| ✅ Delegation share | % of total tokens spent in subagents vs. main thread, by model tier | Is expensive-model work orchestration-only? |
 | ⬜ Subagent return size | Tokens of each agent's final message to parent (benchmark: 1–2k) | Context discipline of workers |
 | ⬜ Concurrency profile | Wall-clock overlap of sibling agents / background tasks | Was parallelism real or nominal? |
 | ⬜ Sibling overlap | Same file read / same query issued by 2+ sibling agents | Vague task descriptions → duplicated work |
@@ -133,8 +133,8 @@ with provenance (line numbers / record UUIDs). ✅ shipped in v1 · ⬜ planned.
 | ✅ Repetition findings | Near-duplicate calls, re-reads, repeated failures | Thrash / lost-context re-discovery |
 | ✅ Tool error classes | file-not-found, string-not-found, command-failed, … | Friction taxonomy |
 | ⬜ File access tree | Directory tree of files read/edited, with counts & timing | What context was actually pulled in |
-| ⬜ Skill invocations | Skill tool calls: which skill, when, what it loaded | Was procedural context available & used? |
-| ⬜ Instruction footprint | Size of CLAUDE.md / rules / MEMORY.md loaded at start | Adherence-risk baseline (200-line guidance) |
+| ✅ Skill invocations | Skill tool calls: which skill, when, what it loaded | Was procedural context available & used? |
+| ⬜ Instruction footprint | Size of CLAUDE.md / rules / MEMORY.md loaded at start; per-file injected sizes now tracked via file access (#40) — size-at-start as a headline signal remains open | Adherence-risk baseline (200-line guidance) |
 
 Aggregate lenses (cross-session trends, error taxonomy across sessions) stay
 post-v1 — see [roadmap.md](./roadmap.md).
@@ -233,8 +233,9 @@ API. New needs:
   agent attribution (exploration profile already tracks the sets).
 - **Subagent routes** + per-agent analysis reusing the same session pipeline
   (core supports this recursively already).
-- **New derived signals**: delegation share, return sizes, concurrency
-  profile, sibling overlap, token composition per turn, instruction footprint.
+- **New derived signals**: delegation share (shipped #38), return sizes,
+  concurrency profile, sibling overlap, token composition per turn,
+  instruction footprint.
 
 ## 5. MCP parity
 

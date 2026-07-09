@@ -43,7 +43,8 @@ claude mcp add --transport http junrei http://localhost:7867/mcp
 ```
 
 Tools: `list_sessions`, `get_session_summary`, `get_context_timeline`,
-`find_repetitions`, `get_subagent_tree`, `get_task_executions`, `get_first_prompt`.
+`find_repetitions`, `get_subagent_tree`, `get_task_executions`, `get_first_prompt`,
+`get_repo_overview`.
 
 ## License
 

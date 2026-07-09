@@ -81,9 +81,45 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 - ✅ File-access event list (per-file, timestamped, agent-attributed)
 - ✅ Subagent drill-down routes (recursive session-shaped detail)
 - ✅ New derived signals: subagent return sizes, per-turn token composition
-- ⬜ New derived signals: delegation share, concurrency profile, sibling
-  overlap, instruction footprint
+- ✅ New derived signals: delegation share (#38)
+- ⬜ New derived signals: concurrency profile, sibling overlap, instruction
+  footprint (instruction sizes partially visible via injected-file tracking,
+  #40)
 - ✅ UI lenses: Timeline / Orchestration / Context & cost / Files & skills
+
+## Value-delivery loop (dogfooding, 2026-07-10)
+
+Dogfooded Junrei on its own repo: 16 sessions / $527 spent at the time, the
+top 3 sessions accounting for 78% of spend, and main-thread orchestrator cost
+dominant over subagent cost. Every finding required jq and hand-math to
+extract — so the missing signals shipped as one same-day PR series instead.
+
+- ✅ Zero-usage models (e.g. `<synthetic>` API-error stubs) no longer flip
+  `costIsComplete=false` (#35)
+- ✅ Worktree-aware repo identity — `deriveRepoIdentity(cwd)` →
+  `repoRoot`/`worktreeName` on analyses + list items (#36)
+- ✅ Repo-aware session-list filter (`?repo=`), worktree marker on rows (#37)
+- ✅ First-class delegation share signal — core `computeDelegationSummary` →
+  `analysis.delegation` (main vs. subagents tokens/cost + byModel, Codex
+  serve-time), MCP `get_session_summary` serves it, Overview tile shows
+  "$X delegated — N% of cost · M% of tokens", Orchestration header
+  "main N% cost · M% tokens" (#38)
+- ✅ Skill injected payload — `skillInvocations[].injectedChars`/
+  `injectionLine` from `isMeta` injection records; panel shows "N chars
+  loaded" (closes #27) (#39)
+- ✅ Injected files in `fileAccess` — "Contents of `<path>`" system-reminder
+  blocks (CLAUDE.md/MEMORY.md) + SKILL.md injections tracked as
+  `injectedCount`/`injectedChars`; file tree shows "· inj N" markers (#40)
+- ✅ Multi-model subagents surfaced in Orchestration (activeModels badges +
+  per-model breakdown in detail panel) — makes SendMessage model-override
+  cost leaks visible at tree level (#41)
+- ✅ Repo overview aggregates — list items carry slim `usageByModel` +
+  `delegation`; `computeRepoOverview` + `GET /api/overview?repo=`;
+  session-list aggregate band (total cost, sessions, delegated share, top
+  model, per-day UTC bars) (#42)
+- ✅ `get_repo_overview` MCP tool (shares `getRepoOverview` with the HTTP
+  route) + tool-description cost semantics (`cacheWriteCostUsd` included in
+  `costUsd`; `costIsComplete=false` = lower bound) (#43)
 
 ## Codex CLI sessions
 
@@ -185,7 +221,8 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 
 ## Later (post-v1)
 
-- ⬜ Cross-session aggregates & trends
+- 🚧 Cross-session aggregates & trends — repo-level overview shipped
+  (#42, #43); cross-repo/global trends still open
 - ⬜ Export/copy portable summaries (paste into ChatGPT, issues, docs)
 - ⬜ Review Skill for agent-driven retrospectives
 - ⬜ Desktop packaging (Tauri/Electron)
