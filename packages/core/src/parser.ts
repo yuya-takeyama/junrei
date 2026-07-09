@@ -297,6 +297,11 @@ function normalizeSystem(raw: Record<string, unknown>, line: number): SystemReco
     const record: ApiErrorRecord = { ...envelope(raw, line), type: "system", subtype: "api_error" };
     const retryAttempt = num(raw.retryAttempt);
     if (retryAttempt !== undefined) record.retryAttempt = retryAttempt;
+    const error = isObject(raw.error) ? raw.error : undefined;
+    const message = str(error?.formatted) ?? str(error?.message);
+    if (message !== undefined) record.message = message;
+    const status = num(error?.status) ?? num(raw.status);
+    if (status !== undefined) record.status = status;
     return record;
   }
   const record: OtherSystemRecord = { ...envelope(raw, line), type: "system" };

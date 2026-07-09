@@ -1,10 +1,18 @@
 import {
   analyzeSession,
+  buildSessionData,
+  buildTimeline,
+  getRecordDetail,
   listSessionFiles,
+  loadSubagentSessionData,
+  parseTranscriptFile,
+  type RecordDetail,
   resolveProjectsDirs,
   type SessionAnalysis,
+  type SessionData,
   type SessionFileRef,
   type SubagentNode,
+  type TimelineEntry,
 } from "@junrei/core";
 
 /** Per-model output-token totals (main session + all subagents, recursively). */
@@ -122,16 +130,89 @@ export async function listSessions(limit: number): Promise<SessionListItem[]> {
   return items;
 }
 
+async function findRef(
+  projectDirName: string,
+  sessionId: string,
+): Promise<SessionFileRef | undefined> {
+  const dirs = await resolveProjectsDirs();
+  const refs = await listSessionFiles(dirs);
+  return refs.find((r) => r.projectDirName === projectDirName && r.sessionId === sessionId);
+}
+
 export async function getSession(
   projectDirName: string,
   sessionId: string,
 ): Promise<SessionAnalysis | undefined> {
-  const dirs = await resolveProjectsDirs();
-  const refs = await listSessionFiles(dirs);
-  const ref = refs.find((r) => r.projectDirName === projectDirName && r.sessionId === sessionId);
+  const ref = await findRef(projectDirName, sessionId);
   if (ref === undefined) return undefined;
   try {
     return await analyzeCached(ref);
+  } catch {
+    return undefined;
+  }
+}
+
+interface SessionDataCacheEntry {
+  mtimeMs: number;
+  data: SessionData;
+}
+
+const sessionDataCache = new Map<string, SessionDataCacheEntry>();
+
+/** Parsed + structured (but not analyzed) main-session data, cached by mtime. */
+async function sessionDataCached(ref: SessionFileRef): Promise<SessionData> {
+  const hit = sessionDataCache.get(ref.filePath);
+  if (hit !== undefined && hit.mtimeMs === ref.mtimeMs) return hit.data;
+  const transcript = await parseTranscriptFile(ref.filePath);
+  const data = buildSessionData(transcript);
+  sessionDataCache.set(ref.filePath, { mtimeMs: ref.mtimeMs, data });
+  return data;
+}
+
+/**
+ * Resolve which transcript to read for a timeline/record request: the main
+ * session, or — when `agentId` is given — that subagent's own sidecar
+ * transcript (which lives alongside the main session file regardless of
+ * nesting depth).
+ */
+async function resolveThreadData(
+  ref: SessionFileRef,
+  agentId: string | undefined,
+): Promise<SessionData | undefined> {
+  if (agentId === undefined) return sessionDataCached(ref);
+  return loadSubagentSessionData(ref.filePath, agentId);
+}
+
+/** Full-transcript timeline for the Timeline lens (L2). `agentId` scopes it to one subagent. */
+export async function getTimeline(
+  projectDirName: string,
+  sessionId: string,
+  agentId?: string,
+): Promise<TimelineEntry[] | undefined> {
+  const ref = await findRef(projectDirName, sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    const data = await resolveThreadData(ref, agentId);
+    if (data === undefined) return undefined;
+    return await buildTimeline(data, { mainFilePath: ref.filePath });
+  } catch {
+    return undefined;
+  }
+}
+
+/** Full detail for one source line — for the Record detail (L3) slide-over. */
+export async function getSessionRecordDetail(
+  projectDirName: string,
+  sessionId: string,
+  line: number,
+  agentId?: string,
+): Promise<RecordDetail | undefined> {
+  const ref = await findRef(projectDirName, sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    const data = await resolveThreadData(ref, agentId);
+    if (data === undefined) return undefined;
+    return await getRecordDetail(data, line, { mainFilePath: ref.filePath });
   } catch {
     return undefined;
   }
