@@ -3,8 +3,9 @@ import { Fragment, useEffect, useState } from "react";
 import { client, type SessionJson } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
 import { Overview } from "./lenses/Overview.js";
+import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
-import type { Lens } from "./router.js";
+import { buildHash, buildRecordHash, type Lens } from "./router.js";
 import { Band } from "./shell/Band.js";
 import { LensTabs } from "./shell/LensTabs.js";
 import { StatStrip } from "./shell/StatStrip.js";
@@ -13,6 +14,8 @@ interface Props {
   project: string;
   id: string;
   lens: Lens;
+  /** Source line of the record slide-over (L3, screen 8) to show over this lens, if any. */
+  record?: number;
 }
 
 const LENS_LABEL: Record<Lens, string> = {
@@ -72,10 +75,12 @@ function MetaLine({ session }: { session: SessionJson }) {
  * design-spec/01-shell.md. Only "overview" renders real content in this PR;
  * the rest are placeholders for later PRs.
  */
-export function SessionShell({ project, id, lens }: Props) {
+export function SessionShell({ project, id, lens, record }: Props) {
   const [session, setSession] = useState<SessionJson | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const recordOpen = record !== undefined;
+  const closeRecordHref = buildHash(project, id, lens);
 
   useEffect(() => {
     setSession(null);
@@ -102,47 +107,63 @@ export function SessionShell({ project, id, lens }: Props) {
   };
 
   return (
-    <div>
-      <Band
-        left={
-          <span className="mono fs11 mut nowrap">
-            <a href="#/">Sessions</a> / {project} / {title}
-          </span>
-        }
-        right={
-          <button type="button" className="cp" onClick={handleCopy}>
-            {shortenId(id)} {copied ? "copied" : "⧉"}
-          </button>
-        }
-      />
-      {session !== null && (
-        <>
-          <div className="hpad" style={{ paddingTop: "22px" }}>
-            <h1 className="ttl" style={{ fontSize: "24px" }}>
-              {title}
-            </h1>
-            <MetaLine session={session} />
-          </div>
-          <StatStrip session={session} />
-        </>
-      )}
-      <div className="hpad mt16">
-        <LensTabs project={project} id={id} active={lens} />
-      </div>
-      {error !== null && <div className="hpad mt16 mut">Failed to load session: {error}</div>}
-      {error === null && session === null && (
-        <div className="hpad mt16 mut">Analyzing session…</div>
-      )}
-      {error === null && session !== null && lens === "overview" && <Overview session={session} />}
-      {error === null && session !== null && lens === "timeline" && (
-        <Timeline project={project} id={id} />
-      )}
-      {error === null && session !== null && lens !== "overview" && lens !== "timeline" && (
+    <div className="posrel">
+      <div
+        className={recordOpen ? "dim" : undefined}
+        style={recordOpen ? { pointerEvents: "none" } : undefined}
+      >
+        <Band
+          left={
+            <span className="mono fs11 mut nowrap">
+              <a href="#/">Sessions</a> / {project} / {title}
+            </span>
+          }
+          right={
+            <button type="button" className="cp" onClick={handleCopy}>
+              {shortenId(id)} {copied ? "copied" : "⧉"}
+            </button>
+          }
+        />
+        {session !== null && (
+          <>
+            <div className="hpad" style={{ paddingTop: "22px" }}>
+              <h1 className="ttl" style={{ fontSize: "24px" }}>
+                {title}
+              </h1>
+              <MetaLine session={session} />
+            </div>
+            <StatStrip session={session} />
+          </>
+        )}
         <div className="hpad mt16">
-          <div className="pan tile mut">
-            {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
-          </div>
+          <LensTabs project={project} id={id} active={lens} />
         </div>
+        {error !== null && <div className="hpad mt16 mut">Failed to load session: {error}</div>}
+        {error === null && session === null && (
+          <div className="hpad mt16 mut">Analyzing session…</div>
+        )}
+        {error === null && session !== null && lens === "overview" && (
+          <Overview session={session} />
+        )}
+        {error === null && session !== null && lens === "timeline" && (
+          <Timeline
+            project={project}
+            id={id}
+            onOpenRecord={(line) => {
+              window.location.hash = buildRecordHash(project, id, lens, line);
+            }}
+          />
+        )}
+        {error === null && session !== null && lens !== "overview" && lens !== "timeline" && (
+          <div className="hpad mt16">
+            <div className="pan tile mut">
+              {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
+            </div>
+          </div>
+        )}
+      </div>
+      {record !== undefined && (
+        <RecordDetail project={project} id={id} line={record} closeHref={closeRecordHref} />
       )}
     </div>
   );

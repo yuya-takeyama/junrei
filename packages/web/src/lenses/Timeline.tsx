@@ -14,6 +14,8 @@ import {
 interface Props {
   project: string;
   id: string;
+  /** Opens the record slide-over (L3, screen 8) for a given source line. */
+  onOpenRecord: (line: number) => void;
 }
 
 /** Entries are rendered in chunks so a 2000+-entry session doesn't force one giant paint. */
@@ -44,7 +46,7 @@ const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "e
  * is wrapped in `memo` so toggling one tool-call's expansion doesn't
  * re-render its siblings.
  */
-export function Timeline({ project, id }: Props) {
+export function Timeline({ project, id, onOpenRecord }: Props) {
   const [entries, setEntries] = useState<TimelineEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dial, setDial] = useState<DetailDial>("full");
@@ -199,6 +201,7 @@ export function Timeline({ project, id }: Props) {
                   expanded={expandedLines.has(entry.line)}
                   onToggleExpand={onToggleExpand}
                   registerRef={registerRef}
+                  onOpenRecord={onOpenRecord}
                 />
               ))}
               {remaining > 0 && (

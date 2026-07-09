@@ -40,6 +40,25 @@ export function formatTime(iso: string): string {
   });
 }
 
+/**
+ * Time with millisecond precision (`14:03:12.480`) — used for the record
+ * slide-over's `Started` row (design-spec/17-record-detail.md), where the
+ * minute-granular `formatTime` above would collapse everything within the
+ * same minute to an identical label.
+ */
+export function formatTimeMs(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const time = date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${time}.${ms}`;
+}
+
 /** Shorten a munged project dir name to its meaningful tail. */
 export function formatProject(projectDirName: string, cwd?: string): string {
   if (cwd !== undefined) {

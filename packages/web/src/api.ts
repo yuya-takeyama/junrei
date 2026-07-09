@@ -18,3 +18,11 @@ type TimelineResponse = InferResponseType<
   (typeof client.api.sessions)[":project"][":id"]["timeline"]["$get"]
 >;
 export type TimelineEntry = Extract<TimelineResponse, { entries: unknown[] }>["entries"][number];
+
+type RecordResponse = InferResponseType<
+  (typeof client.api.sessions)[":project"][":id"]["record"][":line"]["$get"]
+>;
+/** Discriminated union of every record kind the slide-over (L3, screen 8) can render. */
+export type RecordDetail = Exclude<RecordResponse, { error: string }>;
+export type ToolCallRecordDetail = Extract<RecordDetail, { kind: "tool-call" }>;
+export type SubagentLaunchRecordDetail = Extract<RecordDetail, { kind: "subagent-launch" }>;

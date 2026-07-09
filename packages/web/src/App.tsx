@@ -17,7 +17,12 @@ export function App() {
       {route.view === "list" ? (
         <SessionList />
       ) : (
-        <SessionShell project={route.project} id={route.id} lens={route.lens} />
+        <SessionShell
+          project={route.project}
+          id={route.id}
+          lens={route.lens}
+          {...(route.record !== undefined && { record: route.record })}
+        />
       )}
     </div>
   );
