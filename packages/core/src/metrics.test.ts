@@ -4,12 +4,29 @@ import { describe, expect, it } from "vitest";
 import {
   computeFileAccess,
   computeSkillInvocations,
+  computeUsage,
   type FileAccessAgg,
   mergeFileAccess,
 } from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
-import type { SessionData, ToolCall } from "./session-data.js";
+import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
+
+/** Bare `SessionData` with only `apiMessages` populated — mirrors the literal in the "computeSkillInvocations" describe block below, sized for `computeUsage` instead. */
+function sessionDataWithMessages(apiMessages: ApiMessage[]): SessionData {
+  return {
+    records: [],
+    apiMessages,
+    toolCalls: [],
+    userPrompts: [],
+    compactions: [],
+    backgroundLaunches: [],
+    taskNotifications: [],
+    apiErrorCount: 0,
+    apiErrors: [],
+    warningCount: 0,
+  };
+}
 
 const FIXTURE_PROJECTS = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/projects");
 const SESSION_FILE = join(
@@ -21,6 +38,56 @@ async function loadMainData(): Promise<SessionData> {
   const transcript = await parseClaudeTranscriptFile(SESSION_FILE);
   return buildSessionData(transcript);
 }
+
+describe("computeUsage", () => {
+  it("a zero-usage message on an unpriced model doesn't flip costIsComplete false", () => {
+    // Shape mirrors Claude Code's real "<synthetic>" harness stub: a
+    // zero-token error-stub message on a model that has no pricing entry
+    // (observed in session 52ee641f-6d82-459d-9324-878fcc1037b5's subagent
+    // sidecar, agent-a07131f00d4299b4e.jsonl line 20 — "API Error: Connection
+    // closed mid-response").
+    const priced: ApiMessage = {
+      messageId: "msg_priced",
+      model: "claude-fable-5",
+      usage: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      line: 1,
+    };
+    const synthetic: ApiMessage = {
+      messageId: "msg_synthetic",
+      model: "<synthetic>",
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      line: 2,
+    };
+    const data = sessionDataWithMessages([priced, synthetic]);
+    const usage = computeUsage(data);
+
+    expect(usage.total.costIsComplete).toBe(true);
+    const pricedEntry = usage.byModel.find((m) => m.model === "claude-fable-5");
+    expect(usage.total.costUsd).toBe(pricedEntry?.costUsd);
+
+    // Present in byModel (its message still happened) but priced at an exact
+    // $0, not left undefined/"unpriced" — see the zero-usage short-circuit in
+    // pricing.ts's estimateCostComponents.
+    const syntheticEntry = usage.byModel.find((m) => m.model === "<synthetic>");
+    expect(syntheticEntry).toBeDefined();
+    expect(syntheticEntry?.costUsd).toBe(0);
+    expect(syntheticEntry?.messageCount).toBe(1);
+  });
+
+  it("an unpriced model WITH nonzero tokens still marks costIsComplete false", () => {
+    const message: ApiMessage = {
+      messageId: "msg_unpriced",
+      model: "totally-unknown-model-xyz",
+      usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      line: 1,
+    };
+    const usage = computeUsage(sessionDataWithMessages([message]));
+
+    expect(usage.total.costIsComplete).toBe(false);
+    const entry = usage.byModel.find((m) => m.model === "totally-unknown-model-xyz");
+    expect(entry?.costUsd).toBeUndefined();
+  });
+});
 
 describe("computeFileAccess", () => {
   it("tallies reads/edits for the main transcript alone, ignoring search tools", async () => {

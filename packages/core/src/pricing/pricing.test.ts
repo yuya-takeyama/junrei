@@ -40,6 +40,27 @@ describe("estimateCostComponents / estimateCostUsd", () => {
     expect(estimateCostUsd("totally-unknown-model-xyz", USAGE)).toBeUndefined();
   });
 
+  it("returns an exact $0 for an unpriced model when usage is entirely zero tokens", () => {
+    // Zero tokens cost $0 regardless of pricing availability — e.g. Claude
+    // Code's "<synthetic>" harness stub messages, which carry no real usage
+    // and have no pricing entry. This must NOT be treated the same as a
+    // genuinely unpriced/unknown-cost model (previous test).
+    const zeroUsage: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    };
+    expect(estimateCostComponents("<synthetic>", zeroUsage)).toEqual({
+      inputCost: 0,
+      outputCost: 0,
+      cacheReadCost: 0,
+      cacheCreationCost: 0,
+      totalCost: 0,
+    });
+    expect(estimateCostUsd("<synthetic>", zeroUsage)).toBe(0);
+  });
+
   it("splits ephemeral 5m/1h cache-creation tokens at their respective rates", () => {
     const usage: TokenUsage = {
       inputTokens: 0,
