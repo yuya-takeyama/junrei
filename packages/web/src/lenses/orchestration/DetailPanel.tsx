@@ -1,36 +1,59 @@
 import { Link } from "react-router";
-import type { AnySessionJson, SubagentNodeJson } from "../../api.js";
-import { formatDuration, formatTime, formatUsd } from "../../format.js";
+import type { AnySessionJson, ModelUsageSummary, SubagentNodeJson } from "../../api.js";
+import { formatDuration, formatTime, formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import { agentPath, sessionPath } from "../../router.js";
 import {
+  activeModels,
   displayName,
   findSubagent,
   MAIN_ID,
   nodeDurationMs,
-  primaryModel,
   type SelectedId,
   spawnedByLabel,
   totalTokensOf,
 } from "./agentTree.js";
+import { ModelBadges } from "./ModelBadges.js";
 
 interface Props {
   session: AnySessionJson;
   selected: SelectedId;
 }
 
-function ModelBadge({ model }: { model: string | undefined }) {
-  if (model === undefined) return null;
+/**
+ * Per-model cost/token split — only rendered when a node actually used more
+ * than one active model (the SendMessage model-override case: a subagent
+ * billed under both its assigned cheap model and the session's expensive
+ * one). Single-model nodes skip straight past this, same as before.
+ */
+function ModelBreakdown({ models }: { models: readonly ModelUsageSummary[] }) {
+  if (models.length <= 1) return null;
   return (
-    <span className="mbdg">
-      <span className={`mdot c-${classifyModel(model)}`} />
-      {modelShortLabel(model)}
-    </span>
+    <div className="mt16">
+      <div className="lbl">Per-model</div>
+      <div className="mbk hdr">
+        <span className="lbl">Model</span>
+        <span className="lbl cellr">Msgs</span>
+        <span className="lbl cellr">Output</span>
+        <span className="lbl cellr">Cost</span>
+      </div>
+      {models.map((m) => (
+        <div className="mbk" key={m.model}>
+          <span className="fx ac gap6">
+            <span className={`mdot c-${classifyModel(m.model)}`} />
+            <span className="mono fs11">{modelShortLabel(m.model)}</span>
+          </span>
+          <span className="num fs11 cellr">{m.messageCount}</span>
+          <span className="num fs11 cellr">{formatTokens(m.outputTokens)}</span>
+          <span className="num fs11 cellr">{formatUsd(m.costUsd ?? 0)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
 function MainDetail({ session }: { session: AnySessionJson }) {
-  const model = primaryModel(session.usage.byModel);
+  const models = activeModels(session.usage.byModel);
   // Claude: per-tool-call stats (toolStats). Codex has no such breakdown —
   // codex.toolCallCount/toolErrorCount already covers the whole main turn.
   const toolCallCount =
@@ -48,7 +71,7 @@ function MainDetail({ session }: { session: AnySessionJson }) {
         <span className="fw6" style={{ fontSize: "15px" }}>
           {session.title ?? "main"}
         </span>
-        <ModelBadge model={model} />
+        <ModelBadges models={models} />
       </div>
       <div className="mono fs10 mut mt8">
         session root · every subagent below is delegated from here
@@ -72,12 +95,14 @@ function MainDetail({ session }: { session: AnySessionJson }) {
           )}
         </span>
       </div>
+      <ModelBreakdown models={models} />
     </>
   );
 }
 
 function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySessionJson }) {
   const durationMs = nodeDurationMs(node);
+  const models = activeModels(node.usage.byModel);
   const spawnedAt = node.launchedAt ?? node.startedAt;
   const spawnMeta = [
     `spawned by ${spawnedByLabel(node, session.subagents)}`,
@@ -102,7 +127,7 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySe
         <span className="fw6" style={{ fontSize: "15px" }}>
           {displayName(node)}
         </span>
-        <ModelBadge model={node.model} />
+        <ModelBadges models={models} />
       </div>
       <div className="mono fs10 mut mt8">{spawnMeta}</div>
       {node.promptPreview !== undefined && (
@@ -141,6 +166,7 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySe
           )}
         </span>
       </div>
+      <ModelBreakdown models={models} />
       <div className="ann mt12" style={{ borderTop: "1px dotted var(--bd)", paddingTop: "10px" }}>
         ref · typical subagent summary: 1–2k tokens
       </div>

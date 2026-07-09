@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { SubagentNodeJson } from "../../api.js";
+import type { ModelUsageSummary, SubagentNodeJson } from "../../api.js";
 import {
+  activeModels,
   findAgentPath,
   flattenSubagents,
   mainDelegatedSplit,
@@ -158,6 +159,66 @@ describe("findAgentPath", () => {
   it("returns undefined when the agentId isn't anywhere in the forest", () => {
     const research = node("research-agent", 0.94);
     expect(findAgentPath([research], "does-not-exist")).toBeUndefined();
+  });
+});
+
+function modelUsage(model: string, overrides: Partial<ModelUsageSummary> = {}): ModelUsageSummary {
+  return {
+    model,
+    messageCount: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    ...overrides,
+  };
+}
+
+describe("activeModels", () => {
+  it("returns every model with real activity, cost descending — the SendMessage override case", () => {
+    // Mirrors the dogfooding example (session acca8a8c-36c7-42d2-be69-46fa1473ab2b,
+    // subagent a4a92f13): a subagent silently switched from its assigned
+    // sonnet to the expensive session model (fable) mid-run, so usage.byModel
+    // carries both — a single-model badge used to hide the fable side
+    // entirely.
+    const sonnet = modelUsage("claude-sonnet-4-5", {
+      messageCount: 149,
+      outputTokens: 12000,
+      costUsd: 6.72,
+    });
+    const fable = modelUsage("claude-fable-5", {
+      messageCount: 57,
+      outputTokens: 9000,
+      costUsd: 18.21,
+    });
+    expect(activeModels([sonnet, fable]).map((m) => m.model)).toEqual([
+      "claude-fable-5",
+      "claude-sonnet-4-5",
+    ]);
+  });
+
+  it("returns the single entry unchanged for a single-model node", () => {
+    const sonnet = modelUsage("claude-sonnet-4-5", { outputTokens: 500, costUsd: 0.42 });
+    expect(activeModels([sonnet])).toEqual([sonnet]);
+  });
+
+  it("excludes a zero-usage entry even when messageCount > 0 — a logged '<synthetic>' stub must never count as an active model", () => {
+    // Shape mirrors Claude Code's real "<synthetic>" harness stub (see
+    // @junrei/core's metrics.test.ts): the message happened (messageCount: 1)
+    // but moved no tokens and billed nothing, so `messageCount` alone can't
+    // be the activity signal — only token volume / cost qualifies.
+    const sonnet = modelUsage("claude-sonnet-4-5", { outputTokens: 500, costUsd: 0.42 });
+    const synthetic = modelUsage("<synthetic>", { messageCount: 1, costUsd: 0 });
+    expect(activeModels([sonnet, synthetic]).map((m) => m.model)).toEqual(["claude-sonnet-4-5"]);
+  });
+
+  it("returns [] when every entry is zero-usage (no active model at all)", () => {
+    const synthetic = modelUsage("<synthetic>", { messageCount: 1, costUsd: 0 });
+    expect(activeModels([synthetic])).toEqual([]);
+  });
+
+  it("returns [] for an empty byModel — the Codex-safety no-data case", () => {
+    expect(activeModels([])).toEqual([]);
   });
 });
 
