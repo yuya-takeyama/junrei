@@ -36,6 +36,7 @@ in Workflow scripts:
 | Mechanical edits, codemods, test scaffolding | `sonnet` | low |
 | Feature implementation with clear spec | `sonnet` | high |
 | UI/preview verification of a change | `sonnet` via `preview-verifier` agent | medium |
+| Commit/push/PR/CI-watch chores | `sonnet` via `pr-shepherd` agent | low |
 | Hard implementation, tricky debugging | `opus` | high/xhigh |
 | Adversarial verification, independent review | `opus` (fresh context matters more than tier) | high |
 | Architecture decisions, ambiguous planning | keep on orchestrator (or `opus` xhigh) | — |
@@ -59,6 +60,13 @@ Rules of thumb:
   `preview-verifier` agent (`.claude/agents/preview-verifier.md`, pinned to
   Sonnet) and consume its text verdict; in the acca8a8c session, main-loop
   preview driving contributed to a $58 orchestrator bill on a $94 session.
+- **Don't babysit CI from the orchestrator.** `gh pr checks --watch`, git
+  rebases, pushes, and PR creation each land their output as another
+  main-loop message that re-reads the whole context at top-tier prices (73
+  main-loop Bash calls in the same acca8a8c session). Hand the prepared tree
+  to the `pr-shepherd` agent (`.claude/agents/pr-shepherd.md`, pinned to
+  Sonnet) with the commit message, PR title/body, and merge authorization,
+  and consume its one-paragraph report.
 
 ## Session-level setup (for the human, not the agent)
 
