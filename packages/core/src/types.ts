@@ -73,7 +73,13 @@ export interface TaskNotificationInfo {
 export interface ToolUseDetail {
   /** Bash launched with run_in_background — id used in later task notifications. */
   backgroundTaskId?: string;
-  /** Agent tool: async launch info. */
+  /**
+   * Agent tool: id of the spawned agent (`toolUseResult.agentId`), present
+   * for BOTH sync and async launches. Links this tool_result back to the
+   * sidecar transcript when the sidecar's meta.json lacks `toolUseId`.
+   */
+  agentId?: string;
+  /** Agent tool: async launch info (only when `status: "async_launched"`). */
   asyncAgentId?: string;
   asyncAgentDescription?: string;
 }

@@ -131,6 +131,28 @@ export function asyncAgentLaunchToolUseIds(
   return ids;
 }
 
+/**
+ * agentId -> tool_use id of the Agent/Task call that spawned that agent,
+ * recovered from parent-side `toolUseResult.agentId` (present for both sync
+ * and async launches). Fallback linkage for sidecar transcripts whose
+ * meta.json lacks `toolUseId` — some Claude Code versions (observed on
+ * 2.1.138) write only `agentType`/`description` there, which would otherwise
+ * orphan the node: no returnedChars/returnedPreview, no async detection, and
+ * no parent attachment in the subagent tree.
+ */
+export function agentLaunchToolUseIds(data: Pick<SessionData, "records">): Map<string, string> {
+  const byAgentId = new Map<string, string>();
+  for (const record of data.records) {
+    if (record.type !== "user" || !("toolResults" in record)) continue;
+    const agentId = record.toolUseDetail?.agentId;
+    const toolUseId = record.toolResults[0]?.toolUseId;
+    if (agentId !== undefined && toolUseId !== undefined && !byAgentId.has(agentId)) {
+      byAgentId.set(agentId, toolUseId);
+    }
+  }
+  return byAgentId;
+}
+
 export function buildSessionData(transcript: Transcript): SessionData {
   const apiMessagesById = new Map<string, ApiMessage>();
   const toolCalls: ToolCall[] = [];

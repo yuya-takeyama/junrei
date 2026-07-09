@@ -313,10 +313,47 @@ describe("analyzeSession with out-of-order tool results", () => {
   });
 });
 
+describe("analyzeSession with meta.json files lacking toolUseId", () => {
+  // Some Claude Code versions (observed on 2.1.138) write sidecar meta.json
+  // with only agentType/description — no toolUseId. Linkage must be recovered
+  // from the parent-side `toolUseResult.agentId` instead.
+  const NO_META_TOOLUSE_FILE = join(
+    FIXTURE_PROJECTS,
+    "-Users-test-proj/33333333-3333-3333-3333-333333333333.jsonl",
+  );
+
+  it("recovers sync-launch linkage (returnedChars/returnedPreview) via toolUseResult.agentId", async () => {
+    const analysis = await analyzeSession(NO_META_TOOLUSE_FILE);
+    expect(analysis.subagentCount).toBe(2);
+    const agent = analysis.subagents.find((n) => n.agentId === "cccc777788889999b");
+    expect(agent?.toolUseId).toBe("toolu_sync_nometa");
+    expect(agent?.asyncLaunch).toBeUndefined();
+    expect(agent?.returnedChars).toBe(
+      "The sync agent finished its work and returned this text.".length,
+    );
+    expect(agent?.returnedPreview).toBe("The sync agent finished its work and returned this text.");
+    expect(agent?.spawnedBy).toBe("main");
+    expect(agent?.launchLine).toBe(4);
+  });
+
+  it("recovers async-launch linkage and does NOT measure the ack as a return", async () => {
+    const analysis = await analyzeSession(NO_META_TOOLUSE_FILE);
+    const agent = analysis.subagents.find((n) => n.agentId === "dddd000011112222c");
+    expect(agent?.toolUseId).toBe("toolu_async_nometa");
+    // Recovered linkage restores async detection too: without it the node
+    // was misreported as a sync launch with no return.
+    expect(agent?.asyncLaunch).toBe(true);
+    expect(agent?.returnedChars).toBeUndefined();
+    expect(agent?.returnedPreview).toBeUndefined();
+    expect(agent?.spawnedBy).toBe("main");
+    expect(agent?.launchLine).toBe(2);
+  });
+});
+
 describe("listSessionFiles", () => {
   it("finds session files under a projects dir", async () => {
     const refs = await listSessionFiles([FIXTURE_PROJECTS]);
-    expect(refs).toHaveLength(2);
+    expect(refs).toHaveLength(3);
     expect(refs.map((r) => r.sessionId)).toContain("11111111-1111-1111-1111-111111111111");
     expect(refs[0]?.projectDirName).toBe("-Users-test-proj");
   });

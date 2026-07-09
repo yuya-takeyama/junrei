@@ -206,8 +206,9 @@ function extractToolUseDetail(raw: unknown): ToolUseDetail | undefined {
   const detail: ToolUseDetail = {};
   const backgroundTaskId = str(raw.backgroundTaskId);
   if (backgroundTaskId !== undefined) detail.backgroundTaskId = backgroundTaskId;
+  const agentId = str(raw.agentId);
+  if (agentId !== undefined) detail.agentId = agentId;
   if (raw.status === "async_launched") {
-    const agentId = str(raw.agentId);
     if (agentId !== undefined) detail.asyncAgentId = agentId;
     const description = str(raw.description);
     if (description !== undefined) detail.asyncAgentDescription = description;

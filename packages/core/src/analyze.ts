@@ -21,7 +21,12 @@ import {
 } from "./metrics.js";
 import { parseTranscriptFile } from "./parser.js";
 import type { ApiErrorLogEntry, CompactionEvent, SessionData, ToolCall } from "./session-data.js";
-import { asyncAgentLaunchToolUseIds, buildSessionData, toolResultLength } from "./session-data.js";
+import {
+  agentLaunchToolUseIds,
+  asyncAgentLaunchToolUseIds,
+  buildSessionData,
+  toolResultLength,
+} from "./session-data.js";
 import { listSubagentRefs } from "./subagents.js";
 
 /** Sentinel owner id for nodes launched directly from the main transcript. */
@@ -35,7 +40,12 @@ export interface SubagentNode {
   agentId: string;
   agentType?: string;
   description?: string;
-  /** tool_use id of the Agent/Task call that spawned this agent. */
+  /**
+   * tool_use id of the Agent/Task call that spawned this agent — from the
+   * sidecar's meta.json, or recovered from the parent-side
+   * `toolUseResult.agentId` when meta.json lacks it (some Claude Code
+   * versions write only agentType/description there).
+   */
   toolUseId?: string;
   spawnDepth?: number;
   model?: string;
@@ -257,11 +267,17 @@ async function analyzeSubagents(
   const toolCallsByOwner = new Map<string, Map<string, ToolCall>>();
   /** tool_use ids whose result is only an async-launch ack, across every transcript. */
   const asyncLaunchIds = new Set<string>();
+  /** agentId -> spawning tool_use id, recovered from parent-side `toolUseResult.agentId` —
+   *  fallback linkage for sidecars whose meta.json lacks `toolUseId`. */
+  const toolUseIdByAgentId = new Map<string, string>();
 
   const registerOwner = (ownerId: string, data: SessionData) => {
     toolCallsByOwner.set(ownerId, new Map(data.toolCalls.map((c) => [c.toolUseId, c])));
     for (const call of data.toolCalls) toolUseOwner.set(call.toolUseId, ownerId);
     for (const id of asyncAgentLaunchToolUseIds(data)) asyncLaunchIds.add(id);
+    for (const [agentId, toolUseId] of agentLaunchToolUseIds(data)) {
+      if (!toolUseIdByAgentId.has(agentId)) toolUseIdByAgentId.set(agentId, toolUseId);
+    }
   };
   registerOwner(MAIN_OWNER, mainData);
 
@@ -304,6 +320,13 @@ async function analyzeSubagents(
   // unmatched) becomes a root node, attributed to "main".
   const roots: SubagentNode[] = [];
   for (const node of nodes.values()) {
+    if (node.toolUseId === undefined) {
+      // Some Claude Code versions (observed on 2.1.138) write meta.json
+      // without `toolUseId`; recover it from the spawning transcript's
+      // `toolUseResult.agentId` so linkage below still resolves.
+      const recovered = toolUseIdByAgentId.get(node.agentId);
+      if (recovered !== undefined) node.toolUseId = recovered;
+    }
     const ownerId = node.toolUseId !== undefined ? toolUseOwner.get(node.toolUseId) : undefined;
     const owner = ownerId !== undefined && ownerId !== MAIN_OWNER ? nodes.get(ownerId) : undefined;
     if (owner !== undefined && owner !== node) {
