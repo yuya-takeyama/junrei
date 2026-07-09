@@ -1,6 +1,7 @@
 import type { ClaudeSessionAnalysis } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { getRepoOverview } from "./overview.js";
 import {
   type CodexSessionAnalysisWithSubagents,
   getCodexSession,
@@ -42,6 +43,26 @@ function missingProject() {
       {
         type: "text" as const,
         text: "project is required for claude-code sessions (from list_sessions).",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * `repo` blank/whitespace-only. A `repo` that's well-formed but simply
+ * matches no session is NOT an error — `computeRepoOverview` returns a
+ * zeroed overview for that case (see its doc comment), so an agent can
+ * safely probe candidate keys without a not-found round-trip.
+ */
+function missingRepo() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "repo is required — pass a repoRoot path or fallback bucket key " +
+          "(claude-project:<projectDirName> / codex-cwd:<cwd>) from list_sessions items.",
       },
     ],
     isError: true,
@@ -186,7 +207,11 @@ export function createMcpServer(): McpServer {
       description:
         "List recent Claude Code and/or Codex CLI sessions (newest first) with quantitative " +
         "overview: turns, tool calls/errors, subagents (Claude only), compactions, tokens, " +
-        'estimated cost (USD). Each item\'s `source` field is "claude-code" or "codex".',
+        'estimated cost (USD). Each item\'s `source` field is "claude-code" or "codex". Each ' +
+        "item also carries `repoRoot`/`worktreeName` (repo-level grouping key — see " +
+        "get_repo_overview), a per-model `usageByModel` breakdown, and a `delegation` " +
+        "main-vs-subagents split, so a repo- or model-level rollup can be built without " +
+        "fetching every session's full summary.",
       inputSchema: {
         limit: z.number().int().min(1).max(500).optional().describe("Max sessions (default 20)"),
         source: z
@@ -210,7 +235,11 @@ export function createMcpServer(): McpServer {
         "subagents moved most of the TOKENS), tool stats with error categories, exploration " +
         "profile, compactions, and counts. Works for both Claude Code sessions and Codex CLI " +
         'sessions (source: "codex"). Use get_context_timeline / find_repetitions / ' +
-        "get_subagent_tree for the detailed series.",
+        "get_subagent_tree for the detailed series. A model-usage entry's `cacheWriteCostUsd` " +
+        "(on `usage`/`totalUsageByModel`) is a component already included in `costUsd` — never " +
+        "add them. `costIsComplete: false` (on `totalUsage`/`delegation`) means at least one " +
+        "nonzero-usage model had no pricing entry, so the cost is a lower bound, shown as " +
+        '"estimated" in the UI.',
       inputSchema: sessionRef,
     },
     async (args) => {
@@ -273,7 +302,11 @@ export function createMcpServer(): McpServer {
         "`usage.byModel` breaks that agent's own tokens/cost down per model, same shape as the " +
         "session-level `totalUsageByModel`. Works for both Claude Code sessions and Codex CLI " +
         'sessions (source: "codex") — a Codex sub-agent is its own rollout file rather than a ' +
-        "sidecar transcript, but resolves into the same tree shape.",
+        "sidecar transcript, but resolves into the same tree shape. As with get_session_summary: " +
+        "a `byModel` entry's `cacheWriteCostUsd` is already included in `costUsd` (never add " +
+        "them), and `usage.total.costIsComplete: false` means at least one nonzero-usage model " +
+        'in that node had no pricing entry — the cost is a lower bound, shown as "estimated" in ' +
+        "the UI.",
       inputSchema: sessionRef,
     },
     async (args) => {
@@ -323,6 +356,40 @@ export function createMcpServer(): McpServer {
         title: resolved.analysis.title ?? null,
         userTurnCount: resolved.analysis.userTurnCount,
       });
+    },
+  );
+
+  server.registerTool(
+    "get_repo_overview",
+    {
+      description:
+        "Repo-level retrospective across every session (both harnesses) in one repo: total " +
+        "cost/tokens, a per-day cost timeline, a merged per-model breakdown, the main-vs-" +
+        "subagents delegation split, and the top 5 sessions by cost. `repo` accepts either a " +
+        "`repoRoot` absolute path (a list_sessions item's `repoRoot` field — a `.claude/" +
+        "worktrees/<name>` session collapses into its parent repo's key, see `worktreeName`) " +
+        "or, for a session with no `repoRoot`, the fallback bucket key list_sessions items " +
+        "imply: `claude-project:<projectDirName>` (Claude) or `codex-cwd:<cwd>` (Codex, " +
+        "`codex-cwd:(unknown cwd)` when even `cwd` is missing). Examples: `/Users/me/junrei`, " +
+        "`claude-project:-Users-me-proj`. A `byModel` entry's `cacheWriteCostUsd` (where " +
+        "present, as in get_session_summary/get_subagent_tree) is already included in `costUsd` " +
+        "— never add them. `costIsComplete: false` means at least one nonzero-usage model summed " +
+        'into this rollup had no pricing entry, so totals are a lower bound, shown as "estimated" ' +
+        "in the UI. A `repo` matching no session returns a zeroed overview (`sessionCount: 0`), " +
+        "not an error — safe to probe candidate keys.",
+      inputSchema: {
+        repo: z
+          .string()
+          .describe(
+            "A repoRoot absolute path, or a fallback bucket key (claude-project:<projectDirName> " +
+              "/ codex-cwd:<cwd>) for a session with no repoRoot — both come from list_sessions " +
+              "items. Example: /Users/me/junrei",
+          ),
+      },
+    },
+    async ({ repo }) => {
+      if (repo.trim() === "") return missingRepo();
+      return jsonResult(await getRepoOverview(repo));
     },
   );
 
