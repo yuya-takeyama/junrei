@@ -1,7 +1,7 @@
 import type { AnySessionJson } from "../../api.js";
 import { formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
-import { mainDelegatedSplit, totalTokensOf } from "./agentTree.js";
+import { mainDelegatedSplit, mainDelegatedTokenSplit, totalTokensOf } from "./agentTree.js";
 
 interface Props {
   session: AnySessionJson;
@@ -9,14 +9,16 @@ interface Props {
 
 /**
  * Right-hand half of the controls row — per-model token/cost totals plus the
- * main-vs-delegated cost split. See design-spec/13-orchestration.md's
- * `.mono fs11 mut` legend row.
+ * main-vs-delegated split, both by cost and by token volume (the two often
+ * rank in opposite directions — see `mainDelegatedTokenSplit`). See
+ * design-spec/13-orchestration.md's `.mono fs11 mut` legend row.
  */
 export function ModelMixStrip({ session }: Props) {
   const rows = session.totalUsageByModel
     .filter((m) => (m.costUsd ?? 0) > 0 || m.outputTokens > 0 || m.inputTokens > 0)
     .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
-  const { mainPct, delegatedPct } = mainDelegatedSplit(session);
+  const { mainPct } = mainDelegatedSplit(session);
+  const { mainPct: mainTokenPct } = mainDelegatedTokenSplit(session);
 
   return (
     <div className="fx ac gap12 mono fs11 mut" style={{ flexWrap: "wrap" }}>
@@ -27,7 +29,7 @@ export function ModelMixStrip({ session }: Props) {
         </span>
       ))}
       <span>
-        main {mainPct}% / delegated {delegatedPct}%
+        main {mainPct}% cost · {mainTokenPct}% tokens
       </span>
     </div>
   );

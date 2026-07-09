@@ -1,3 +1,4 @@
+import { computeDelegationSummary } from "../delegation.js";
 import type { ContextPoint, ModelUsageSummary, TokenTotals, UsageSummary } from "../metrics.js";
 import { mergeFileAccess } from "../metrics.js";
 import { estimateCostComponents } from "../pricing/pricing.js";
@@ -492,6 +493,12 @@ export function analyzeCodexSession(
     usage,
     totalUsage,
     totalUsageByModel: usage.byModel,
+    // Own-thread only (no sub-agent forest known yet — a sibling rollout file
+    // this single-session analysis never sees) — same "all-zero subagents
+    // slice, refined later" pattern as `totalUsage` above. `getCodexSession`
+    // (server) overrides this with the real forest-inclusive split once the
+    // sub-agent tree is resolved.
+    delegation: computeDelegationSummary(usage, totalUsage, usage.byModel),
     contextTimeline,
     compactions,
     parseWarningCount: transcript.warnings.length,

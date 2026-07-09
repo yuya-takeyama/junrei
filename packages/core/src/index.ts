@@ -22,6 +22,12 @@ export { buildCodexSubagentForest } from "./codex/orchestration.js";
 export type { CodexTranscript } from "./codex/parser.js";
 export { parseCodexTranscriptFile } from "./codex/parser.js";
 export { buildCodexTimeline, getCodexRecordDetail } from "./codex/timeline.js";
+export type {
+  DelegationModelSlice,
+  DelegationScopeSlice,
+  DelegationSummary,
+} from "./delegation.js";
+export { computeDelegationSummary } from "./delegation.js";
 export type { ClaudeSessionFileRef } from "./discovery.js";
 export { listSessionFiles, resolveProjectsDirs } from "./discovery.js";
 export { parseJsonlLine } from "./jsonl.js";

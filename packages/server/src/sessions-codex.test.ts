@@ -280,6 +280,13 @@ describe("getCodexSession", () => {
       }),
     ]);
     expect(analysis?.skillInvocations).toEqual([]);
+    // No sub-agent forest -> delegation's subagents slice is honestly zero.
+    expect(analysis?.delegation.subagents).toEqual({
+      tokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      messageCount: 0,
+    });
   });
 
   it("returns undefined for an unknown session id", async () => {
@@ -359,6 +366,32 @@ describe("getCodexSession — sub-agent orchestration (77777777 -> 88888888 -> 9
     expect(models).toContain("gpt-5.5"); // parent's own turn_context model
     expect(models).toContain("gpt-5.5-explorer"); // Aquinas's model
     expect(models).toContain("gpt-5.5-mini"); // Scout's model
+  });
+
+  it("recomputes delegation at serve time from the forest-inclusive totals (not the parse-time own-thread value)", async () => {
+    const parent = await getCodexSession("77777777-7777-7777-7777-777777777777");
+    expect(parent).toBeDefined();
+    if (parent === undefined) return;
+
+    // Own-thread-only value (what `analyzeCodexSession` would have produced,
+    // before this session's sub-agent forest was known) has NO delegated
+    // tokens — the override must move it off that baseline.
+    expect(parent.delegation.subagents.tokens).toBeGreaterThan(0);
+    expect(parent.delegation.main.tokens).toBe(
+      parent.usage.total.inputTokens +
+        parent.usage.total.outputTokens +
+        parent.usage.total.cacheReadTokens +
+        parent.usage.total.cacheCreationTokens,
+    );
+    // gpt-5.5-explorer (Aquinas) never ran on the parent's own thread.
+    const explorerSlice = parent.delegation.byModel.find((m) => m.model === "gpt-5.5-explorer");
+    expect(explorerSlice?.main).toEqual({
+      tokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      messageCount: 0,
+    });
+    expect(explorerSlice?.subagents.tokens).toBeGreaterThan(0);
   });
 
   it("a sub-agent fetched directly still shows its OWN nested children (Aquinas -> Scout)", async () => {

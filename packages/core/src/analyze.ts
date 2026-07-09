@@ -1,4 +1,5 @@
 import { basename, dirname } from "node:path";
+import { computeDelegationSummary } from "./delegation.js";
 import type {
   ExplorationProfile,
   FileAccessAgg,
@@ -192,6 +193,7 @@ export async function analyzeSession(filePath: string): Promise<ClaudeSessionAna
     costUsd: usage.total.costUsd + subagentTotals.costUsd,
     costIsComplete: usage.total.costIsComplete && subagentTotals.costIsComplete,
   };
+  const totalUsageByModel = mergeUsageByModel(usage.byModel, subagents);
 
   const models = [
     ...new Set(data.apiMessages.map((m) => m.model).filter((m): m is string => m !== undefined)),
@@ -216,7 +218,8 @@ export async function analyzeSession(filePath: string): Promise<ClaudeSessionAna
     models,
     usage,
     totalUsage,
-    totalUsageByModel: mergeUsageByModel(usage.byModel, subagents),
+    totalUsageByModel,
+    delegation: computeDelegationSummary(usage, totalUsage, totalUsageByModel),
     contextTimeline: computeContextTimeline(data),
     compactions: data.compactions,
     apiErrorCount: data.apiErrorCount,

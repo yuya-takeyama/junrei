@@ -102,9 +102,16 @@ describe("MCP tools", () => {
       arguments: { source: "claude-code", project: CLAUDE_PROJECT, sessionId: CLAUDE_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
-    const summary = JSON.parse(textOf(result)) as { subagents?: unknown };
+    const summary = JSON.parse(textOf(result)) as {
+      subagents?: unknown;
+      delegation?: { main: { tokens: number }; subagents: { tokens: number } };
+    };
     // toSummary() strips `subagents` entirely (use get_subagent_tree instead).
     expect(summary.subagents).toBeUndefined();
+    // ...but `delegation` (the main-vs-subagents split) is NOT stripped — a
+    // consumer shouldn't have to subtract `usage` from `totalUsage` itself.
+    expect(summary.delegation?.main.tokens).toBeGreaterThan(0);
+    expect(summary.delegation?.subagents.tokens).toBeGreaterThan(0);
   });
 
   it("get_session_summary errors clearly when source: 'claude-code' omits project", async () => {
@@ -146,6 +153,39 @@ describe("MCP tools", () => {
     expect(body.subagentCount).toBe(2);
     expect(body.subagents).toHaveLength(1);
     expect(body.subagents[0]?.agentId).toBe("88888888-8888-8888-8888-888888888888");
+  });
+
+  it("get_session_summary's delegation split is forest-inclusive for a Codex parent session", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_session_summary",
+      arguments: { source: "codex", sessionId: "77777777-7777-7777-7777-777777777777" },
+    });
+    expect(result.isError).not.toBe(true);
+    const summary = JSON.parse(textOf(result)) as {
+      delegation?: { main: { tokens: number }; subagents: { tokens: number } };
+    };
+    // Computed at serve time from the forest-rolled-up totalUsage — not the
+    // own-thread-only value `analyzeCodexSession` attaches at parse time.
+    expect(summary.delegation?.subagents.tokens).toBeGreaterThan(0);
+  });
+
+  it("get_session_summary's delegation split is an all-zero subagents slice for a Codex leaf session", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "get_session_summary",
+      arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+    });
+    expect(result.isError).not.toBe(true);
+    const summary = JSON.parse(textOf(result)) as {
+      delegation?: { subagents: { tokens: number; outputTokens: number; costUsd?: number } };
+    };
+    expect(summary.delegation?.subagents).toEqual({
+      tokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      messageCount: 0,
+    });
   });
 
   it("find_repetitions and get_task_executions also reject Codex sessions clearly", async () => {

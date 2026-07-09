@@ -1,3 +1,4 @@
+import type { DelegationSummary } from "./delegation.js";
 import type {
   ContextPoint,
   FileAccessEntry,
@@ -52,6 +53,18 @@ export interface SessionAnalysisCore {
   totalUsage: TokenTotals & { costUsd: number; costIsComplete: boolean };
   /** Per-model usage, merged (recursively for Claude) by model id. */
   totalUsageByModel: ModelUsageSummary[];
+  /**
+   * Main-vs-subagents split of `totalUsage`/`totalUsageByModel` — see
+   * `DelegationSummary`. Claude computes this once, at parse time
+   * (`analyze.ts`), over the already-resolved subagent forest. Codex can't:
+   * a session's own rollout never sees its descendants' files, so
+   * `analyzeCodexSession` populates this with an own-thread-only value
+   * (`subagents` all zero, same as its own `totalUsage` before the serve-time
+   * rollup) and `getCodexSession` (server) OVERRIDES it once the sub-agent
+   * forest is known — same override pattern as `totalUsage`/
+   * `totalUsageByModel` there.
+   */
+  delegation: DelegationSummary;
   contextTimeline: ContextPoint[];
   compactions: CompactionEvent[];
   firstUserPrompt?: string;

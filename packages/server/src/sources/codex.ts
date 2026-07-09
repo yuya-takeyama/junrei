@@ -5,6 +5,7 @@ import {
   type CodexSessionAnalysis,
   type CodexSessionFileRef,
   type CodexTranscript,
+  computeDelegationSummary,
   type FileAccessEntry,
   getCodexRecordDetail,
   listCodexSessionFiles,
@@ -325,7 +326,11 @@ async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | un
  * names. `totalUsage`/`totalUsageByModel` are OVERRIDDEN from the base
  * `CodexSessionAnalysis` values (see `computeCodexForestTotals`) to include
  * every sub-agent recursively — the cached single-file analysis itself is
- * never mutated, this is a fresh object built at serve time. `fileAccess`
+ * never mutated, this is a fresh object built at serve time. `delegation` is
+ * OVERRIDDEN the same way, recomputed from the forest-inclusive
+ * `totalUsage`/`totalUsageByModel` rather than the own-thread-only value
+ * `analyzeCodexSession` attached (see `session-analysis.ts`'s field doc).
+ * `fileAccess`
  * (+ its truncation flags) is OVERRIDDEN the same way, folding in every
  * descendant's own file access with the `subagent`/`both` `threads` marker —
  * see `mergeCodexFileAccess`/`collectForestFileAccess`. `skillInvocations`
@@ -358,6 +363,11 @@ export async function getCodexSession(
       sessionId,
     );
     const { totalUsage, totalUsageByModel } = computeCodexForestTotals(found.analysis, forest);
+    const delegation = computeDelegationSummary(
+      found.analysis.usage,
+      totalUsage,
+      totalUsageByModel,
+    );
     const bySessionId = new Map(pool.map((p) => [p.analysis.sessionId, p.analysis] as const));
     const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeCodexFileAccess(
       found.analysis.fileAccess,
@@ -367,6 +377,7 @@ export async function getCodexSession(
       ...found.analysis,
       totalUsage,
       totalUsageByModel,
+      delegation,
       subagents: forest,
       subagentCount: countForestNodes(forest),
       fileAccess,

@@ -76,6 +76,47 @@ export function formatTimeMs(iso: string): string {
   return `${time}.${ms}`;
 }
 
+interface DelegationShareScope {
+  tokens: number;
+  // `| undefined` explicit (not just `?:`) — the API's JSON-inferred type
+  // for an optional field is `T | undefined`, not "may be omitted", under
+  // `exactOptionalPropertyTypes`.
+  costUsd?: number | undefined;
+}
+
+/** Shape shared by `DelegationSummary.main`/`.subagents` — see `@junrei/core`'s `delegation.ts`. */
+interface DelegationShareInput {
+  main: DelegationShareScope;
+  subagents: DelegationShareScope;
+}
+
+/**
+ * "44% of cost · 77% of tokens" — the delegated (subagents) share of a
+ * session's cost and token volume, from a `DelegationSummary`. This is the
+ * inverse-ranking signal itself: cost share and token share can (and often
+ * do) point in different directions, which is exactly what a mental-math-free
+ * reading of both should surface.
+ *
+ * Returns undefined when there's nothing to report (no subagent tokens at
+ * all — the common single-thread session) so callers can fall back to a
+ * plain dollar figure. The cost share is omitted (tokens-only string) when
+ * either scope's cost is unpriced, rather than guessing.
+ */
+export function formatDelegatedShare(delegation: DelegationShareInput): string | undefined {
+  const { main, subagents } = delegation;
+  if (subagents.tokens <= 0) return undefined;
+
+  const totalTokens = main.tokens + subagents.tokens;
+  const tokenPct = totalTokens > 0 ? Math.round((subagents.tokens / totalTokens) * 100) : 0;
+
+  if (main.costUsd === undefined || subagents.costUsd === undefined) {
+    return `${tokenPct}% of tokens`;
+  }
+  const totalCost = main.costUsd + subagents.costUsd;
+  const costPct = totalCost > 0 ? Math.round((subagents.costUsd / totalCost) * 100) : 0;
+  return `${costPct}% of cost · ${tokenPct}% of tokens`;
+}
+
 /** Shorten a munged project dir name to its meaningful tail. */
 export function formatProject(projectDirName: string, cwd?: string): string {
   if (cwd !== undefined) {
