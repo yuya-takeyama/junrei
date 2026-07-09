@@ -2,8 +2,11 @@ import { basename, dirname } from "node:path";
 import type {
   ContextPoint,
   ExplorationProfile,
+  FileAccessAgg,
+  FileAccessEntry,
   ModelUsageSummary,
   RepetitionFinding,
+  SkillInvocation,
   TaskExecutionInfo,
   TokenTotals,
   ToolStat,
@@ -13,11 +16,15 @@ import type {
 import {
   computeContextTimeline,
   computeExploration,
+  computeFileAccess,
   computeRepetitions,
+  computeSkillInvocations,
   computeTaskExecutions,
   computeToolStats,
   computeTurnUsage,
   computeUsage,
+  foldFileAccess,
+  mergeFileAccess,
 } from "./metrics.js";
 import { parseTranscriptFile } from "./parser.js";
 import type { ApiErrorLogEntry, CompactionEvent, SessionData, ToolCall } from "./session-data.js";
@@ -121,6 +128,14 @@ export interface SessionAnalysis {
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
   taskExecutions: TaskExecutionInfo[];
+  /** Per-file read/edit tally, main + every subagent merged — see `FileAccessEntry`. */
+  fileAccess: FileAccessEntry[];
+  /** True when the merged path count exceeded the cap (500) and entries were dropped. */
+  fileAccessTruncated: boolean;
+  /** Present only when `fileAccessTruncated` — number of distinct paths dropped by the cap. */
+  fileAccessOmittedCount?: number;
+  /** Skill/slash-command invocations, main transcript only — see `SkillInvocation`. */
+  skillInvocations: SkillInvocation[];
   subagents: SubagentNode[];
   subagentCount: number;
   firstUserPrompt?: string;
@@ -178,7 +193,14 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
 
-  const { subagents, subagentCount, subagentTotals } = await analyzeSubagents(filePath, data);
+  const { subagents, subagentCount, subagentTotals, subagentFileAccess } = await analyzeSubagents(
+    filePath,
+    data,
+  );
+  const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
+    computeFileAccess(data),
+    subagentFileAccess,
+  );
 
   const usage = computeUsage(data);
   const totalUsage = {
@@ -221,6 +243,10 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
     repetitions: computeRepetitions(data),
     exploration: computeExploration(data),
     taskExecutions: computeTaskExecutions(data),
+    fileAccess,
+    fileAccessTruncated,
+    ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
+    skillInvocations: computeSkillInvocations(data),
     subagents,
     subagentCount,
     parseWarningCount: data.warningCount,
@@ -243,6 +269,8 @@ async function analyzeSubagents(
   subagents: SubagentNode[];
   subagentCount: number;
   subagentTotals: TokenTotals & { costUsd: number; costIsComplete: boolean };
+  /** Every subagent's file-access tallies, folded into one combined map. */
+  subagentFileAccess: Map<string, FileAccessAgg>;
 }> {
   const subagentTotals = {
     inputTokens: 0,
@@ -252,10 +280,11 @@ async function analyzeSubagents(
     costUsd: 0,
     costIsComplete: true,
   };
+  const subagentFileAccess = new Map<string, FileAccessAgg>();
 
   const refs = await listSubagentRefs(filePath);
   if (refs.length === 0) {
-    return { subagents: [], subagentCount: 0, subagentTotals };
+    return { subagents: [], subagentCount: 0, subagentTotals, subagentFileAccess };
   }
 
   const nodes = new Map<string, SubagentNode>();
@@ -286,6 +315,7 @@ async function analyzeSubagents(
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
     registerOwner(agentId, data);
+    foldFileAccess(subagentFileAccess, computeFileAccess(data));
 
     subagentTotals.inputTokens += usage.total.inputTokens;
     subagentTotals.outputTokens += usage.total.outputTokens;
@@ -341,7 +371,7 @@ async function analyzeSubagents(
   for (const node of nodes.values()) node.children.sort(byStart);
   roots.sort(byStart);
 
-  return { subagents: roots, subagentCount: nodes.size, subagentTotals };
+  return { subagents: roots, subagentCount: nodes.size, subagentTotals, subagentFileAccess };
 }
 
 /**

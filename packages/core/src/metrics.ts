@@ -1,5 +1,5 @@
 import { estimateCostComponents } from "./pricing/pricing.js";
-import type { SessionData, TaskNotificationEvent, ToolCall } from "./session-data.js";
+import type { SessionData, TaskNotificationEvent, ToolCall, UserPrompt } from "./session-data.js";
 
 // ---------------------------------------------------------------------------
 // Tokens & cost
@@ -566,4 +566,270 @@ export function computeExploration(data: SessionData): ExplorationProfile {
     }
   }
   return profile;
+}
+
+// ---------------------------------------------------------------------------
+// File access (Files & skills lens, row 1)
+// ---------------------------------------------------------------------------
+
+/** One transcript's own read/edit tally for a single file path. */
+export interface FileAccessAgg {
+  path: string;
+  reads: number;
+  edits: number;
+  /** Earliest timestamp among this transcript's touches of the path. */
+  firstTimestamp?: string;
+  /** Earliest line among this transcript's touches of the path. */
+  firstLine?: number;
+}
+
+export type FileAccessThread = "main" | "subagent" | "both";
+
+export interface FileAccessEntry {
+  /** Path as given in the tool input (absolute). */
+  path: string;
+  /** Read + NotebookRead calls, main + every subagent, merged. */
+  reads: number;
+  /** Edit + Write + MultiEdit + NotebookEdit calls, main + every subagent, merged. */
+  edits: number;
+  /** Earliest timestamp across every transcript that touched this path. */
+  firstTouchTimestamp?: string;
+  /** Line of the first MAIN-transcript touch, if any — omitted when only subagents touched the path. */
+  firstTouchLine?: number;
+  threads: FileAccessThread;
+}
+
+export interface FileAccessResult {
+  fileAccess: FileAccessEntry[];
+  /** True when the merged path count exceeded the cap and entries were dropped. */
+  fileAccessTruncated: boolean;
+  /** Number of distinct paths dropped by the cap — present only when truncated. */
+  fileAccessOmittedCount?: number;
+}
+
+const FILE_READ_TOOLS = new Set(["Read", "NotebookRead"]);
+const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const FILE_ACCESS_CAP = 500;
+
+/**
+ * Per-transcript file-access tally — Grep/Glob/LS are deliberately excluded
+ * (searches, not file touches). Calls with a missing or non-string
+ * `file_path` are skipped. `toolCalls` is already in ascending line order
+ * (see `buildSessionData`), so the first call touching a path is naturally
+ * its first touch — no need to compare timestamps across entries.
+ */
+export function computeFileAccess(data: SessionData): Map<string, FileAccessAgg> {
+  const map = new Map<string, FileAccessAgg>();
+  for (const call of data.toolCalls) {
+    const isRead = FILE_READ_TOOLS.has(call.name);
+    const isEdit = FILE_EDIT_TOOLS.has(call.name);
+    if (!isRead && !isEdit) continue;
+    const input =
+      typeof call.input === "object" && call.input !== null
+        ? (call.input as Record<string, unknown>)
+        : undefined;
+    const filePath = typeof input?.file_path === "string" ? input.file_path : undefined;
+    if (filePath === undefined) continue;
+
+    let entry = map.get(filePath);
+    if (entry === undefined) {
+      entry = {
+        path: filePath,
+        reads: 0,
+        edits: 0,
+        firstLine: call.line,
+        ...(call.timestamp !== undefined && { firstTimestamp: call.timestamp }),
+      };
+      map.set(filePath, entry);
+    }
+    if (isRead) entry.reads += 1;
+    else entry.edits += 1;
+  }
+  return map;
+}
+
+/**
+ * Merge one main transcript's file-access map with the (already-summed)
+ * combined map from every subagent transcript, then cap the result — see
+ * `FileAccessEntry`'s field docs for the exact semantics of each derived
+ * field (`firstTouchLine` only ever comes from the main transcript;
+ * `firstTouchTimestamp` is the earliest across all transcripts).
+ *
+ * Cap: when the merged path count exceeds `FILE_ACCESS_CAP`, keep the 500
+ * paths with the highest `reads + edits`, breaking ties by path (stable)
+ * so the kept set is deterministic — then re-sort the kept entries back to
+ * path order for display.
+ */
+export function mergeFileAccess(
+  main: ReadonlyMap<string, FileAccessAgg>,
+  subagents: ReadonlyMap<string, FileAccessAgg>,
+): FileAccessResult {
+  const paths = new Set([...main.keys(), ...subagents.keys()]);
+  const entries: FileAccessEntry[] = [];
+  for (const path of paths) {
+    const m = main.get(path);
+    const s = subagents.get(path);
+    const reads = (m?.reads ?? 0) + (s?.reads ?? 0);
+    const edits = (m?.edits ?? 0) + (s?.edits ?? 0);
+    const threads: FileAccessThread =
+      m !== undefined && s !== undefined ? "both" : m !== undefined ? "main" : "subagent";
+    let firstTouchTimestamp: string | undefined;
+    if (m?.firstTimestamp !== undefined && s?.firstTimestamp !== undefined) {
+      firstTouchTimestamp =
+        m.firstTimestamp < s.firstTimestamp ? m.firstTimestamp : s.firstTimestamp;
+    } else {
+      firstTouchTimestamp = m?.firstTimestamp ?? s?.firstTimestamp;
+    }
+    entries.push({
+      path,
+      reads,
+      edits,
+      ...(firstTouchTimestamp !== undefined && { firstTouchTimestamp }),
+      ...(m?.firstLine !== undefined && { firstTouchLine: m.firstLine }),
+      threads,
+    });
+  }
+
+  entries.sort((a, b) => a.path.localeCompare(b.path));
+  if (entries.length <= FILE_ACCESS_CAP) {
+    return { fileAccess: entries, fileAccessTruncated: false };
+  }
+
+  const omittedCount = entries.length - FILE_ACCESS_CAP;
+  const kept = [...entries]
+    .sort((a, b) => {
+      const scoreDiff = b.reads + b.edits - (a.reads + a.edits);
+      return scoreDiff !== 0 ? scoreDiff : a.path.localeCompare(b.path);
+    })
+    .slice(0, FILE_ACCESS_CAP)
+    .sort((a, b) => a.path.localeCompare(b.path));
+  return { fileAccess: kept, fileAccessTruncated: true, fileAccessOmittedCount: omittedCount };
+}
+
+/** Fold `source` into `target` in place — sums reads/edits, keeps the earliest timestamp/line. */
+export function foldFileAccess(
+  target: Map<string, FileAccessAgg>,
+  source: ReadonlyMap<string, FileAccessAgg>,
+): void {
+  for (const [path, entry] of source) {
+    const existing = target.get(path);
+    if (existing === undefined) {
+      target.set(path, { ...entry });
+      continue;
+    }
+    existing.reads += entry.reads;
+    existing.edits += entry.edits;
+    if (
+      entry.firstTimestamp !== undefined &&
+      (existing.firstTimestamp === undefined || entry.firstTimestamp < existing.firstTimestamp)
+    ) {
+      existing.firstTimestamp = entry.firstTimestamp;
+    }
+    if (
+      entry.firstLine !== undefined &&
+      (existing.firstLine === undefined || entry.firstLine < existing.firstLine)
+    ) {
+      existing.firstLine = entry.firstLine;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skill invocations (Files & skills lens, row 1 right column)
+// ---------------------------------------------------------------------------
+
+export interface SkillInvocation {
+  /** Skill tool call vs a `<command-name>` slash-command user record. */
+  kind: "skill" | "command";
+  /** `input.skill` for a Skill call, or the command name (incl. leading "/") for a slash command. */
+  name: string;
+  /** `input.args` / `<command-args>` content, capped at `DETAIL_LIMIT` chars. */
+  argsPreview?: string;
+  line: number;
+  timestamp?: string;
+  /** 1-based user-turn index — same greatest-prompt-line-<= attribution as `computeTurnUsage`. */
+  userTurn?: number;
+  /** Skill tool only: full (untruncated) length of the tool_result text, when known. */
+  resultChars?: number;
+}
+
+const COMMAND_NAME_PATTERN = /<command-name>([^<]*)<\/command-name>/;
+const COMMAND_ARGS_PATTERN = /<command-args>([^<]*)<\/command-args>/;
+
+/**
+ * 1-based index of the user turn open at `line` — mirrors `computeTurnUsage`'s
+ * "greatest prompt line at or before this line" attribution, without
+ * building the full `TurnUsage[]` array. `undefined` only when there are no
+ * user prompts at all; a line before the first prompt still falls into turn 1
+ * (same fallback `computeTurnUsage` documents).
+ */
+function turnIndexForLine(prompts: readonly UserPrompt[], line: number): number | undefined {
+  if (prompts.length === 0) return undefined;
+  let idx = 0;
+  for (let i = 1; i < prompts.length; i += 1) {
+    const prompt = prompts[i];
+    if (prompt !== undefined && prompt.line <= line) idx = i;
+    else break;
+  }
+  return idx + 1;
+}
+
+/**
+ * Skill/command invocations, MAIN transcript only (like `computeToolStats`).
+ * Two independent sources, merged and sorted by line:
+ *  - Skill tool calls (`name === "Skill"`, `input.skill` the skill id).
+ *  - Slash-command user records — the parser captures their full XML-ish
+ *    text as `promptText` unconditionally (see `parser.ts#normalizeUser`),
+ *    so this scans `data.records` directly rather than `data.userPrompts`:
+ *    that keeps detection working even if a future harness version starts
+ *    marking these records `isMeta` (which would otherwise exclude them
+ *    from `userPrompts`/turn counting, but not from this scan).
+ */
+export function computeSkillInvocations(data: SessionData): SkillInvocation[] {
+  const invocations: SkillInvocation[] = [];
+
+  for (const call of data.toolCalls) {
+    if (call.name !== "Skill") continue;
+    const input =
+      typeof call.input === "object" && call.input !== null
+        ? (call.input as Record<string, unknown>)
+        : undefined;
+    const skillName = typeof input?.skill === "string" ? input.skill : undefined;
+    if (skillName === undefined) continue;
+    const argsValue = input?.args;
+    const argsPreview =
+      typeof argsValue === "string" ? argsValue.slice(0, DETAIL_LIMIT) : undefined;
+    const userTurn = turnIndexForLine(data.userPrompts, call.line);
+    invocations.push({
+      kind: "skill",
+      name: skillName,
+      line: call.line,
+      ...(call.timestamp !== undefined && { timestamp: call.timestamp }),
+      ...(argsPreview !== undefined && { argsPreview }),
+      ...(userTurn !== undefined && { userTurn }),
+      ...(call.result?.fullTextLength !== undefined && { resultChars: call.result.fullTextLength }),
+    });
+  }
+
+  for (const record of data.records) {
+    if (!("promptText" in record) || record.promptText === undefined) continue;
+    const nameMatch = COMMAND_NAME_PATTERN.exec(record.promptText);
+    if (nameMatch?.[1] === undefined || nameMatch[1] === "") continue;
+    const argsMatch = COMMAND_ARGS_PATTERN.exec(record.promptText);
+    const argsPreview =
+      argsMatch?.[1] !== undefined && argsMatch[1] !== ""
+        ? argsMatch[1].slice(0, DETAIL_LIMIT)
+        : undefined;
+    const userTurn = turnIndexForLine(data.userPrompts, record.line);
+    invocations.push({
+      kind: "command",
+      name: nameMatch[1],
+      line: record.line,
+      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+      ...(argsPreview !== undefined && { argsPreview }),
+      ...(userTurn !== undefined && { userTurn }),
+    });
+  }
+
+  return invocations.sort((a, b) => a.line - b.line);
 }

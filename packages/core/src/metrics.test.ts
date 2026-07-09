@@ -1,0 +1,177 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import {
+  computeFileAccess,
+  computeSkillInvocations,
+  type FileAccessAgg,
+  mergeFileAccess,
+} from "./metrics.js";
+import { parseTranscriptFile } from "./parser.js";
+import type { SessionData, ToolCall } from "./session-data.js";
+import { buildSessionData } from "./session-data.js";
+
+const FIXTURE_PROJECTS = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/projects");
+const SESSION_FILE = join(
+  FIXTURE_PROJECTS,
+  "-Users-test-proj/11111111-1111-1111-1111-111111111111.jsonl",
+);
+
+async function loadMainData(): Promise<SessionData> {
+  const transcript = await parseTranscriptFile(SESSION_FILE);
+  return buildSessionData(transcript);
+}
+
+describe("computeFileAccess", () => {
+  it("tallies reads/edits for the main transcript alone, ignoring search tools", async () => {
+    const data = await loadMainData();
+    const access = computeFileAccess(data);
+
+    // /p/foo.ts: Read at lines 3, 12, 14, 16 (4 reads) + Edit at line 10 (1 edit).
+    const foo = access.get("/p/foo.ts");
+    expect(foo?.reads).toBe(4);
+    expect(foo?.edits).toBe(1);
+    expect(foo?.firstLine).toBe(3);
+    expect(foo?.firstTimestamp).toBe("2026-07-09T01:00:06.000Z");
+
+    // Grep/Glob/LS calls never appear here — the fixture has none, but
+    // confirm no unexpected extra paths snuck in beyond foo.ts.
+    expect([...access.keys()]).toEqual(["/p/foo.ts"]);
+  });
+});
+
+describe("mergeFileAccess", () => {
+  function agg(overrides: Partial<FileAccessAgg> & { path: string }): FileAccessAgg {
+    return { reads: 0, edits: 0, ...overrides };
+  }
+
+  it("marks a path touched only by main as 'main', keeping firstLine", () => {
+    const main = new Map([
+      ["/a.ts", agg({ path: "/a.ts", reads: 2, edits: 1, firstLine: 5, firstTimestamp: "t1" })],
+    ]);
+    const { fileAccess, fileAccessTruncated } = mergeFileAccess(main, new Map());
+    expect(fileAccessTruncated).toBe(false);
+    expect(fileAccess).toEqual([
+      {
+        path: "/a.ts",
+        reads: 2,
+        edits: 1,
+        firstTouchTimestamp: "t1",
+        firstTouchLine: 5,
+        threads: "main",
+      },
+    ]);
+  });
+
+  it("marks a path touched only by a subagent as 'subagent', omitting firstTouchLine", () => {
+    const subagents = new Map([
+      ["/b.ts", agg({ path: "/b.ts", reads: 1, edits: 0, firstLine: 9, firstTimestamp: "t2" })],
+    ]);
+    const { fileAccess } = mergeFileAccess(new Map(), subagents);
+    expect(fileAccess).toEqual([
+      { path: "/b.ts", reads: 1, edits: 0, firstTouchTimestamp: "t2", threads: "subagent" },
+    ]);
+  });
+
+  it("merges a path touched by both, summing counts and taking the earliest timestamp", () => {
+    const main = new Map([
+      [
+        "/c.ts",
+        agg({
+          path: "/c.ts",
+          reads: 2,
+          edits: 1,
+          firstLine: 3,
+          firstTimestamp: "2026-01-01T00:00:05.000Z",
+        }),
+      ],
+    ]);
+    const subagents = new Map([
+      [
+        "/c.ts",
+        agg({
+          path: "/c.ts",
+          reads: 1,
+          edits: 0,
+          firstLine: 40,
+          firstTimestamp: "2026-01-01T00:00:01.000Z",
+        }),
+      ],
+    ]);
+    const { fileAccess } = mergeFileAccess(main, subagents);
+    expect(fileAccess).toEqual([
+      {
+        path: "/c.ts",
+        reads: 3,
+        edits: 1,
+        // Earliest across both transcripts, even though it's the subagent's.
+        firstTouchTimestamp: "2026-01-01T00:00:01.000Z",
+        // firstTouchLine still comes from MAIN only.
+        firstTouchLine: 3,
+        threads: "both",
+      },
+    ]);
+  });
+
+  it("caps at 500 paths, keeping the highest reads+edits and reporting the omitted count", () => {
+    const main = new Map<string, FileAccessAgg>();
+    for (let i = 0; i < 600; i += 1) {
+      const path = `/file-${String(i).padStart(4, "0")}.ts`;
+      // Give the first 100 paths a high score so they're guaranteed to survive the cap.
+      const reads = i < 100 ? 10 : 1;
+      main.set(path, agg({ path, reads, edits: 0, firstLine: i + 1 }));
+    }
+
+    const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
+      main,
+      new Map(),
+    );
+
+    expect(fileAccessTruncated).toBe(true);
+    expect(fileAccessOmittedCount).toBe(100);
+    expect(fileAccess).toHaveLength(500);
+    // Every high-score path survived the cap.
+    for (let i = 0; i < 100; i += 1) {
+      expect(fileAccess.some((e) => e.path === `/file-${String(i).padStart(4, "0")}.ts`)).toBe(
+        true,
+      );
+    }
+    // Kept entries are sorted back to path order for display.
+    const sorted = [...fileAccess].sort((a, b) => a.path.localeCompare(b.path));
+    expect(fileAccess).toEqual(sorted);
+  });
+});
+
+describe("computeSkillInvocations", () => {
+  it("extracts Skill tool calls and slash-command records, in line order", async () => {
+    const data = await loadMainData();
+    const invocations = computeSkillInvocations(data);
+    expect(invocations).toHaveLength(2);
+    expect(invocations.map((i) => i.kind)).toEqual(["command", "skill"]);
+    expect(
+      invocations.every((i, idx, arr) => idx === 0 || (arr[idx - 1]?.line ?? 0) <= i.line),
+    ).toBe(true);
+  });
+
+  it("skips a Skill tool_use whose input carries no skill id", () => {
+    const call: ToolCall = {
+      toolUseId: "toolu_x",
+      name: "Skill",
+      input: { args: "no skill field" },
+      line: 5,
+    };
+    const data: SessionData = {
+      records: [],
+      apiMessages: [],
+      toolCalls: [call],
+      userPrompts: [],
+      compactions: [],
+      backgroundLaunches: [],
+      taskNotifications: [],
+      apiErrorCount: 0,
+      apiErrors: [],
+      warningCount: 0,
+    };
+    expect(computeSkillInvocations(data)).toEqual([]);
+  });
+});

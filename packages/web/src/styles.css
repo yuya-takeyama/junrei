@@ -947,3 +947,26 @@ button.fb {
   border-bottom: 1px dotted var(--bd);
   font-size: 12px;
 }
+.tstat.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+
+/* ---------------------------------------------------------------------
+   Files & skills lens (L2)
+   --------------------------------------------------------------------- */
+
+.ftg {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 52px 76px 44px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.ftg.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+.rere {
+  color: var(--amb);
+}

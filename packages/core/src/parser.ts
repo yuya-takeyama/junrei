@@ -162,11 +162,13 @@ function normalizeUser(raw: Record<string, unknown>, line: number): UserRecord {
       hasToolResult = true;
       const toolUseId = str(block.tool_use_id);
       if (toolUseId === undefined) continue;
+      const fullText = extractText(block.content);
       toolResults.push({
         toolUseId,
         // `is_error: null` is common and means success.
         isError: block.is_error === true,
-        text: extractText(block.content).slice(0, TOOL_RESULT_TEXT_LIMIT),
+        text: fullText.slice(0, TOOL_RESULT_TEXT_LIMIT),
+        fullTextLength: fullText.length,
       });
     }
   }

@@ -27,6 +27,8 @@ export interface ToolCall {
     text: string;
     line: number;
     timestamp?: string;
+    /** Untruncated length of the result text — see `ToolResultInfo.fullTextLength`. */
+    fullTextLength: number;
   };
 }
 
@@ -330,6 +332,7 @@ function collectUser(
     const resolved = {
       isError: result.isError,
       text: result.text,
+      fullTextLength: result.fullTextLength,
       line: record.line,
       ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
     };

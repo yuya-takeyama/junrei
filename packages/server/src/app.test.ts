@@ -47,7 +47,12 @@ describe("timeline + record routes", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { entries: Array<{ kind: string }> };
-    expect(body.entries.map((e) => e.kind)).toEqual(["user", "tool-call", "assistant-text"]);
+    expect(body.entries.map((e) => e.kind)).toEqual([
+      "user",
+      "tool-call",
+      "assistant-text",
+      "tool-call",
+    ]);
   });
 
   it("GET .../timeline 404s for an unknown session", async () => {

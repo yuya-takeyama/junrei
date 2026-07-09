@@ -6,8 +6,13 @@ export { parseJsonlLine } from "./jsonl.js";
 export type {
   ContextPoint,
   ExplorationProfile,
+  FileAccessAgg,
+  FileAccessEntry,
+  FileAccessResult,
+  FileAccessThread,
   ModelUsageSummary,
   RepetitionFinding,
+  SkillInvocation,
   TaskExecutionInfo,
   TokenTotals,
   ToolErrorCategory,
@@ -19,11 +24,15 @@ export {
   classifyToolError,
   computeContextTimeline,
   computeExploration,
+  computeFileAccess,
   computeRepetitions,
+  computeSkillInvocations,
   computeTaskExecutions,
   computeToolStats,
   computeTurnUsage,
   computeUsage,
+  foldFileAccess,
+  mergeFileAccess,
 } from "./metrics.js";
 export { parseTranscriptFile } from "./parser.js";
 export type { CostComponents } from "./pricing/pricing.js";
