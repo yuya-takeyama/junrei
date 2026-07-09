@@ -1,10 +1,17 @@
-import type { SessionAnalysis } from "@junrei/core";
+import type { CodexSessionAnalysis, SessionAnalysis } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getSession, listSessions } from "./sessions.js";
+import { getCodexSession, getSession, listSessions } from "./sessions.js";
+
+const CODEX_PROJECT = "codex";
 
 const sessionRef = {
-  project: z.string().describe("Munged project directory name (from list_sessions)"),
+  project: z
+    .string()
+    .describe(
+      'Munged project directory name (from list_sessions), or the literal "codex" for a ' +
+        "Codex CLI session (sessionId still comes from list_sessions).",
+    ),
   sessionId: z.string().describe("Session UUID (from list_sessions)"),
 };
 
@@ -22,6 +29,43 @@ function notFound(project: string, sessionId: string) {
     ],
     isError: true,
   };
+}
+
+/** Claude-only tools (subagent tree, repetitions, task executions) have no Codex analog. */
+function notAvailableForCodex() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "not available for Codex sessions (source: codex) — Codex CLI has no subagent " +
+          "tree, repetition detection, or task-execution log in Junrei today.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+type ResolvedAnalysis =
+  | { source: "claude-code"; analysis: SessionAnalysis }
+  | { source: "codex"; analysis: CodexSessionAnalysis };
+
+/**
+ * Resolve either harness's analysis from the same `{project, sessionId}`
+ * pair the tools take: `project === "codex"` routes to the Codex lookup
+ * (which is keyed by sessionId alone — Codex has no project-dir concept),
+ * anything else is a Claude Code lookup exactly as before.
+ */
+async function resolveAnalysis(
+  project: string,
+  sessionId: string,
+): Promise<ResolvedAnalysis | undefined> {
+  if (project === CODEX_PROJECT) {
+    const analysis = await getCodexSession(sessionId);
+    return analysis === undefined ? undefined : { source: "codex", analysis };
+  }
+  const analysis = await getSession(project, sessionId);
+  return analysis === undefined ? undefined : { source: "claude-code", analysis };
 }
 
 /** Compact summary: the full analysis minus bulky series (fetch those via dedicated tools). */
@@ -69,6 +113,28 @@ function toSummary(analysis: SessionAnalysis) {
   };
 }
 
+/** Codex analog of `toSummary` — same "trim the bulky series" shape, over Codex's own fields. */
+function toCodexSummary(analysis: CodexSessionAnalysis) {
+  const { contextTimeline, codex, ...rest } = analysis;
+  const { turns, ...codexRest } = codex;
+  return {
+    ...rest,
+    contextTimeline: {
+      points: contextTimeline.length,
+      peakContextTokens: Math.max(0, ...contextTimeline.map((p) => p.contextTokens)),
+      lastContextTokens: contextTimeline.at(-1)?.contextTokens ?? 0,
+    },
+    codex: {
+      ...codexRest,
+      turns: {
+        count: turns.length,
+        totalOutputTokens: turns.reduce((sum, t) => sum + t.outputTokens, 0),
+        peakOutputTokens: Math.max(0, ...turns.map((t) => t.outputTokens)),
+      },
+    },
+  };
+}
+
 /**
  * Junrei's MCP interface: a small set of high-leverage tools that expose
  * quantitative session data. Junrei never evaluates — interpretation is the
@@ -81,13 +147,21 @@ export function createMcpServer(): McpServer {
     "list_sessions",
     {
       description:
-        "List recent Claude Code sessions (newest first) with quantitative overview: " +
-        "turns, tool calls/errors, subagents, compactions, tokens, estimated cost (USD).",
+        "List recent Claude Code and/or Codex CLI sessions (newest first) with quantitative " +
+        "overview: turns, tool calls/errors, subagents (Claude only), compactions, tokens, " +
+        'estimated cost (USD). Each item\'s `source` field is "claude-code" or "codex".',
       inputSchema: {
         limit: z.number().int().min(1).max(500).optional().describe("Max sessions (default 20)"),
+        source: z
+          .enum(["claude-code", "codex", "all"])
+          .optional()
+          .describe("Restrict to one harness; omit for both, merged and sorted by recency"),
       },
     },
-    async ({ limit }) => jsonResult(await listSessions(limit ?? 20)),
+    // MCP defaults to the merged view (items self-describe via `source`),
+    // unlike the HTTP API whose omitted-source default stays Claude-only for
+    // pre-Codex web clients.
+    async ({ limit, source }) => jsonResult(await listSessions(limit ?? 20, source ?? "all")),
   );
 
   server.registerTool(
@@ -96,14 +170,18 @@ export function createMcpServer(): McpServer {
       description:
         "Full quantitative summary of one session: usage/cost per model (main + subagents), " +
         "tool stats with error categories, exploration profile, compactions, and counts. " +
+        'Works for both Claude Code sessions and Codex CLI sessions (project: "codex"). ' +
         "Use get_context_timeline / find_repetitions / get_subagent_tree for the detailed series.",
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
-      const analysis = await getSession(project, sessionId);
-      return analysis === undefined
-        ? notFound(project, sessionId)
-        : jsonResult(toSummary(analysis));
+      const resolved = await resolveAnalysis(project, sessionId);
+      if (resolved === undefined) return notFound(project, sessionId);
+      return jsonResult(
+        resolved.source === "codex"
+          ? toCodexSummary(resolved.analysis)
+          : toSummary(resolved.analysis),
+      );
     },
   );
 
@@ -113,17 +191,17 @@ export function createMcpServer(): McpServer {
       description:
         "Context-size series for one session: effective context tokens " +
         "(input + cache_read + cache_creation) per API message, plus compaction events " +
-        "with pre/post token counts. Each point carries its source line number for provenance.",
+        "with pre/post token counts. Each point carries its source line number for provenance. " +
+        'Works for both Claude Code sessions and Codex CLI sessions (project: "codex").',
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
-      const analysis = await getSession(project, sessionId);
-      return analysis === undefined
-        ? notFound(project, sessionId)
-        : jsonResult({
-            contextTimeline: analysis.contextTimeline,
-            compactions: analysis.compactions,
-          });
+      const resolved = await resolveAnalysis(project, sessionId);
+      if (resolved === undefined) return notFound(project, sessionId);
+      return jsonResult({
+        contextTimeline: resolved.analysis.contextTimeline,
+        compactions: resolved.analysis.compactions,
+      });
     },
   );
 
@@ -134,10 +212,11 @@ export function createMcpServer(): McpServer {
         "Repetition/loop findings for one session: consecutive identical tool calls, " +
         "same-file re-reads, and repeated failing calls. Includes source line numbers. " +
         "These are observations, not judgments — whether a repetition was wasteful " +
-        "depends on the task.",
+        "depends on the task. Claude Code sessions only.",
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
+      if (project === CODEX_PROJECT) return notAvailableForCodex();
       const analysis = await getSession(project, sessionId);
       return analysis === undefined
         ? notFound(project, sessionId)
@@ -150,10 +229,12 @@ export function createMcpServer(): McpServer {
     {
       description:
         "Subagent execution tree for one session: per-agent type, model, prompt preview, " +
-        "token usage, estimated cost, tool call/error counts, and nesting.",
+        "token usage, estimated cost, tool call/error counts, and nesting. Claude Code " +
+        "sessions only — Codex CLI has no subagent concept.",
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
+      if (project === CODEX_PROJECT) return notAvailableForCodex();
       const analysis = await getSession(project, sessionId);
       return analysis === undefined
         ? notFound(project, sessionId)
@@ -170,10 +251,12 @@ export function createMcpServer(): McpServer {
       description:
         "All task executions of a session, as Claude Code's Background-tasks panel counts " +
         "them: every Bash command and Agent run (foreground and background) plus preview " +
-        "servers — with start time, duration, and outcome (completed/failed/stopped/unresolved).",
+        "servers — with start time, duration, and outcome (completed/failed/stopped/unresolved). " +
+        "Claude Code sessions only.",
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
+      if (project === CODEX_PROJECT) return notAvailableForCodex();
       const analysis = await getSession(project, sessionId);
       return analysis === undefined
         ? notFound(project, sessionId)
@@ -186,18 +269,18 @@ export function createMcpServer(): McpServer {
     {
       description:
         "The first user prompt of a session (truncated preview) — the original task " +
-        "the quantitative data should be interpreted against.",
+        "the quantitative data should be interpreted against. Works for both Claude Code " +
+        'sessions and Codex CLI sessions (project: "codex").',
       inputSchema: sessionRef,
     },
     async ({ project, sessionId }) => {
-      const analysis = await getSession(project, sessionId);
-      return analysis === undefined
-        ? notFound(project, sessionId)
-        : jsonResult({
-            firstUserPrompt: analysis.firstUserPrompt ?? null,
-            title: analysis.title ?? null,
-            userTurnCount: analysis.userTurnCount,
-          });
+      const resolved = await resolveAnalysis(project, sessionId);
+      if (resolved === undefined) return notFound(project, sessionId);
+      return jsonResult({
+        firstUserPrompt: resolved.analysis.firstUserPrompt ?? null,
+        title: resolved.analysis.title ?? null,
+        userTurnCount: resolved.analysis.userTurnCount,
+      });
     },
   );
 

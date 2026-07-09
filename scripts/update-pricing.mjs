@@ -30,7 +30,10 @@ const snapshot = {};
 for (const [model, entry] of Object.entries(raw)) {
   if (typeof entry !== "object" || entry === null) continue;
   const isClaude = model.startsWith("claude") || model.includes("anthropic/claude");
-  if (!isClaude) continue;
+  // Codex CLI sessions report bare OpenAI ids (e.g. "gpt-5.5", "gpt-5.2-codex") with
+  // no provider prefix, so only the unprefixed litellm keys are relevant here.
+  const isOpenAiGpt5 = /^gpt-5/.test(model);
+  if (!isClaude && !isOpenAiGpt5) continue;
   const kept = {};
   for (const field of KEPT_FIELDS) {
     if (typeof entry[field] === "number") {
