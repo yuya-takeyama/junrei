@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
 import { client, type SessionJson } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
+import { Orchestration } from "./lenses/Orchestration.js";
 import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
@@ -154,13 +155,20 @@ export function SessionShell({ project, id, lens, record }: Props) {
             }}
           />
         )}
-        {error === null && session !== null && lens !== "overview" && lens !== "timeline" && (
-          <div className="hpad mt16">
-            <div className="pan tile mut">
-              {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
-            </div>
-          </div>
+        {error === null && session !== null && lens === "orchestration" && (
+          <Orchestration session={session} />
         )}
+        {error === null &&
+          session !== null &&
+          lens !== "overview" &&
+          lens !== "timeline" &&
+          lens !== "orchestration" && (
+            <div className="hpad mt16">
+              <div className="pan tile mut">
+                {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
+              </div>
+            </div>
+          )}
       </div>
       {record !== undefined && (
         <RecordDetail project={project} id={id} line={record} closeHref={closeRecordHref} />

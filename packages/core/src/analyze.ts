@@ -18,9 +18,12 @@ import {
   computeUsage,
 } from "./metrics.js";
 import { parseTranscriptFile } from "./parser.js";
-import type { CompactionEvent } from "./session-data.js";
-import { buildSessionData } from "./session-data.js";
+import type { CompactionEvent, SessionData, ToolCall } from "./session-data.js";
+import { asyncAgentLaunchToolUseIds, buildSessionData, toolResultLength } from "./session-data.js";
 import { listSubagentRefs } from "./subagents.js";
+
+/** Sentinel owner id for nodes launched directly from the main transcript. */
+const MAIN_OWNER = "main";
 
 const PROMPT_PREVIEW_LIMIT = 500;
 
@@ -38,6 +41,30 @@ export interface SubagentNode {
   toolErrorCount: number;
   startedAt?: string;
   endedAt?: string;
+  /**
+   * Length of the parent-side `tool_result` text for the launching
+   * Agent/Task tool call — undefined while unresolved (no result yet, the
+   * launching call couldn't be matched, or the launch was ASYNC — see
+   * `asyncLaunch`). Mirrors `SubagentLaunchEntry.returnedChars` in
+   * timeline.ts (same underlying `ToolCall.result`), computed here too so
+   * the Orchestration lens doesn't need a second round-trip through the
+   * timeline builder just to show "↩ return" tokens in the tree.
+   */
+  returnedChars?: number;
+  /**
+   * True when the launch was asynchronous (`status: "async_launched"`). The
+   * parent-side tool_result for an async launch is only the launch-ack
+   * boilerplate — the agent's real return arrives later as a
+   * task-notification whose text isn't in the log — so `returnedChars` stays
+   * undefined rather than measuring the ack.
+   */
+  asyncLaunch?: boolean;
+  /** Source line of the launching tool_use, in whichever transcript issued it (main or a parent subagent). */
+  launchLine?: number;
+  /** Timestamp of the launching tool_use — only set when distinct from `startedAt` (the agent's own first record). */
+  launchedAt?: string;
+  /** "main" when launched directly from the main transcript, otherwise the parent subagent's `agentId`. */
+  spawnedBy?: string;
   children: SubagentNode[];
 }
 
@@ -122,7 +149,7 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
 
-  const { subagents, subagentCount, subagentTotals } = await analyzeSubagents(filePath);
+  const { subagents, subagentCount, subagentTotals } = await analyzeSubagents(filePath, data);
 
   const usage = computeUsage(data);
   const totalUsage = {
@@ -178,7 +205,10 @@ export async function analyzeSession(filePath: string): Promise<SessionAnalysis>
   };
 }
 
-async function analyzeSubagents(filePath: string): Promise<{
+async function analyzeSubagents(
+  filePath: string,
+  mainData: SessionData,
+): Promise<{
   subagents: SubagentNode[];
   subagentCount: number;
   subagentTotals: TokenTotals & { costUsd: number; costIsComplete: boolean };
@@ -198,16 +228,27 @@ async function analyzeSubagents(filePath: string): Promise<{
   }
 
   const nodes = new Map<string, SubagentNode>();
-  /** toolUseId -> agentId of the transcript that issued that tool call. */
+  /** toolUseId -> id ("main" or an agentId) of the transcript that issued that tool call. */
   const toolUseOwner = new Map<string, string>();
+  /** owner id -> that transcript's own tool calls, keyed by toolUseId — lets us find the
+   *  launching Agent/Task call's `result` (returnedChars/launchLine/launchedAt) the same
+   *  way `buildTimeline` does, just across the whole subagent forest instead of one transcript. */
+  const toolCallsByOwner = new Map<string, Map<string, ToolCall>>();
+  /** tool_use ids whose result is only an async-launch ack, across every transcript. */
+  const asyncLaunchIds = new Set<string>();
+
+  const registerOwner = (ownerId: string, data: SessionData) => {
+    toolCallsByOwner.set(ownerId, new Map(data.toolCalls.map((c) => [c.toolUseId, c])));
+    for (const call of data.toolCalls) toolUseOwner.set(call.toolUseId, ownerId);
+    for (const id of asyncAgentLaunchToolUseIds(data)) asyncLaunchIds.add(id);
+  };
+  registerOwner(MAIN_OWNER, mainData);
 
   for (const { agentId, jsonlPath, meta } of refs) {
     const transcript = await parseTranscriptFile(jsonlPath);
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
-    for (const call of data.toolCalls) {
-      toolUseOwner.set(call.toolUseId, agentId);
-    }
+    registerOwner(agentId, data);
 
     subagentTotals.inputTokens += usage.total.inputTokens;
     subagentTotals.outputTokens += usage.total.outputTokens;
@@ -238,18 +279,18 @@ async function analyzeSubagents(filePath: string): Promise<{
   }
 
   // Attach children to the agent whose transcript issued their spawning tool
-  // call; everything else (spawned by the main transcript, or unmatched)
-  // becomes a root node.
+  // call; everything else (spawned directly by the main transcript, or
+  // unmatched) becomes a root node, attributed to "main".
   const roots: SubagentNode[] = [];
   for (const node of nodes.values()) {
-    const ownerAgentId =
-      node.toolUseId !== undefined ? toolUseOwner.get(node.toolUseId) : undefined;
-    const owner = ownerAgentId !== undefined ? nodes.get(ownerAgentId) : undefined;
+    const ownerId = node.toolUseId !== undefined ? toolUseOwner.get(node.toolUseId) : undefined;
+    const owner = ownerId !== undefined && ownerId !== MAIN_OWNER ? nodes.get(ownerId) : undefined;
     if (owner !== undefined && owner !== node) {
       owner.children.push(node);
     } else {
       roots.push(node);
     }
+    Object.assign(node, launchLinkage(node, ownerId, toolCallsByOwner, asyncLaunchIds));
   }
   const byStart = (a: SubagentNode, b: SubagentNode) =>
     (a.startedAt ?? "").localeCompare(b.startedAt ?? "");
@@ -257,4 +298,37 @@ async function analyzeSubagents(filePath: string): Promise<{
   roots.sort(byStart);
 
   return { subagents: roots, subagentCount: nodes.size, subagentTotals };
+}
+
+/**
+ * Resolve a node's launch-side metadata (returnedChars/asyncLaunch/launchLine/
+ * launchedAt/spawnedBy) from the launching Agent/Task tool call, found in
+ * whichever transcript owns it (main, or a parent subagent). Falls back to
+ * `spawnedBy: "main"` when the owner or launching call can't be resolved —
+ * the node still renders as a root in the tree either way. For async
+ * launches, `returnedChars` is deliberately left undefined: the launch's
+ * tool_result is only the ack boilerplate, not the agent's return.
+ */
+function launchLinkage(
+  node: SubagentNode,
+  ownerId: string | undefined,
+  toolCallsByOwner: ReadonlyMap<string, ReadonlyMap<string, ToolCall>>,
+  asyncLaunchIds: ReadonlySet<string>,
+): Pick<SubagentNode, "returnedChars" | "asyncLaunch" | "launchLine" | "launchedAt" | "spawnedBy"> {
+  const spawnedBy = ownerId ?? MAIN_OWNER;
+  const asyncLaunch = node.toolUseId !== undefined && asyncLaunchIds.has(node.toolUseId);
+  const launchCall =
+    node.toolUseId !== undefined ? toolCallsByOwner.get(spawnedBy)?.get(node.toolUseId) : undefined;
+  if (launchCall === undefined) {
+    return { spawnedBy, ...(asyncLaunch && { asyncLaunch }) };
+  }
+  const returnedChars = asyncLaunch ? undefined : toolResultLength(launchCall);
+  return {
+    spawnedBy,
+    launchLine: launchCall.line,
+    ...(asyncLaunch && { asyncLaunch }),
+    ...(returnedChars !== undefined && { returnedChars }),
+    ...(launchCall.timestamp !== undefined &&
+      launchCall.timestamp !== node.startedAt && { launchedAt: launchCall.timestamp }),
+  };
 }

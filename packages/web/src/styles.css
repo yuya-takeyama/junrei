@@ -713,6 +713,48 @@ button.tool-hd {
   color: var(--tx);
 }
 
+/* ---------------------------------------------------------------------
+   Orchestration (L2) — agent tree, waterfall, flame. See
+   design-spec/13-orchestration.md and 99-components.md.
+   --------------------------------------------------------------------- */
+
+.fw6 {
+  font-weight: 600;
+}
+
+.tn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 108px 56px 56px;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 12px;
+  font-size: 12px;
+  border-bottom: 1px dotted var(--bd);
+}
+.tn.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+button.tn {
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted var(--bd);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button.tn:hover {
+  background: var(--pan);
+}
+.tn.on {
+  background: var(--pan);
+  box-shadow: inset 2px 0 0 var(--amb);
+}
+.pan.f1 > .tn:last-child {
+  border-bottom: 0;
+}
+
 .kv {
   display: grid;
   grid-template-columns: 140px 1fr;
@@ -732,4 +774,72 @@ button.tool-hd {
 }
 .cp-inline:hover {
   color: var(--tx);
+}
+
+.ann {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mut);
+  line-height: 1.5;
+}
+
+.wrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+.wlab {
+  width: 158px;
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--mut);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wtrk {
+  flex: 1;
+  position: relative;
+  height: 13px;
+}
+.wbar {
+  position: absolute;
+  top: 1.5px;
+  height: 10px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.wbar.notiming {
+  background: var(--mut);
+  opacity: 0.35;
+}
+.wbar.sel {
+  box-shadow: inset 0 0 0 2px var(--amb);
+}
+
+.frow {
+  display: flex;
+}
+.fb {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  border: 1px solid var(--bg);
+  box-sizing: border-box;
+  color: var(--bg);
+}
+button.fb {
+  cursor: pointer;
+}
+.fb.sel {
+  box-shadow: inset 0 0 0 2px var(--amb);
 }

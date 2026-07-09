@@ -180,7 +180,9 @@ describe("buildTimeline", () => {
     expect(launch?.model).toBe("haiku"); // from the tool_use input, unresolved
     expect(launch?.promptPreview).toBe("explore stuff");
     expect(launch?.promptTruncated).toBe(false);
-    expect(launch?.returnedChars).toBe("agent done".length);
+    // ASYNC launch: the tool_result ("agent done") is only the launch ack,
+    // not the agent's return — returnedChars stays unresolved.
+    expect(launch?.returnedChars).toBeUndefined();
     expect(launch?.resultLine).toBe(22);
     // Usage/duration are unresolved without a sidecar lookup.
     expect(launch?.outputTokens).toBeUndefined();
@@ -216,6 +218,21 @@ describe("buildTimeline", () => {
     const toolCalls = entries.filter((e): e is ToolCallEntry => e.kind === "tool-call");
     expect(toolCalls).toHaveLength(2);
     expect(toolCalls.every((c) => c.status === "error")).toBe(true);
+  });
+
+  it("captures returnedChars for a SYNCHRONOUS subagent launch", async () => {
+    const transcript = await parseTranscriptFile(OUT_OF_ORDER_FILE);
+    const data = buildSessionData(transcript);
+    const entries = await buildTimeline(data);
+    const launch = entries.find(
+      (e): e is SubagentLaunchEntry =>
+        e.kind === "subagent-launch" && e.toolUseId === "toolu_agent_sync1",
+    );
+    // Sync launch: the parent-side tool_result IS the agent's return.
+    expect(launch?.returnedChars).toBe(
+      "Both edits failed because the files were never read.".length,
+    );
+    expect(launch?.resultLine).toBe(7);
   });
 
   it("truncates long user/assistant text and marks it truncated", async () => {

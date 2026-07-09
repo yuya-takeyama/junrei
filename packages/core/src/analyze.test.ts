@@ -114,6 +114,20 @@ describe("analyzeSession", () => {
     expect(agent?.usage.total.inputTokens).toBe(110);
     expect(agent?.children).toEqual([]);
 
+    // Launch-side linkage: the Agent tool_use is at line 21 of the main
+    // transcript; the agent's own first record is timestamped later
+    // (01:02:32) than the launching call (01:02:05), so launchedAt is
+    // populated as distinct from startedAt. This launch is ASYNC
+    // (toolUseResult.status "async_launched"), so its tool_result text is
+    // only the launch ack ("agent done") — returnedChars must stay
+    // unresolved rather than measuring the ack.
+    expect(agent?.spawnedBy).toBe("main");
+    expect(agent?.launchLine).toBe(21);
+    expect(agent?.asyncLaunch).toBe(true);
+    expect(agent?.returnedChars).toBeUndefined();
+    expect(agent?.startedAt).toBe("2026-07-09T01:02:32.000Z");
+    expect(agent?.launchedAt).toBe("2026-07-09T01:02:05.000Z");
+
     // Total usage = main + subagent.
     expect(analysis.totalUsage.inputTokens).toBe(1715 + 110);
     expect(analysis.totalUsage.costUsd).toBeGreaterThan(analysis.usage.total.costUsd);
@@ -177,16 +191,35 @@ describe("analyzeSession", () => {
 });
 
 describe("analyzeSession with out-of-order tool results", () => {
+  const OUT_OF_ORDER_FILE = join(
+    FIXTURE_PROJECTS,
+    "-Users-test-proj/22222222-2222-2222-2222-222222222222.jsonl",
+  );
+
   it("links tool_result records that appear before their tool_use", async () => {
-    const analysis = await analyzeSession(
-      join(FIXTURE_PROJECTS, "-Users-test-proj/22222222-2222-2222-2222-222222222222.jsonl"),
-    );
+    const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
     const edit = analysis.toolStats.find((s) => s.name === "Edit");
     // Both parallel edits errored — including the one whose result precedes
     // its tool_use record in file order.
     expect(edit?.callCount).toBe(2);
     expect(edit?.errorCount).toBe(2);
     expect(edit?.missingResultCount).toBe(0);
+  });
+
+  it("captures returnedChars for a SYNCHRONOUS subagent launch", async () => {
+    const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
+    expect(analysis.subagentCount).toBe(1);
+    const agent = analysis.subagents[0];
+    expect(agent?.agentId).toBe("bbbb444455556666a");
+    expect(agent?.agentType).toBe("general-purpose");
+    // Sync launch (no async markers in toolUseResult): the parent-side
+    // tool_result IS the agent's return, so its length is meaningful.
+    expect(agent?.asyncLaunch).toBeUndefined();
+    expect(agent?.returnedChars).toBe(
+      "Both edits failed because the files were never read.".length,
+    );
+    expect(agent?.spawnedBy).toBe("main");
+    expect(agent?.launchLine).toBe(6);
   });
 });
 

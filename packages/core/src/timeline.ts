@@ -20,6 +20,7 @@
 import { computeUsage } from "./metrics.js";
 import { estimateCostUsd } from "./pricing/pricing.js";
 import type { SessionData, ToolCall } from "./session-data.js";
+import { asyncAgentLaunchToolUseIds } from "./session-data.js";
 import { listSubagentRefs, loadSubagentSessionData, type SubagentRef } from "./subagents.js";
 import type {
   AssistantRecord,
@@ -89,7 +90,12 @@ export interface SubagentLaunchEntry extends EntryBase {
   effort?: string;
   promptPreview?: string;
   promptTruncated: boolean;
-  /** Length of the parent-side tool_result text; undefined while unresolved (no result yet). */
+  /**
+   * Length of the parent-side tool_result text; undefined while unresolved
+   * (no result yet) — and always undefined for ASYNC launches, whose
+   * tool_result is only the launch-ack boilerplate, not the agent's return
+   * (that arrives later as a task-notification whose text isn't captured).
+   */
   returnedChars?: number;
   resultLine?: number;
   /** Below: the agent's own usage/duration, resolved only when `mainFilePath` is given
@@ -374,6 +380,7 @@ export async function buildTimeline(
 ): Promise<TimelineEntry[]> {
   const toolCallsById = new Map(data.toolCalls.map((c) => [c.toolUseId, c]));
   const launchByTaskId = new Map(data.backgroundLaunches.map((l) => [l.taskId, l]));
+  const asyncLaunchIds = asyncAgentLaunchToolUseIds(data);
 
   const refByToolUseId = new Map<string, SubagentRef>();
   if (opts.mainFilePath !== undefined) {
@@ -423,7 +430,12 @@ export async function buildTimeline(
             if (call === undefined) break;
             if (isSubagentLaunchTool(call.name) || refByToolUseId.has(call.toolUseId)) {
               const ref = refByToolUseId.get(call.toolUseId);
-              const entry = await buildSubagentEntry(call, ref, opts);
+              const entry = await buildSubagentEntry(
+                call,
+                ref,
+                opts,
+                asyncLaunchIds.has(call.toolUseId),
+              );
               entries.push(entry);
             } else {
               entries.push(buildToolCallEntry(call));
@@ -528,6 +540,7 @@ async function buildSubagentEntry(
   call: ToolCall,
   ref: SubagentRef | undefined,
   opts: TimelineOptions,
+  isAsyncLaunch: boolean,
 ): Promise<SubagentLaunchEntry> {
   const input = asRecord(call.input);
   const agentType = ref?.meta.agentType ?? strField(input, "subagent_type");
@@ -550,10 +563,10 @@ async function buildSubagentEntry(
     ...(name !== undefined && { name }),
     ...(inputModel !== undefined && { model: inputModel }),
     ...(promptPreview !== "" && { promptPreview }),
-    ...(call.result !== undefined && {
-      returnedChars: call.result.text.length,
-      resultLine: call.result.line,
-    }),
+    ...(call.result !== undefined && { resultLine: call.result.line }),
+    // Async launches: the result text is only the launch ack, not the agent's
+    // return — leave returnedChars unresolved rather than measuring the ack.
+    ...(call.result !== undefined && !isAsyncLaunch && { returnedChars: call.result.text.length }),
   };
 
   if (ref !== undefined && opts.mainFilePath !== undefined) {

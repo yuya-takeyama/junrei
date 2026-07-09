@@ -1,0 +1,6 @@
+{
+  "agentType": "general-purpose",
+  "description": "Summarize edits",
+  "toolUseId": "toolu_agent_sync1",
+  "spawnDepth": 1
+}
