@@ -13,6 +13,11 @@ export type {
 export { analyzeCodexSession } from "./codex/analyze.js";
 export type { CodexSessionFileRef } from "./codex/discovery.js";
 export { listCodexSessionFiles, resolveCodexHome } from "./codex/discovery.js";
+export {
+  computeCodexFileAccess,
+  computeCodexSkillInvocations,
+  mergeCodexFileAccess,
+} from "./codex/files-skills.js";
 export { buildCodexSubagentForest } from "./codex/orchestration.js";
 export type { CodexTranscript } from "./codex/parser.js";
 export { parseCodexTranscriptFile } from "./codex/parser.js";

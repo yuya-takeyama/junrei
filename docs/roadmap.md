@@ -135,10 +135,35 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   session page. Also fixed in passing: `base_instructions` can be
   `{text: "..."}` on real Codex Desktop data, not a bare string — the old
   strict-string schema silently degraded the WHOLE `session_meta` line to a
-  generic record, losing subagent linkage entirely — this PR
+  generic record, losing subagent linkage entirely
+- ✅ Files & skills lens for Codex sessions — completes Claude-lens parity
+  for Codex (every lens but the Codex-only Turns tab is now shared).
+  `codex/files-skills.ts`: edits are DETERMINISTIC (`custom_tool_call`
+  `apply_patch` envelopes, parsing every `*** Update/Add/Delete File:`
+  header); reads are a conservative HEURISTIC over `exec_command`/`shell`
+  calls (a short recognized-command list — cat/head/tail/less/more/rg/grep/
+  awk/wc/stat/nl/sed, `sed` only counted with `-n` — never `-i`, never an
+  unrecognized command), under-reporting rather than guessing at arbitrary
+  shell invocations; relative paths resolve against the session's
+  `session_meta`/`turn_context` cwd. Skill invocations are parsed from
+  `[$plugin:skill](path-to-SKILL.md)` markdown markers in `user_message`
+  event text. `fileAccess`/`skillInvocations` are now `SessionAnalysisCore`
+  fields (promoted off the Claude-only `SessionAnalysis`), so the web's
+  `FilesSkills`/`FileAccessTree`/`SkillInvocationsPanel` render unbranched
+  for either source; `getCodexSession` folds every descendant sub-agent
+  thread's own `fileAccess` into the parent's at serve time
+  (`mergeCodexFileAccess`, reusing Claude's `mergeFileAccess`/
+  `foldFileAccess`), producing the same main/subagent/both `threads` marker
+  Claude's subagent merge does. Repetition findings and the per-tool/
+  task-execution row stay Claude-only (no honest Codex equivalent) and are
+  skipped for Codex, same pattern `ContextCost` uses for its own Claude-only
+  panels — this PR
 - ⬜ Fork lineage (`forked_from_id`): parsed and retained on
   `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
   fork-tree UI exists, unlike the sub-agent forest above
+- ⬜ Legacy-format rollout support: pre-2026-02-25 Codex transcripts parse as
+  `format: "legacy"` (no records) and are skipped everywhere (list, detail,
+  every lens) rather than interpreted — no legacy-schema parser exists yet
 
 ## Later (post-v1)
 

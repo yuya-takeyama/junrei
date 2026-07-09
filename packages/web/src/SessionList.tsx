@@ -245,11 +245,9 @@ export function SessionList() {
                 {isEstimatedCost(s) && <EstBadge />}
               </span>
               <ModelMixBar mix={s.modelMix} />
-              {s.source === "codex" ? (
-                <span className="num fs12 cellr mut">{subagentCellText(s)}</span>
-              ) : (
-                <NumCell value={s.subagentCount} />
-              )}
+              <span className={s.subagentCount > 0 ? "num fs12 cellr" : "num fs12 cellr mut"}>
+                {subagentCellText(s)}
+              </span>
               <NumCell value={s.toolErrorCount} errorish />
               <NumCell value={s.compactionCount} />
             </Link>

@@ -10,12 +10,14 @@ import {
   type CodexSessionAnalysis,
   type CodexSessionFileRef,
   type CodexTranscript,
+  type FileAccessEntry,
   getCodexRecordDetail,
   getRecordDetail,
   listCodexSessionFiles,
   listSessionFiles,
   loadSubagentSessionData,
   type ModelUsageSummary,
+  mergeCodexFileAccess,
   mergeUsageByModel,
   parseCodexTranscriptFile,
   parseTranscriptFile,
@@ -223,6 +225,32 @@ function computeCodexForestTotals(
     },
     totalUsageByModel: mergeUsageByModel(analysis.usage.byModel, forest),
   };
+}
+
+/**
+ * Every descendant sub-agent thread's own `fileAccess`, resolved from the
+ * analyzed pool by `agentId` (== that thread's own `sessionId`) — feeds
+ * `mergeCodexFileAccess` the same list-of-arrays shape Claude's
+ * `analyzeSubagents` builds from sidecar transcripts (analyze.ts), just
+ * walking the already-built `SubagentNode` forest instead: a Codex
+ * sub-agent's `fileAccess` was already computed once at analysis time (see
+ * `analyzeCodexSession`), so this only re-associates it, it never
+ * re-parses anything.
+ */
+function collectForestFileAccess(
+  nodes: readonly SubagentNode[],
+  bySessionId: ReadonlyMap<string, CodexSessionAnalysis>,
+): FileAccessEntry[][] {
+  const out: FileAccessEntry[][] = [];
+  const visit = (list: readonly SubagentNode[]) => {
+    for (const node of list) {
+      const analysis = bySessionId.get(node.agentId);
+      if (analysis !== undefined) out.push(analysis.fileAccess);
+      visit(node.children);
+    }
+  };
+  visit(nodes);
+  return out;
 }
 
 interface CacheEntry {
@@ -516,7 +544,11 @@ async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | un
  * names. `totalUsage`/`totalUsageByModel` are OVERRIDDEN from the base
  * `CodexSessionAnalysis` values (see `computeCodexForestTotals`) to include
  * every sub-agent recursively — the cached single-file analysis itself is
- * never mutated, this is a fresh object built at serve time.
+ * never mutated, this is a fresh object built at serve time. `fileAccess`
+ * (+ its truncation flags) is OVERRIDDEN the same way, folding in every
+ * descendant's own file access with the `subagent`/`both` `threads` marker —
+ * see `mergeCodexFileAccess`/`collectForestFileAccess`. `skillInvocations`
+ * is NOT overridden — main-transcript-only, same as Claude's.
  */
 export interface CodexSessionAnalysisWithSubagents extends CodexSessionAnalysis {
   subagents: SubagentNode[];
@@ -545,12 +577,20 @@ export async function getCodexSession(
       sessionId,
     );
     const { totalUsage, totalUsageByModel } = computeCodexForestTotals(found.analysis, forest);
+    const bySessionId = new Map(pool.map((p) => [p.analysis.sessionId, p.analysis] as const));
+    const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeCodexFileAccess(
+      found.analysis.fileAccess,
+      collectForestFileAccess(forest, bySessionId),
+    );
     return {
       ...found.analysis,
       totalUsage,
       totalUsageByModel,
       subagents: forest,
       subagentCount: countForestNodes(forest),
+      fileAccess,
+      fileAccessTruncated,
+      ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
     };
   } catch {
     return undefined;

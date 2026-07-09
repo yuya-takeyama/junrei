@@ -130,20 +130,20 @@ function SubagentOfChip({ session }: { session: AnySessionJson }) {
  * segment (matching the sentinel `projectDirName` Codex list rows carry —
  * see `sessions.ts` on the server) is dispatched to the Codex detail
  * endpoint instead of a dedicated route, so every Codex session URL stays
- * `sessionPath("codex", id, lens)` like any other session link. Files &
- * skills is a Claude-only endpoint that doesn't exist for Codex (see api.ts)
- * and is never reached for a Codex session — `CODEX_LENSES` doesn't offer
- * that tab. Timeline, Orchestration, and the record slide-over, by
- * contrast, ARE available for Codex: Orchestration renders the same
- * `Orchestration` component for both sources (a Codex sub-agent is its own
- * rollout file, not a sidecar, but `getCodexSession` on the server attaches
- * the same `subagents`/`subagentCount` shape — see
- * `codex/orchestration.ts` in `@junrei/core`); Timeline and the record
- * slide-over fetch through the same generic `:project/:id/timeline` /
+ * `sessionPath("codex", id, lens)` like any other session link. Every lens
+ * except "turns" renders the exact same component for both sources —
+ * `FilesSkills` included, now that `fileAccess`/`skillInvocations` live on
+ * `SessionAnalysisCore` and Codex populates them too (see
+ * `codex/files-skills.ts` in `@junrei/core`); Orchestration likewise renders
+ * unchanged (a Codex sub-agent is its own rollout file, not a sidecar, but
+ * `getCodexSession` on the server attaches the same `subagents`/
+ * `subagentCount` shape — see `codex/orchestration.ts`); Timeline and the
+ * record slide-over fetch through the same generic `:project/:id/timeline` /
  * `:project/:id/record/:line` routes/components used for Claude, since the
  * server registers Codex-specific handlers ahead of those generic routes
  * (see app.ts) that return the exact same `TimelineEntry`/`RecordDetail`
- * shapes — no separate dispatch needed here.
+ * shapes — no separate dispatch needed here. "turns" stays Codex-only (no
+ * Claude equivalent) — see `CLAUDE_LENSES`/`CODEX_LENSES`.
  */
 export function SessionShell() {
   const {
@@ -268,10 +268,9 @@ export function SessionShell() {
         {error === null && session !== null && lens === "context" && (
           <ContextCost session={session} />
         )}
-        {error === null &&
-          session !== null &&
-          session.source === "claude-code" &&
-          lens === "files" && <FilesSkills session={session} />}
+        {error === null && session !== null && lens === "files" && (
+          <FilesSkills session={session} />
+        )}
         {error === null && session !== null && session.source === "codex" && lens === "turns" && (
           <CodexTurns session={session} />
         )}

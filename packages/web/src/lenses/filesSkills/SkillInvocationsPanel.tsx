@@ -1,8 +1,8 @@
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 import { formatTime, formatTokens } from "../../format.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
 }
 
 const EM_DASH = "—";

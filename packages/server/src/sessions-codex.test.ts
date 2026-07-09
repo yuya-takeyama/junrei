@@ -268,6 +268,19 @@ describe("getCodexSession", () => {
     // No sub-agents — this fixture is a leaf session.
     expect(analysis?.subagents).toEqual([]);
     expect(analysis?.subagentCount).toBe(0);
+    // Files & skills lens data rides on the same SessionAnalysisCore fields
+    // Claude uses — see codex/files-skills.ts. This fixture's one
+    // custom_tool_call (apply_patch, updating foo.spec.ts) surfaces as a
+    // main-only edit; it has no skill markers in either user_message.
+    expect(analysis?.fileAccess).toEqual([
+      expect.objectContaining({
+        path: "/Users/test/codex-proj/foo.spec.ts",
+        edits: 1,
+        reads: 0,
+        threads: "main",
+      }),
+    ]);
+    expect(analysis?.skillInvocations).toEqual([]);
   });
 
   it("returns undefined for an unknown session id", async () => {
@@ -362,5 +375,79 @@ describe("getCodexSession — sub-agent orchestration (77777777 -> 88888888 -> 9
     expect(scout).toBeDefined();
     expect(scout?.subagents).toEqual([]);
     expect(scout?.subagentCount).toBe(0);
+  });
+
+  // Fixture file access, appended to the end of each rollout (after the
+  // existing token/turn records the tests above depend on, so none of those
+  // assertions shift): the parent (77777777) edits src/parent-only.ts, the
+  // child Aquinas (88888888) edits src/auth.ts, and the grandchild Scout
+  // (99999999) reads src/auth.ts (the same path Aquinas edited) plus its own
+  // src/scout-only.ts. All three share one cwd
+  // (/Users/test/orchestration-proj), so the resolved absolute paths line up
+  // exactly across sessions — this is what actually exercises the merge.
+  it("folds every descendant's fileAccess into the parent's, tagging a path only a descendant touched as 'subagent'", async () => {
+    const parent = await getCodexSession("77777777-7777-7777-7777-777777777777");
+    expect(parent).toBeDefined();
+    if (parent === undefined) return;
+
+    const parentOnly = parent.fileAccess.find(
+      (e) => e.path === "/Users/test/orchestration-proj/src/parent-only.ts",
+    );
+    expect(parentOnly).toMatchObject({ edits: 1, reads: 0, threads: "main" });
+
+    // Neither the parent nor Scout edited src/auth.ts directly — only Aquinas
+    // (edit) and Scout (read) did, both descendants of the parent — so from
+    // the PARENT's point of view this path is subagent-only.
+    const auth = parent.fileAccess.find(
+      (e) => e.path === "/Users/test/orchestration-proj/src/auth.ts",
+    );
+    expect(auth).toMatchObject({ edits: 1, reads: 1, threads: "subagent" });
+
+    const scoutOnly = parent.fileAccess.find(
+      (e) => e.path === "/Users/test/orchestration-proj/src/scout-only.ts",
+    );
+    expect(scoutOnly).toMatchObject({ edits: 0, reads: 1, threads: "subagent" });
+  });
+
+  it("tags a path as 'both' when the session itself AND a descendant touched it — fetched one level down (Aquinas + Scout)", async () => {
+    const aquinas = await getCodexSession("88888888-8888-8888-8888-888888888888");
+    expect(aquinas).toBeDefined();
+    if (aquinas === undefined) return;
+
+    // Aquinas edited src/auth.ts itself (main); Scout, its own descendant,
+    // read the same path — combined, this is "both" from Aquinas's own
+    // getCodexSession view (a different marker than the parent saw it as).
+    const auth = aquinas.fileAccess.find(
+      (e) => e.path === "/Users/test/orchestration-proj/src/auth.ts",
+    );
+    expect(auth).toMatchObject({ edits: 1, reads: 1, threads: "both" });
+
+    const scoutOnly = aquinas.fileAccess.find(
+      (e) => e.path === "/Users/test/orchestration-proj/src/scout-only.ts",
+    );
+    expect(scoutOnly).toMatchObject({ edits: 0, reads: 1, threads: "subagent" });
+  });
+
+  it("a leaf sub-agent's own fileAccess is untouched by aggregation — just its own reads, threads 'main'", async () => {
+    const scout = await getCodexSession("99999999-9999-9999-9999-999999999999");
+    expect(scout).toBeDefined();
+    if (scout === undefined) return;
+
+    expect(scout.fileAccess).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/Users/test/orchestration-proj/src/auth.ts",
+          reads: 1,
+          edits: 0,
+          threads: "main",
+        }),
+        expect.objectContaining({
+          path: "/Users/test/orchestration-proj/src/scout-only.ts",
+          reads: 1,
+          edits: 0,
+          threads: "main",
+        }),
+      ]),
+    );
   });
 });

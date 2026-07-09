@@ -1,13 +1,13 @@
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 import { formatTime } from "../../format.js";
 import { buildFileTreeRows, REREAD_THRESHOLD } from "./fileTree.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
 }
 
 const EM_DASH = "—";
-const THREAD_LABEL: Record<SessionJson["fileAccess"][number]["threads"], string> = {
+const THREAD_LABEL: Record<AnySessionJson["fileAccess"][number]["threads"], string> = {
   main: "M",
   subagent: "S",
   both: "M+S",
