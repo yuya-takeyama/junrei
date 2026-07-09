@@ -1,6 +1,7 @@
 import type { ContextPoint, ModelUsageSummary, TokenTotals, UsageSummary } from "../metrics.js";
 import { mergeFileAccess } from "../metrics.js";
 import { estimateCostComponents } from "../pricing/pricing.js";
+import { deriveRepoIdentity } from "../repo.js";
 import type { SessionAnalysisCore } from "../session-analysis.js";
 import type { CompactionEvent } from "../session-data.js";
 import type { TokenUsage } from "../types.js";
@@ -458,6 +459,7 @@ export function analyzeCodexSession(
   // former.
   const isSubagent =
     sessionMeta?.isSubagentSource === true || sessionMeta?.parentThreadId !== undefined;
+  const { repoRoot, worktreeName } = deriveRepoIdentity(sessionMeta?.cwd);
 
   const codex: CodexSessionExtras = {
     archived: ref.archived,
@@ -499,6 +501,8 @@ export function analyzeCodexSession(
     skillInvocations,
     codex,
     ...(sessionMeta?.cwd !== undefined && { cwd: sessionMeta.cwd }),
+    ...(repoRoot !== undefined && { repoRoot }),
+    ...(worktreeName !== undefined && { worktreeName }),
     ...(sessionMeta?.git?.branch !== undefined && { gitBranch: sessionMeta.git.branch }),
     ...(title !== undefined && { title }),
     ...(startedAt !== undefined && { startedAt }),

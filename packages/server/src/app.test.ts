@@ -283,8 +283,24 @@ describe("Codex routes", () => {
     expect(codexBody.sessions.every((s) => s.source === "codex")).toBe(true);
 
     const claudeOnly = await app.request("/api/sessions?source=claude-code");
-    const claudeBody = (await claudeOnly.json()) as { sessions: Array<{ source: string }> };
+    const claudeBody = (await claudeOnly.json()) as {
+      sessions: Array<{
+        sessionId: string;
+        source: string;
+        repoRoot?: string;
+        worktreeName?: string;
+      }>;
+    };
     expect(claudeBody.sessions.every((s) => s.source === "claude-code")).toBe(true);
+
+    // A worktree-shaped cwd (fixture session 22222222-...) surfaces
+    // repoRoot/worktreeName on the list item, not just on the full analysis —
+    // see `deriveRepoIdentity` (@junrei/core) and `sources/claude.ts`'s `toListItem`.
+    const worktreeSession = claudeBody.sessions.find(
+      (s) => s.sessionId === "22222222-2222-2222-2222-222222222222",
+    );
+    expect(worktreeSession?.repoRoot).toBe("/Users/test/proj2");
+    expect(worktreeSession?.worktreeName).toBe("wt-1");
 
     const merged = await app.request("/api/sessions?source=all");
     const mergedBody = (await merged.json()) as { sessions: Array<{ source: string }> };

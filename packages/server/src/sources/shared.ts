@@ -17,6 +17,10 @@ export interface ModelMixEntry {
 export interface SessionListItemBase {
   sessionId: string;
   cwd?: string;
+  /** Repo-level grouping key derived from `cwd` — see `@junrei/core`'s `deriveRepoIdentity`. */
+  repoRoot?: string;
+  /** Set alongside `repoRoot` only when `cwd` was under a `.claude/worktrees/<name>` path. */
+  worktreeName?: string;
   title?: string;
   firstUserPrompt?: string;
   startedAt?: string;

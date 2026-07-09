@@ -24,6 +24,7 @@ import {
   mergeFileAccess,
 } from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
+import { deriveRepoIdentity } from "./repo.js";
 import type { SessionAnalysisCore } from "./session-analysis.js";
 import type { ApiErrorLogEntry, SessionData, ToolCall } from "./session-data.js";
 import {
@@ -203,6 +204,7 @@ export async function analyzeSession(filePath: string): Promise<ClaudeSessionAna
       : undefined;
   const firstUserPrompt = data.userPrompts[0]?.text.slice(0, PROMPT_PREVIEW_LIMIT);
   const firstUserPromptLine = data.userPrompts[0]?.line;
+  const { repoRoot, worktreeName } = deriveRepoIdentity(data.cwd);
 
   return {
     source: "claude-code",
@@ -232,6 +234,8 @@ export async function analyzeSession(filePath: string): Promise<ClaudeSessionAna
     subagentCount,
     parseWarningCount: data.warningCount,
     ...(data.cwd !== undefined && { cwd: data.cwd }),
+    ...(repoRoot !== undefined && { repoRoot }),
+    ...(worktreeName !== undefined && { worktreeName }),
     ...(data.gitBranch !== undefined && { gitBranch: data.gitBranch }),
     ...(data.version !== undefined && { version: data.version }),
     ...(data.title !== undefined && { title: data.title }),

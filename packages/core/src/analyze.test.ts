@@ -347,6 +347,13 @@ describe("analyzeSession with out-of-order tool results", () => {
     "-Users-test-proj/22222222-2222-2222-2222-222222222222.jsonl",
   );
 
+  it("derives repoRoot/worktreeName from a worktree-shaped cwd", async () => {
+    const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
+    expect(analysis.cwd).toBe("/Users/test/proj2/.claude/worktrees/wt-1");
+    expect(analysis.repoRoot).toBe("/Users/test/proj2");
+    expect(analysis.worktreeName).toBe("wt-1");
+  });
+
   it("links tool_result records that appear before their tool_use", async () => {
     const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
     const edit = analysis.toolStats.find((s) => s.name === "Edit");

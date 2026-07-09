@@ -32,6 +32,13 @@ export interface SessionAnalysisCore {
   sessionId: string;
   filePath: string;
   cwd?: string;
+  /**
+   * Repo-level grouping key derived from `cwd` — see `deriveRepoIdentity`
+   * (`repo.ts`). Undefined when `cwd` itself is undefined.
+   */
+  repoRoot?: string;
+  /** Set alongside `repoRoot` only when `cwd` was under a `.claude/worktrees/<name>` path. */
+  worktreeName?: string;
   gitBranch?: string;
   title?: string;
   startedAt?: string;
