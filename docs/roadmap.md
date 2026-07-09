@@ -103,7 +103,16 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   cache-write composition, API errors — doesn't exist) plus a Codex-only
   Turns lens (per-turn model/duration/tokens/reasoning, provenance chips),
   "est." cost markers wherever a Codex figure is API-list-price estimated
-  rather than billed (#30 — this PR)
+  rather than billed (#30)
+- ✅ Timeline lens for Codex sessions: `buildCodexTimeline`/
+  `getCodexRecordDetail` map Codex's `event_msg`/`response_item` records onto
+  the existing Claude `TimelineEntry`/`RecordDetail` vocabulary (user,
+  assistant-text, thinking, tool-call, compaction — no subagent-launch/
+  task-notification/api-error, which Codex has no analog for), served by
+  `GET /api/sessions/codex/:id/timeline` + `.../record/:line` (registered
+  ahead of the generic `:project` routes, transcript cached by mtime like the
+  Claude path), and reused as-is by the web's Timeline/RecordDetail
+  components via the same generic `:project/:id` fetch path — this PR
 
 ## Later (post-v1)
 

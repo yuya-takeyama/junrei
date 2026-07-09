@@ -3,10 +3,13 @@ import { join } from "node:path";
 import {
   analyzeCodexSession,
   analyzeSession,
+  buildCodexTimeline,
   buildSessionData,
   buildTimeline,
   type CodexSessionAnalysis,
   type CodexSessionFileRef,
+  type CodexTranscript,
+  getCodexRecordDetail,
   getRecordDetail,
   listCodexSessionFiles,
   listSessionFiles,
@@ -365,6 +368,63 @@ export async function getCodexSession(
   if (ref === undefined) return undefined;
   try {
     return await analyzeCodexCached(ref);
+  } catch {
+    return undefined;
+  }
+}
+
+interface CodexTranscriptCacheEntry {
+  mtimeMs: number;
+  transcript: CodexTranscript;
+}
+
+const codexTranscriptCache = new Map<string, CodexTranscriptCacheEntry>();
+
+/**
+ * Parsed (but not analyzed) Codex transcript, cached by mtime — the Codex
+ * analog of `sessionDataCached` below. A separate cache from `codexCache`
+ * above (which stores the already-*analyzed* `CodexSessionAnalysis`) because
+ * the Timeline/record-detail routes need the raw parsed records, not the
+ * session-level rollup; both caches are keyed by `filePath` so a session's
+ * `analyzeCodexCached` and `codexTranscriptCached` entries never collide.
+ */
+async function codexTranscriptCached(ref: CodexSessionFileRef): Promise<CodexTranscript> {
+  const hit = codexTranscriptCache.get(ref.filePath);
+  if (hit !== undefined && hit.mtimeMs === ref.mtimeMs) return hit.transcript;
+  const transcript = await parseCodexTranscriptFile(ref.filePath);
+  codexTranscriptCache.set(ref.filePath, { mtimeMs: ref.mtimeMs, transcript });
+  return transcript;
+}
+
+/**
+ * Full-transcript timeline for the Timeline lens (L2), scoped to a Codex
+ * session — no `agentId` param (Codex has no subagent tree to scope into).
+ * `undefined` for an unknown id or a legacy/empty-format transcript, same
+ * 404 semantics as `getCodexSession`.
+ */
+export async function getCodexTimeline(sessionId: string): Promise<TimelineEntry[] | undefined> {
+  const ref = await findCodexRef(sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    const transcript = await codexTranscriptCached(ref);
+    if (transcript.format !== "current") return undefined;
+    return buildCodexTimeline(transcript);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Full detail for one source line in a Codex transcript — for the Record detail (L3) slide-over. */
+export async function getCodexSessionRecordDetail(
+  sessionId: string,
+  line: number,
+): Promise<RecordDetail | undefined> {
+  const ref = await findCodexRef(sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    const transcript = await codexTranscriptCached(ref);
+    if (transcript.format !== "current") return undefined;
+    return getCodexRecordDetail(transcript, line);
   } catch {
     return undefined;
   }

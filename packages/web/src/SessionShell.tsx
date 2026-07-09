@@ -107,10 +107,16 @@ function MetaLine({ session }: { session: AnySessionJson }) {
  * segment (matching the sentinel `projectDirName` Codex list rows carry —
  * see `sessions.ts` on the server) is dispatched to the Codex detail
  * endpoint instead of a dedicated route, so every Codex session URL stays
- * `sessionPath("codex", id, lens)` like any other session link. Timeline /
- * Orchestration / Files & skills / the record slide-over are Claude-only
- * endpoints that don't exist for Codex (see api.ts) and are never reached
- * for a Codex session — `CODEX_LENSES` only offers overview/context/turns.
+ * `sessionPath("codex", id, lens)` like any other session link. Orchestration
+ * and Files & skills are Claude-only endpoints that don't exist for Codex
+ * (see api.ts) and are never reached for a Codex session — `CODEX_LENSES`
+ * doesn't offer those tabs. Timeline and the record slide-over, by contrast,
+ * ARE available for Codex (see `codex/timeline.ts` in `@junrei/core`): both
+ * fetch through the same generic `:project/:id/timeline` /
+ * `:project/:id/record/:line` routes/components used for Claude, since the
+ * server registers Codex-specific handlers ahead of those generic routes
+ * (see app.ts) that return the exact same `TimelineEntry`/`RecordDetail`
+ * shapes — no separate dispatch needed here.
  */
 export function SessionShell() {
   const {
@@ -129,7 +135,7 @@ export function SessionShell() {
   const [session, setSession] = useState<AnySessionJson | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const recordOpen = !isCodex && record !== undefined;
+  const recordOpen = record !== undefined;
   const closeRecordHref = sessionPath(project, id, lens);
 
   useEffect(() => {
@@ -219,18 +225,15 @@ export function SessionShell() {
         {error === null && session !== null && lens === "overview" && (
           <Overview session={session} />
         )}
-        {error === null &&
-          session !== null &&
-          session.source === "claude-code" &&
-          lens === "timeline" && (
-            <Timeline
-              project={project}
-              id={id}
-              onOpenRecord={(line) => {
-                navigate(recordPath(project, id, lens, line));
-              }}
-            />
-          )}
+        {error === null && session !== null && lens === "timeline" && (
+          <Timeline
+            project={project}
+            id={id}
+            onOpenRecord={(line) => {
+              navigate(recordPath(project, id, lens, line));
+            }}
+          />
+        )}
         {error === null &&
           session !== null &&
           session.source === "claude-code" &&
@@ -246,7 +249,7 @@ export function SessionShell() {
           <CodexTurns session={session} />
         )}
       </div>
-      {!isCodex && record !== undefined && (
+      {record !== undefined && (
         <RecordDetail project={project} id={id} line={record} closeHref={closeRecordHref} />
       )}
     </div>

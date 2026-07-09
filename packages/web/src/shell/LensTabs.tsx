@@ -16,7 +16,7 @@ interface LensTabsProps {
    * Which lenses to render as tabs, in order — defaults to `CLAUDE_LENSES`
    * (the historical five-tab lineup). The Codex session shell passes
    * `CODEX_LENSES` instead, since Codex sessions have no subagent
-   * tree/timeline/files data to back Orchestration/Timeline/Files & skills.
+   * tree/files data to back Orchestration/Files & skills.
    */
   lenses?: readonly Lens[];
 }

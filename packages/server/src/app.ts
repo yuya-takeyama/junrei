@@ -4,6 +4,8 @@ import { createMcpServer } from "./mcp.js";
 import {
   getAgentSession,
   getCodexSession,
+  getCodexSessionRecordDetail,
+  getCodexTimeline,
   getSession,
   getSessionRecordDetail,
   getTimeline,
@@ -39,17 +41,37 @@ export function createApp() {
         const source = parseSourceFilter(c.req.query("source"));
         return c.json({ sessions: await listSessions(limit, source) });
       })
-      // Registered BEFORE the generic `/api/sessions/:project/:id` route below:
+      // Registered BEFORE the generic `/api/sessions/:project/:id` route below
+      // (and the codex/:id/timeline + codex/:id/record/:line routes below
+      // that, similarly, BEFORE their own generic `:project` equivalents):
       // Hono matches routes in registration order, and munged Claude project
       // dirs always start with "-" (see resolveProjectsDirs/listSessionFiles
       // in @junrei/core), so the literal "codex" segment can never collide
-      // with a real `:project` value — but only as long as this stays first.
+      // with a real `:project` value — but only as long as these stay first.
       .get("/api/sessions/codex/:id", async (c) => {
         const analysis = await getCodexSession(c.req.param("id"));
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
         return c.json({ analysis });
+      })
+      .get("/api/sessions/codex/:id/timeline", async (c) => {
+        const entries = await getCodexTimeline(c.req.param("id"));
+        if (entries === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json({ entries });
+      })
+      .get("/api/sessions/codex/:id/record/:line", async (c) => {
+        const line = Number.parseInt(c.req.param("line"), 10);
+        if (!Number.isInteger(line) || line < 1) {
+          return c.json({ error: "record not found" } as const, 404);
+        }
+        const detail = await getCodexSessionRecordDetail(c.req.param("id"), line);
+        if (detail === undefined) {
+          return c.json({ error: "record not found" } as const, 404);
+        }
+        return c.json(detail);
       })
       .get("/api/sessions/:project/:id", async (c) => {
         const analysis = await getSession(c.req.param("project"), c.req.param("id"));

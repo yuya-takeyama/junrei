@@ -4,6 +4,8 @@ import {
   AGENT_ROUTE_PATH,
   agentPath,
   agentRecordPath,
+  CLAUDE_LENSES,
+  CODEX_LENSES,
   normalizeLens,
   parseRecordParam,
   parseSourceTab,
@@ -11,6 +13,24 @@ import {
   SESSION_ROUTE_PATH,
   sessionPath,
 } from "./router.js";
+
+describe("CODEX_LENSES", () => {
+  it("offers overview/timeline/context/turns, in that order — no subagent tree, orchestration, or files/skills data for Codex", () => {
+    expect(CODEX_LENSES).toEqual(["overview", "timeline", "context", "turns"]);
+  });
+
+  it("includes 'timeline', now shared with Claude, but omits Claude-only 'orchestration'/'files'", () => {
+    expect(CODEX_LENSES).toContain("timeline");
+    expect(CODEX_LENSES).not.toContain("orchestration");
+    expect(CODEX_LENSES).not.toContain("files");
+  });
+});
+
+describe("CLAUDE_LENSES", () => {
+  it("is unchanged by the Codex timeline addition", () => {
+    expect(CLAUDE_LENSES).toEqual(["overview", "timeline", "orchestration", "context", "files"]);
+  });
+});
 
 describe("sessionPath", () => {
   it("omits the lens segment for overview (default)", () => {

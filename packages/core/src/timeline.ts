@@ -260,16 +260,20 @@ const INPUT_SUMMARY_LIMIT = 120;
 const RESULT_SUMMARY_LIMIT = 160;
 const PROMPT_PREVIEW_LIMIT = 200;
 
-function collapseWhitespace(text: string): string {
+// Exported (beyond this file's own use) so `codex/timeline.ts` can build the
+// Codex analog of this file's entries/detail with the exact same text
+// formatting rules, instead of redefining them.
+
+export function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function truncate(text: string, limit: number): { text: string; truncated: boolean } {
+export function truncate(text: string, limit: number): { text: string; truncated: boolean } {
   if (text.length <= limit) return { text, truncated: false };
   return { text: `${text.slice(0, limit)}…`, truncated: true };
 }
 
-function truncateOneLine(text: string, limit: number): string {
+export function truncateOneLine(text: string, limit: number): string {
   return truncate(collapseWhitespace(text), limit).text;
 }
 
@@ -284,11 +288,14 @@ function strField(obj: Record<string, unknown> | undefined, key: string): string
   return typeof value === "string" ? value : undefined;
 }
 
-function countLines(text: string): number {
+export function countLines(text: string): number {
   return text.length === 0 ? 0 : text.split("\n").length;
 }
 
-function durationBetween(start: string | undefined, end: string | undefined): number | undefined {
+export function durationBetween(
+  start: string | undefined,
+  end: string | undefined,
+): number | undefined {
   if (start === undefined || end === undefined) return undefined;
   const delta = Date.parse(end) - Date.parse(start);
   return Number.isFinite(delta) && delta >= 0 ? delta : undefined;
@@ -320,7 +327,7 @@ function summarizeToolInput(input: unknown): string {
   return truncateOneLine(JSON.stringify(input ?? null), INPUT_SUMMARY_LIMIT);
 }
 
-function summarizeResultText(text: string): string {
+export function summarizeResultText(text: string): string {
   const firstLine = text.split("\n")[0] ?? "";
   const base = firstLine.length > 0 ? firstLine : collapseWhitespace(text);
   return truncate(base, RESULT_SUMMARY_LIMIT).text;
