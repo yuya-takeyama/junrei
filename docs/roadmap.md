@@ -85,9 +85,23 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   overlap, instruction footprint
 - ✅ UI lenses: Timeline / Orchestration / Context & cost / Files & skills
 
+## Codex CLI sessions
+
+- ✅ Core parsing: rollout JSONL discovery (`$CODEX_HOME`/`~/.codex`,
+  `sessions/YYYY/MM/DD/` + `archived_sessions/`), tolerant parser
+  (current/legacy/empty format detection), `analyzeCodexSession` producing
+  `CodexSessionAnalysis` on the shared `SessionAnalysisCore` shape (#28)
+- ✅ Server API + pricing: discriminated `AnySessionListItem` list
+  (`source: "claude-code" | "codex"`, merged + sorted by recency, optional
+  `source` filter), `GET /api/sessions/codex/:id` detail route, OpenAI
+  `gpt-5*` family pricing (LiteLLM snapshot), MCP tools accept
+  `project: "codex"` for session-scoped lookups (Claude-only tools reject
+  Codex sessions with a clear error) — this PR
+- ⬜ Web UI: session-list source tabs (Claude Code / Codex / all), Codex
+  detail screen (turns, tool calls, reasoning tokens, rate limits) — next
+
 ## Later (post-v1)
 
-- ⬜ Codex session support (adapter layer in core)
 - ⬜ Cross-session aggregates & trends
 - ⬜ Export/copy portable summaries (paste into ChatGPT, issues, docs)
 - ⬜ Review Skill for agent-driven retrospectives

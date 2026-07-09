@@ -127,11 +127,12 @@ describe("analyzeCodexSession", () => {
     expect(gpt?.inputTokens).toBe(400);
     expect(gpt?.outputTokens).toBe(150);
     expect(gpt?.cacheReadTokens).toBe(100);
-    // No pricing entry for "gpt-5.5" — cost is left undefined, not faked as 0.
-    expect(gpt?.costUsd).toBeUndefined();
+    // "gpt-5.5" has known pricing (added alongside the OpenAI snapshot for
+    // Codex support — see prices.json), so this model's slice is priced too.
+    expect(gpt?.costUsd).toBeGreaterThan(0);
 
-    // The session overall is NOT fully priced, because of the unpriced model.
-    expect(analysis.totalUsage.costIsComplete).toBe(false);
+    // Both models are now priced, so the session total is fully priced.
+    expect(analysis.totalUsage.costIsComplete).toBe(true);
     expect(analysis.totalUsage.inputTokens).toBe(1200);
     expect(analysis.totalUsage.outputTokens).toBe(450);
     expect(analysis.totalUsage.cacheReadTokens).toBe(300);

@@ -1,18 +1,25 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  analyzeCodexSession,
   analyzeSession,
   buildSessionData,
   buildTimeline,
+  type CodexSessionAnalysis,
+  type CodexSessionFileRef,
   getRecordDetail,
+  listCodexSessionFiles,
   listSessionFiles,
   loadSubagentSessionData,
+  parseCodexTranscriptFile,
   parseTranscriptFile,
   type RecordDetail,
+  resolveCodexHome,
   resolveProjectsDirs,
   type SessionAnalysis,
   type SessionData,
   type SessionFileRef,
+  type SessionSource,
   type SubagentNode,
   subagentsDirFor,
   type TimelineEntry,
@@ -24,9 +31,14 @@ export interface ModelMixEntry {
   outputTokens: number;
 }
 
-export interface SessionListItem {
+/**
+ * Fields genuinely shared by both harnesses' list items. `projectDirName` and
+ * `subagentCount` are deliberately NOT here — see `ClaudeSessionListItem` /
+ * `CodexSessionListItem` below for why Codex still carries them (sentinel
+ * values) rather than omitting them.
+ */
+interface SessionListItemBase {
   sessionId: string;
-  projectDirName: string;
   cwd?: string;
   title?: string;
   firstUserPrompt?: string;
@@ -39,7 +51,6 @@ export interface SessionListItem {
   costIsComplete: boolean;
   totalTokens: number;
   cacheReadTokens: number;
-  subagentCount: number;
   compactionCount: number;
   toolCallCount: number;
   toolErrorCount: number;
@@ -47,6 +58,40 @@ export interface SessionListItem {
   /** Output-token share per model, main session + all subagents (for the L0 model-mix bar). */
   modelMix: ModelMixEntry[];
 }
+
+/**
+ * `projectDirName` and `subagentCount` are conceptually Claude-only (Codex
+ * has no project-dir munging and no subagent tree), but @junrei/web's
+ * session-list UI (out of scope for this PR — see docs/roadmap.md) reads
+ * both unconditionally without narrowing on `source`. Rather than making
+ * them optional (which would force `string | undefined` through
+ * `formatProject`/`sessionPath` call sites the web package isn't touched to
+ * fix), `CodexSessionListItem` below fills sentinel values: `projectDirName:
+ * "codex"` (the same literal segment the detail route uses, so it never
+ * collides with a real munged Claude dir) and `subagentCount: 0`. PR3 (web
+ * UI) should switch to branching on `source` and can drop this shim then.
+ */
+export interface ClaudeSessionListItem extends SessionListItemBase {
+  source: "claude-code";
+  projectDirName: string;
+  subagentCount: number;
+}
+
+export interface CodexSessionListItem extends SessionListItemBase {
+  source: "codex";
+  /** Sentinel — see the comment above `ClaudeSessionListItem`. */
+  projectDirName: "codex";
+  /** Sentinel — Codex CLI sessions have no subagent concept. */
+  subagentCount: 0;
+  /** True when the rollout file lives under `archived_sessions/` rather than `sessions/YYYY/MM/DD/`. */
+  archived: boolean;
+}
+
+/** Either harness's list item, discriminated on `source`. */
+export type AnySessionListItem = ClaudeSessionListItem | CodexSessionListItem;
+
+/** Back-compat alias — pre-Codex call sites imported this name directly. */
+export type SessionListItem = AnySessionListItem;
 
 /**
  * Aggregate output tokens per model across the main transcript and every
@@ -71,6 +116,11 @@ export function computeModelMix(analysis: SessionAnalysis): ModelMixEntry[] {
   return [...totals].map(([model, outputTokens]) => ({ model, outputTokens }));
 }
 
+/** Codex has no subagent tree, so its "model mix" is just its own per-model usage. */
+function codexModelMix(analysis: CodexSessionAnalysis): ModelMixEntry[] {
+  return analysis.usage.byModel.map((m) => ({ model: m.model, outputTokens: m.outputTokens }));
+}
+
 interface CacheEntry {
   mtimeMs: number;
   analysis: SessionAnalysis;
@@ -88,10 +138,40 @@ async function analyzeCached(ref: SessionFileRef): Promise<SessionAnalysis> {
   return analysis;
 }
 
-function toListItem(analysis: SessionAnalysis, ref: SessionFileRef): SessionListItem {
+interface CodexCacheEntry {
+  mtimeMs: number;
+  /** `undefined` when the transcript isn't `format: "current"` — callers must skip it. */
+  analysis: CodexSessionAnalysis | undefined;
+}
+
+const codexCache = new Map<string, CodexCacheEntry>();
+
+/**
+ * Analyze a Codex rollout file, cached by mtime like `analyzeCached` above
+ * (separate map, keyed by the same `filePath`, so a Claude and a Codex
+ * session never collide even in the unlikely case their file paths matched).
+ * Returns `undefined` for legacy/empty-format transcripts, which callers
+ * must skip rather than surface as a broken session.
+ */
+async function analyzeCodexCached(
+  ref: CodexSessionFileRef,
+): Promise<CodexSessionAnalysis | undefined> {
+  const hit = codexCache.get(ref.filePath);
+  if (hit !== undefined && hit.mtimeMs === ref.mtimeMs) {
+    return hit.analysis;
+  }
+  const transcript = await parseCodexTranscriptFile(ref.filePath);
+  const analysis =
+    transcript.format === "current" ? analyzeCodexSession(ref, transcript) : undefined;
+  codexCache.set(ref.filePath, { mtimeMs: ref.mtimeMs, analysis });
+  return analysis;
+}
+
+function toListItem(analysis: SessionAnalysis, ref: SessionFileRef): ClaudeSessionListItem {
   const toolCallCount = analysis.toolStats.reduce((sum, s) => sum + s.callCount, 0);
   const toolErrorCount = analysis.toolStats.reduce((sum, s) => sum + s.errorCount, 0);
   return {
+    source: "claude-code",
     sessionId: analysis.sessionId,
     projectDirName: analysis.projectDirName,
     userTurnCount: analysis.userTurnCount,
@@ -119,26 +199,139 @@ function toListItem(analysis: SessionAnalysis, ref: SessionFileRef): SessionList
   };
 }
 
-export async function listSessions(limit: number): Promise<SessionListItem[]> {
+function toCodexListItem(
+  analysis: CodexSessionAnalysis,
+  ref: CodexSessionFileRef,
+): CodexSessionListItem {
+  return {
+    source: "codex",
+    sessionId: analysis.sessionId,
+    projectDirName: "codex",
+    subagentCount: 0,
+    archived: ref.archived,
+    userTurnCount: analysis.userTurnCount,
+    models: analysis.models,
+    totalCostUsd: analysis.totalUsage.costUsd,
+    costIsComplete: analysis.totalUsage.costIsComplete,
+    totalTokens:
+      analysis.totalUsage.inputTokens +
+      analysis.totalUsage.outputTokens +
+      analysis.totalUsage.cacheReadTokens +
+      analysis.totalUsage.cacheCreationTokens,
+    cacheReadTokens: analysis.totalUsage.cacheReadTokens,
+    compactionCount: analysis.compactions.length,
+    toolCallCount: analysis.codex.toolCallCount,
+    toolErrorCount: analysis.codex.toolErrorCount,
+    sizeBytes: ref.sizeBytes,
+    modelMix: codexModelMix(analysis),
+    ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
+    ...(analysis.title !== undefined && { title: analysis.title }),
+    ...(analysis.firstUserPrompt !== undefined && { firstUserPrompt: analysis.firstUserPrompt }),
+    ...(analysis.startedAt !== undefined && { startedAt: analysis.startedAt }),
+    ...(analysis.endedAt !== undefined && { endedAt: analysis.endedAt }),
+    ...(analysis.durationMs !== undefined && { durationMs: analysis.durationMs }),
+  };
+}
+
+async function listClaudeRefs(): Promise<SessionFileRef[]> {
   const dirs = await resolveProjectsDirs();
-  const refs = (await listSessionFiles(dirs)).slice(0, limit);
-  const items: SessionListItem[] = [];
+  return listSessionFiles(dirs);
+}
+
+/**
+ * List Codex rollout files. `resolveCodexHome` is called per-request (not
+ * cached at module load) so tests can override `CODEX_HOME` via
+ * `process.env` the same way `resolveProjectsDirs` picks up
+ * `CLAUDE_CONFIG_DIR` per-request. A missing `~/.codex` yields `[]`, not an
+ * error — `listCodexSessionFiles` already treats missing dirs as empty.
+ */
+async function listCodexRefs(): Promise<CodexSessionFileRef[]> {
+  const refs = await listCodexSessionFiles(resolveCodexHome(process.env));
+  // A real ~/.codex can hold both a live and an archived rollout for the same
+  // conversation; keep one ref per session (live wins, then newest mtime) so
+  // the list has no duplicate sessionIds and detail lookups are deterministic.
+  const bySession = new Map<string, CodexSessionFileRef>();
+  for (const ref of refs) {
+    const existing = bySession.get(ref.sessionId);
+    if (
+      existing === undefined ||
+      (existing.archived && !ref.archived) ||
+      (existing.archived === ref.archived && ref.mtimeMs > existing.mtimeMs)
+    ) {
+      bySession.set(ref.sessionId, ref);
+    }
+  }
+  return refs.filter((ref) => bySession.get(ref.sessionId) === ref);
+}
+
+async function claudeListItems(): Promise<{ item: ClaudeSessionListItem; mtimeMs: number }[]> {
+  const refs = await listClaudeRefs();
+  const out: { item: ClaudeSessionListItem; mtimeMs: number }[] = [];
   for (const ref of refs) {
     try {
-      items.push(toListItem(await analyzeCached(ref), ref));
+      out.push({ item: toListItem(await analyzeCached(ref), ref), mtimeMs: ref.mtimeMs });
     } catch {
       // Unreadable session — skip rather than failing the whole list.
     }
   }
-  return items;
+  return out;
+}
+
+async function codexListItems(): Promise<{ item: CodexSessionListItem; mtimeMs: number }[]> {
+  const refs = await listCodexRefs();
+  const out: { item: CodexSessionListItem; mtimeMs: number }[] = [];
+  for (const ref of refs) {
+    try {
+      const analysis = await analyzeCodexCached(ref);
+      if (analysis === undefined) continue; // legacy/empty format — not listable.
+      out.push({ item: toCodexListItem(analysis, ref), mtimeMs: ref.mtimeMs });
+    } catch {
+      // Unreadable session — skip rather than failing the whole list.
+    }
+  }
+  return out;
+}
+
+/** `"all"` merges both harnesses; omitted defaults to Claude-only. */
+export type SessionSourceFilter = SessionSource | "all";
+
+/**
+ * List sessions for one or both harnesses, newest first (by file mtime —
+ * both discovery functions already sort that way, and merging preserves it).
+ * `"all"` merges both, applying `limit` once *after* the merge so the cutoff
+ * reflects true recency across sources rather than truncating each source
+ * independently. Omitted `source` stays Claude-only so pre-Codex clients
+ * (notably the web UI until it grows source-aware routing) see unchanged
+ * behavior; they must opt in with `"all"`.
+ */
+export async function listSessions(
+  limit: number,
+  source: SessionSourceFilter = "claude-code",
+): Promise<AnySessionListItem[]> {
+  if (source === "claude-code") {
+    return (await claudeListItems())
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, limit)
+      .map((r) => r.item);
+  }
+  if (source === "codex") {
+    return (await codexListItems())
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, limit)
+      .map((r) => r.item);
+  }
+  const [claude, codex] = await Promise.all([claudeListItems(), codexListItems()]);
+  return [...claude, ...codex]
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, limit)
+    .map((r) => r.item);
 }
 
 async function findRef(
   projectDirName: string,
   sessionId: string,
 ): Promise<SessionFileRef | undefined> {
-  const dirs = await resolveProjectsDirs();
-  const refs = await listSessionFiles(dirs);
+  const refs = await listClaudeRefs();
   return refs.find((r) => r.projectDirName === projectDirName && r.sessionId === sessionId);
 }
 
@@ -150,6 +343,28 @@ export async function getSession(
   if (ref === undefined) return undefined;
   try {
     return await analyzeCached(ref);
+  } catch {
+    return undefined;
+  }
+}
+
+async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | undefined> {
+  const refs = await listCodexRefs();
+  return refs.find((r) => r.sessionId === sessionId);
+}
+
+/**
+ * Codex session detail, by session id alone (Codex has no project-dir
+ * concept to scope by). Returns `undefined` for an unknown id *or* a
+ * legacy/empty-format transcript — both surface as a 404 in `app.ts`.
+ */
+export async function getCodexSession(
+  sessionId: string,
+): Promise<CodexSessionAnalysis | undefined> {
+  const ref = await findCodexRef(sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    return await analyzeCodexCached(ref);
   } catch {
     return undefined;
   }

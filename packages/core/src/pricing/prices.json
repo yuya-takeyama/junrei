@@ -1,6 +1,6 @@
 {
   "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-  "fetchedAt": "2026-07-08T20:31:02.152Z",
+  "fetchedAt": "2026-07-09T09:53:17.448Z",
   "models": {
     "claude-haiku-4-5-20251001": {
       "input_cost_per_token": 0.000001,
@@ -217,6 +217,187 @@
       "input_cost_per_token": 0.000015,
       "output_cost_per_token": 0.000075
     },
+    "gpt-5": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.1": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.1-2025-11-13": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.1-chat-latest": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.2": {
+      "input_cost_per_token": 0.00000175,
+      "output_cost_per_token": 0.000014,
+      "cache_read_input_token_cost": 1.75e-7
+    },
+    "gpt-5.2-2025-12-11": {
+      "input_cost_per_token": 0.00000175,
+      "output_cost_per_token": 0.000014,
+      "cache_read_input_token_cost": 1.75e-7
+    },
+    "gpt-5.2-chat-latest": {
+      "input_cost_per_token": 0.00000175,
+      "output_cost_per_token": 0.000014,
+      "cache_read_input_token_cost": 1.75e-7
+    },
+    "gpt-5.3-chat-latest": {
+      "input_cost_per_token": 0.00000175,
+      "output_cost_per_token": 0.000014,
+      "cache_read_input_token_cost": 1.75e-7
+    },
+    "gpt-5.2-pro": {
+      "input_cost_per_token": 0.000021,
+      "output_cost_per_token": 0.000168
+    },
+    "gpt-5.2-pro-2025-12-11": {
+      "input_cost_per_token": 0.000021,
+      "output_cost_per_token": 0.000168
+    },
+    "gpt-5.5": {
+      "input_cost_per_token": 0.000005,
+      "output_cost_per_token": 0.00003,
+      "cache_read_input_token_cost": 5e-7
+    },
+    "gpt-5.5-2026-04-23": {
+      "input_cost_per_token": 0.000005,
+      "output_cost_per_token": 0.00003,
+      "cache_read_input_token_cost": 5e-7
+    },
+    "gpt-5.5-pro": {
+      "input_cost_per_token": 0.00003,
+      "output_cost_per_token": 0.00018,
+      "cache_read_input_token_cost": 0.000003
+    },
+    "gpt-5.5-pro-2026-04-23": {
+      "input_cost_per_token": 0.00003,
+      "output_cost_per_token": 0.00018,
+      "cache_read_input_token_cost": 0.000003
+    },
+    "gpt-5.4": {
+      "input_cost_per_token": 0.0000025,
+      "output_cost_per_token": 0.000015,
+      "cache_read_input_token_cost": 2.5e-7
+    },
+    "gpt-5.4-2026-03-05": {
+      "input_cost_per_token": 0.0000025,
+      "output_cost_per_token": 0.000015,
+      "cache_read_input_token_cost": 2.5e-7
+    },
+    "gpt-5.4-pro": {
+      "input_cost_per_token": 0.00003,
+      "output_cost_per_token": 0.00018,
+      "cache_read_input_token_cost": 0.000003
+    },
+    "gpt-5.4-pro-2026-03-05": {
+      "input_cost_per_token": 0.00003,
+      "output_cost_per_token": 0.00018,
+      "cache_read_input_token_cost": 0.000003
+    },
+    "gpt-5.4-mini": {
+      "input_cost_per_token": 7.5e-7,
+      "output_cost_per_token": 0.0000045,
+      "cache_read_input_token_cost": 7.5e-8
+    },
+    "gpt-5.4-mini-2026-03-17": {
+      "input_cost_per_token": 7.5e-7,
+      "output_cost_per_token": 0.0000045,
+      "cache_read_input_token_cost": 7.5e-8
+    },
+    "gpt-5.4-nano": {
+      "input_cost_per_token": 2e-7,
+      "output_cost_per_token": 0.00000125,
+      "cache_read_input_token_cost": 2e-8
+    },
+    "gpt-5.4-nano-2026-03-17": {
+      "input_cost_per_token": 2e-7,
+      "output_cost_per_token": 0.00000125,
+      "cache_read_input_token_cost": 2e-8
+    },
+    "gpt-5-pro": {
+      "input_cost_per_token": 0.000015,
+      "output_cost_per_token": 0.00012
+    },
+    "gpt-5-pro-2025-10-06": {
+      "input_cost_per_token": 0.000015,
+      "output_cost_per_token": 0.00012
+    },
+    "gpt-5-2025-08-07": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5-chat": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5-chat-latest": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5-codex": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.1-codex": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.1-codex-max": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5.1-codex-mini": {
+      "input_cost_per_token": 2.5e-7,
+      "output_cost_per_token": 0.000002,
+      "cache_read_input_token_cost": 2.5e-8
+    },
+    "gpt-5.2-codex": {
+      "input_cost_per_token": 0.00000175,
+      "output_cost_per_token": 0.000014,
+      "cache_read_input_token_cost": 1.75e-7
+    },
+    "gpt-5.3-codex": {
+      "input_cost_per_token": 0.00000175,
+      "output_cost_per_token": 0.000014,
+      "cache_read_input_token_cost": 1.75e-7
+    },
+    "gpt-5-mini": {
+      "input_cost_per_token": 2.5e-7,
+      "output_cost_per_token": 0.000002,
+      "cache_read_input_token_cost": 2.5e-8
+    },
+    "gpt-5-mini-2025-08-07": {
+      "input_cost_per_token": 2.5e-7,
+      "output_cost_per_token": 0.000002,
+      "cache_read_input_token_cost": 2.5e-8
+    },
+    "gpt-5-nano": {
+      "input_cost_per_token": 5e-8,
+      "output_cost_per_token": 4e-7,
+      "cache_read_input_token_cost": 5e-9
+    },
+    "gpt-5-nano-2025-08-07": {
+      "input_cost_per_token": 5e-8,
+      "output_cost_per_token": 4e-7,
+      "cache_read_input_token_cost": 5e-9
+    },
     "claude-3-haiku": {
       "input_cost_per_token": 2.5e-7,
       "output_cost_per_token": 0.00000125
@@ -299,6 +480,16 @@
       "output_cost_per_token": 0.000015,
       "cache_creation_input_token_cost": 0.00000375,
       "cache_read_input_token_cost": 3e-7
+    },
+    "gpt-5-search-api": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
+    },
+    "gpt-5-search-api-2025-10-14": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.00001,
+      "cache_read_input_token_cost": 1.25e-7
     }
   }
 }

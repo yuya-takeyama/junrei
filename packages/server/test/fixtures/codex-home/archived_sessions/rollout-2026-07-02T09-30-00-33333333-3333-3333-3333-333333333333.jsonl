@@ -1,0 +1,3 @@
+{"timestamp":"2026-07-02T09:30:00.000Z","type":"session_meta","payload":{"id":"33333333-3333-3333-3333-333333333333","cwd":"/Users/test/codex-proj","originator":"codex_exec","cli_version":"0.104.0","source":"exec"}}
+{"timestamp":"2026-07-02T09:30:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/test/codex-proj\n\nInjected project instructions."}]}}
+{"timestamp":"2026-07-02T09:30:01.500Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fallback prompt"}]}}
