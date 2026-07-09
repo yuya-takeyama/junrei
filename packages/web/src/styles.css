@@ -356,6 +356,37 @@ a.l0g:hover {
   border-bottom: 1px solid var(--bd);
 }
 
+/* Repo overview band — aggregate stat strip shown above the table when a
+   specific repo is selected (see RepoOverviewBand.tsx). Mirrors `.b-strip`/
+   `.b-cell`'s look (dotted separators, uppercase `.lbl`, `.big`/`.sub` value
+   pairs) without the hover/link affordance those carry — these cells aren't
+   navigable. */
+.rob-strip {
+  display: flex;
+  flex-wrap: wrap;
+  border-top: 1px dotted var(--bd);
+  border-bottom: 1px dotted var(--bd);
+}
+.rob-cell {
+  flex: 1;
+  padding: 14px 18px;
+  border-right: 1px dotted var(--bd);
+  min-width: 130px;
+}
+.rob-days {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 40px;
+}
+.rob-bar {
+  flex: 1;
+  max-width: 22px;
+  background: var(--amb);
+  opacity: 0.8;
+  min-height: 1px;
+}
+
 .mix {
   display: flex;
   height: 8px;

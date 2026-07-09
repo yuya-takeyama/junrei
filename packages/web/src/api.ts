@@ -22,6 +22,27 @@ export type ClaudeSessionListItem = Extract<SessionListItem, { source: "claude-c
 export type CodexSessionListItem = Extract<SessionListItem, { source: "codex" }>;
 export type ModelMixEntry = SessionListItem["modelMix"][number];
 
+type RepoOverviewResponse = InferResponseType<typeof client.api.overview.$get>;
+
+/** Repo-level rollup — see `@junrei/server`'s `overview.ts` for the exact aggregation. */
+export type RepoOverview = Extract<RepoOverviewResponse, { overview: unknown }>["overview"];
+
+/**
+ * Fetch the repo-level rollup for one repo key (a `repoRoot` path, or one of
+ * the fallback-bucket keys `repoFilterKey` assigns — see `overview.ts`'s doc
+ * comment on the server for the exact accepted forms). Throws on a non-2xx
+ * response — the session-list band this feeds treats any failure the same
+ * way (log + omit the band), so there's no separate "not found" case to
+ * distinguish here unlike `fetchRecordDetail`'s 404.
+ */
+export async function fetchRepoOverview(repo: string): Promise<RepoOverview> {
+  const res = await client.api.overview.$get({ query: { repo } });
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  const body = await res.json();
+  if (!("overview" in body)) throw new Error("malformed overview response");
+  return body.overview;
+}
+
 type ClaudeSessionResponse = InferResponseType<
   (typeof client.api.sessions)["claude-code"][":project"][":id"]["$get"]
 >;

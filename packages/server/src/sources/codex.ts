@@ -19,7 +19,13 @@ import {
   type TimelineEntry,
   type TokenTotals,
 } from "@junrei/core";
-import { type ModelMixEntry, mixFromUsageTree, type SessionListItemBase } from "./shared.js";
+import {
+  type ModelMixEntry,
+  mixFromUsageTree,
+  type SessionListItemBase,
+  sliceDelegation,
+  sliceUsageByModel,
+} from "./shared.js";
 
 /** Key identifying one Codex session — Codex has no project-dir concept, so the session id alone suffices. */
 export interface CodexSessionKey {
@@ -199,7 +205,7 @@ function toCodexListItem(
   ref: CodexSessionFileRef,
   forest: readonly SubagentNode[],
 ): CodexSessionListItem {
-  const { totalUsage } = computeCodexForestTotals(analysis, forest);
+  const { totalUsage, totalUsageByModel } = computeCodexForestTotals(analysis, forest);
   return {
     source: "codex",
     sessionId: analysis.sessionId,
@@ -220,6 +226,10 @@ function toCodexListItem(
     toolErrorCount: analysis.codex.toolErrorCount,
     sizeBytes: ref.sizeBytes,
     modelMix: codexModelMix(analysis, forest),
+    usageByModel: sliceUsageByModel(totalUsageByModel),
+    delegation: sliceDelegation(
+      computeDelegationSummary(analysis.usage, totalUsage, totalUsageByModel),
+    ),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(analysis.repoRoot !== undefined && { repoRoot: analysis.repoRoot }),
     ...(analysis.worktreeName !== undefined && { worktreeName: analysis.worktreeName }),
