@@ -782,6 +782,20 @@ button.tn:hover {
   font-size: 12px;
 }
 
+/* Per-model breakdown inside DetailPanel's 400px column — only rendered for
+   a node with >1 active model (see `ModelBreakdown` in DetailPanel.tsx). */
+.mbk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px 56px 56px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px dotted var(--bd);
+}
+.mbk.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+
 .cp-inline {
   background: transparent;
   border: none;

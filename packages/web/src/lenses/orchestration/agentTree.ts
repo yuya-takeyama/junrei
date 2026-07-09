@@ -40,6 +40,27 @@ export function primaryModel(byModel: readonly ModelUsageSummary[]): string | un
   return best?.model;
 }
 
+/**
+ * `byModel` entries with real activity — nonzero token volume or cost, cost
+ * descending. Filters out zero-usage placeholder entries such as Claude
+ * Code's "<synthetic>" harness-stub model, which can carry a `messageCount`
+ * without ever moving a token or a cent (see `computeUsage`'s zero-usage
+ * short-circuit in `@junrei/core`'s metrics.ts) — `messageCount` alone is
+ * NOT activity, or every node with a synthetic stub message would grow a
+ * spurious extra badge. Closely mirrors the zero-usage filter already used
+ * by ModelMixStrip/CostByModelChart/CostByModelTable (extended here to
+ * `totalTokensOf` so cache-only activity counts too); centralized here so
+ * the tree row and detail panel can render every model a node actually used
+ * (not just the single highest-cost one — see `primaryModel` above) without
+ * a subagent's SendMessage-induced model switch (sonnet → fable mid-run,
+ * say) hiding behind one badge.
+ */
+export function activeModels(byModel: readonly ModelUsageSummary[]): ModelUsageSummary[] {
+  return byModel
+    .filter((m) => totalTokensOf(m) > 0 || (m.costUsd ?? 0) > 0)
+    .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
+}
+
 export interface FlatTreeRow {
   id: string;
   depth: number;

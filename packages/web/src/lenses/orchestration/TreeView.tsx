@@ -1,17 +1,17 @@
 import type { AnySessionJson } from "../../api.js";
 import { formatTokens } from "../../format.js";
-import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import {
+  activeModels,
   flattenSubagents,
   MAIN_ID,
   nodeDurationMs,
-  primaryModel,
   type SelectedId,
   subtreeCost,
   totalTokensOf,
 } from "./agentTree.js";
 import { DetailPanel } from "./DetailPanel.js";
 import { formatCostPair, formatDurationCompact } from "./format.js";
+import { ModelBadges } from "./ModelBadges.js";
 
 interface Props {
   session: AnySessionJson;
@@ -26,7 +26,7 @@ interface Props {
  */
 export function TreeView({ session, selected, onSelect }: Props) {
   const rows = flattenSubagents(session.subagents);
-  const mainModel = primaryModel(session.usage.byModel);
+  const mainModels = activeModels(session.usage.byModel);
 
   return (
     <div className="hpad fx gap16 mt16">
@@ -44,11 +44,8 @@ export function TreeView({ session, selected, onSelect }: Props) {
           onClick={() => onSelect(MAIN_ID)}
         >
           <span className="fw6">main</span>
-          {mainModel !== undefined ? (
-            <span className="mbdg">
-              <span className={`mdot c-${classifyModel(mainModel)}`} />
-              {modelShortLabel(mainModel)}
-            </span>
+          {mainModels.length > 0 ? (
+            <ModelBadges models={mainModels} />
           ) : (
             <span className="mut fs11">—</span>
           )}
@@ -67,6 +64,7 @@ export function TreeView({ session, selected, onSelect }: Props) {
             row.node.returnedChars !== undefined
               ? ` · ↩${formatTokens(row.node.returnedChars)}`
               : "";
+          const models = activeModels(row.node.usage.byModel);
           return (
             <button
               type="button"
@@ -78,11 +76,8 @@ export function TreeView({ session, selected, onSelect }: Props) {
                 {row.prefix}
                 {row.node.description ?? row.node.agentType ?? row.node.agentId}
               </span>
-              {row.node.model !== undefined ? (
-                <span className="mbdg">
-                  <span className={`mdot c-${classifyModel(row.node.model)}`} />
-                  {modelShortLabel(row.node.model)}
-                </span>
+              {models.length > 0 ? (
+                <ModelBadges models={models} />
               ) : (
                 <span className="mut fs11">—</span>
               )}
