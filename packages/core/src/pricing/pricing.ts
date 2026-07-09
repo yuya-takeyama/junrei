@@ -76,6 +76,20 @@ export function estimateCostComponents(
   model: string,
   usage: TokenUsage,
 ): CostComponents | undefined {
+  // Zero tokens cost exactly $0 no matter what — even for a model with no
+  // pricing entry (e.g. Claude Code's "<synthetic>" harness stub messages,
+  // which carry no real usage). Short-circuit before the pricing lookup so
+  // callers see a priced, exact $0 instead of "unpriced" and don't flip
+  // costIsComplete false over a cost that provably doesn't exist.
+  if (
+    usage.inputTokens === 0 &&
+    usage.outputTokens === 0 &&
+    usage.cacheReadTokens === 0 &&
+    usage.cacheCreationTokens === 0
+  ) {
+    return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
+  }
+
   const pricing = findModelPricing(model);
   if (pricing?.input_cost_per_token === undefined || pricing.output_cost_per_token === undefined) {
     return undefined;
