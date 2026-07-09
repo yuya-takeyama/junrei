@@ -93,6 +93,29 @@ function MetaLine({ session }: { session: AnySessionJson }) {
 }
 
 /**
+ * Small pill linking a Codex sub-agent session back to its parent
+ * (`codex.parentThreadId`, always a full session in its own right — see
+ * `codex/orchestration.ts` in `@junrei/core`). Reuses the `.chip` style
+ * already used for the source-tab filter chips; `undefined` (renders
+ * nothing) for a non-sub-agent session, or when a sub-agent's parent isn't
+ * itself resolvable (its own rollout was deleted/archived away, or the
+ * linkage came from a schema variant with no parent id at all).
+ */
+function SubagentOfChip({ session }: { session: AnySessionJson }) {
+  if (session.source !== "codex" || session.codex.parentThreadId === undefined) return null;
+  const parentId = session.codex.parentThreadId;
+  return (
+    <Link
+      className="chip mt8"
+      to={sessionPath("codex", parentId)}
+      style={{ display: "inline-flex" }}
+    >
+      ↑ sub-agent of {shortenId(parentId)}
+    </Link>
+  );
+}
+
+/**
  * Shell shared by every session route: identity band with breadcrumb +
  * copyable session id, title block, session-level stat strip, then the
  * persistent lens tab bar, then the active lens's content — see
@@ -107,12 +130,16 @@ function MetaLine({ session }: { session: AnySessionJson }) {
  * segment (matching the sentinel `projectDirName` Codex list rows carry —
  * see `sessions.ts` on the server) is dispatched to the Codex detail
  * endpoint instead of a dedicated route, so every Codex session URL stays
- * `sessionPath("codex", id, lens)` like any other session link. Orchestration
- * and Files & skills are Claude-only endpoints that don't exist for Codex
- * (see api.ts) and are never reached for a Codex session — `CODEX_LENSES`
- * doesn't offer those tabs. Timeline and the record slide-over, by contrast,
- * ARE available for Codex (see `codex/timeline.ts` in `@junrei/core`): both
- * fetch through the same generic `:project/:id/timeline` /
+ * `sessionPath("codex", id, lens)` like any other session link. Files &
+ * skills is a Claude-only endpoint that doesn't exist for Codex (see api.ts)
+ * and is never reached for a Codex session — `CODEX_LENSES` doesn't offer
+ * that tab. Timeline, Orchestration, and the record slide-over, by
+ * contrast, ARE available for Codex: Orchestration renders the same
+ * `Orchestration` component for both sources (a Codex sub-agent is its own
+ * rollout file, not a sidecar, but `getCodexSession` on the server attaches
+ * the same `subagents`/`subagentCount` shape — see
+ * `codex/orchestration.ts` in `@junrei/core`); Timeline and the record
+ * slide-over fetch through the same generic `:project/:id/timeline` /
  * `:project/:id/record/:line` routes/components used for Claude, since the
  * server registers Codex-specific handlers ahead of those generic routes
  * (see app.ts) that return the exact same `TimelineEntry`/`RecordDetail`
@@ -202,6 +229,7 @@ export function SessionShell() {
                 {title}
               </h1>
               <MetaLine session={session} />
+              <SubagentOfChip session={session} />
             </div>
             <StatStrip session={session} />
           </>
@@ -234,10 +262,9 @@ export function SessionShell() {
             }}
           />
         )}
-        {error === null &&
-          session !== null &&
-          session.source === "claude-code" &&
-          lens === "orchestration" && <Orchestration session={session} />}
+        {error === null && session !== null && lens === "orchestration" && (
+          <Orchestration session={session} />
+        )}
         {error === null && session !== null && lens === "context" && (
           <ContextCost session={session} />
         )}

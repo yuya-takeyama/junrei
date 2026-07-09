@@ -112,7 +112,33 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   `GET /api/sessions/codex/:id/timeline` + `.../record/:line` (registered
   ahead of the generic `:project` routes, transcript cached by mtime like the
   Claude path), and reused as-is by the web's Timeline/RecordDetail
-  components via the same generic `:project/:id` fetch path — this PR
+  components via the same generic `:project/:id` fetch path (#31)
+- ✅ Sub-agent orchestration for Codex sessions: a Codex sub-agent is its own
+  rollout file (not a sidecar like Claude), linked via
+  `session_meta.source.subagent.thread_spawn` (`parent_thread_id`/`depth`/
+  `agent_nickname`/`agent_role`, tolerating the parentless `review`/`compact`
+  `SubAgentSource` variants and top-level-only schema versions) plus the
+  parent's own `collab_agent_spawn_end` events. `codex/orchestration.ts`'s
+  `buildCodexSubagentForest` assembles these into a Claude-compatible
+  `SubagentNode` forest per session; `getCodexSession` attaches it
+  (`subagents`/`subagentCount`) and recursively rolls up
+  `totalUsage`/`totalUsageByModel` across the whole tree at serve time
+  (Claude parity, cached per-file analyses never mutated). `listSessions`
+  excludes sub-agent sessions from the list (they surface inside their
+  parent's Orchestration lens, same as Claude sidecars, but stay directly
+  fetchable via `/api/sessions/codex/:id` for deep links) and reports the
+  real recursive `subagentCount` for parents. Web reuses the Orchestration
+  lens, StatStrip's Subagents cell, and the session-list SUB column
+  unchanged for both sources, branching only on: agent-drill-down links (→
+  the sub-agent's own session page, not a Claude-style `agent/:agentId`
+  route) and a "sub-agent of `<parent>`" chip on a Codex sub-agent's own
+  session page. Also fixed in passing: `base_instructions` can be
+  `{text: "..."}` on real Codex Desktop data, not a bare string — the old
+  strict-string schema silently degraded the WHOLE `session_meta` line to a
+  generic record, losing subagent linkage entirely — this PR
+- ⬜ Fork lineage (`forked_from_id`): parsed and retained on
+  `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
+  fork-tree UI exists, unlike the sub-agent forest above
 
 ## Later (post-v1)
 

@@ -34,6 +34,14 @@ export const codexSessionMetaPayloadSchema = z.looseObject({
   cwd: z.string().optional(),
   originator: z.string().optional(),
   cli_version: z.string().optional(),
+  /**
+   * Untyped here (validated separately by `codexSessionMetaSourceObjectSchema`
+   * — see below): on most sessions `source` is a plain string ("exec", ...),
+   * but sub-agent threads carry `{subagent: {thread_spawn: {...}}}`. Keeping
+   * this loose lets a non-object `source` (or any other shape) safely fail
+   * the dedicated sub-agent-source parse in `parser.ts` instead of rejecting
+   * the whole `session_meta` envelope.
+   */
   source: z.unknown().optional(),
   agent_nickname: z.string().optional(),
   agent_role: z.string().optional(),
@@ -41,11 +49,49 @@ export const codexSessionMetaPayloadSchema = z.looseObject({
   agent_type: z.string().optional(),
   agent_path: z.string().optional(),
   model_provider: z.string().optional(),
-  /** Large — presence is all `parser.ts` records, not the text itself. */
-  base_instructions: z.string().optional(),
+  /**
+   * Large — presence is all `parser.ts` records, not the text itself — so
+   * this is deliberately `z.unknown()` rather than `z.string()`: Codex
+   * Desktop (observed on real ~/.codex data, cli_version 0.128.0-alpha.1)
+   * sends this as `{text: "..."}`, not a bare string, and a strict
+   * `z.string()` here would fail validation for the WHOLE `session_meta`
+   * payload — degrading it to a generic `other` record and silently losing
+   * every other field on the line, including sub-agent linkage.
+   */
+  base_instructions: z.unknown().optional(),
   git: codexGitInfoSchema.optional(),
 });
 export type CodexSessionMetaPayload = z.infer<typeof codexSessionMetaPayloadSchema>;
+
+// ---------------------------------------------------------------------------
+// session_meta.source — sub-agent thread linkage (SubAgentSource enum
+// upstream: thread_spawn/review/compact). Only `thread_spawn` carries a
+// parent id; `review`/`compact` still mark the thread as a sub-agent, so
+// `parser.ts` treats presence of `source.subagent` (any variant) as
+// "this is a sub-agent thread" and only reads `thread_spawn` for linkage.
+// ---------------------------------------------------------------------------
+
+export const codexSubagentThreadSpawnSchema = z.looseObject({
+  parent_thread_id: z.string().optional(),
+  depth: z.number().optional(),
+  agent_path: z.string().nullable().optional(),
+  agent_nickname: z.string().optional(),
+  agent_role: z.string().optional(),
+});
+export type CodexSubagentThreadSpawn = z.infer<typeof codexSubagentThreadSpawnSchema>;
+
+export const codexSessionMetaSubagentSourceSchema = z.looseObject({
+  thread_spawn: codexSubagentThreadSpawnSchema.optional(),
+  review: z.unknown().optional(),
+  compact: z.unknown().optional(),
+});
+export type CodexSessionMetaSubagentSource = z.infer<typeof codexSessionMetaSubagentSourceSchema>;
+
+/** Parses `session_meta.source` when it's the sub-agent object shape (not the plain-string form most sessions use). */
+export const codexSessionMetaSourceObjectSchema = z.looseObject({
+  subagent: codexSessionMetaSubagentSourceSchema.optional(),
+});
+export type CodexSessionMetaSourceObject = z.infer<typeof codexSessionMetaSourceObjectSchema>;
 
 // ---------------------------------------------------------------------------
 // turn_context
@@ -283,6 +329,25 @@ export const codexEventThreadNameUpdatedSchema = z.looseObject({
 });
 export type CodexEventThreadNameUpdated = z.infer<typeof codexEventThreadNameUpdatedSchema>;
 
+/**
+ * Emitted on the PARENT's rollout when it spawns a sub-agent thread — the
+ * other side of `session_meta.source.subagent.thread_spawn` on the child's
+ * own rollout. Upstream also emits `collab_agent_spawn_begin`,
+ * `collab_agent_interaction_begin/end`, `collab_waiting_begin/end`,
+ * `collab_close_begin/end`, and `sub_agent_activity`; only `_end` carries the
+ * parent->child linkage we need, so the rest fall through to the generic
+ * `{kind: "other"}` case (tolerated, not modeled).
+ */
+export const codexEventCollabAgentSpawnEndSchema = z.looseObject({
+  type: z.literal("collab_agent_spawn_end"),
+  call_id: z.string().optional(),
+  sender_thread_id: z.string().optional(),
+  new_thread_id: z.string(),
+  new_agent_nickname: z.string().optional(),
+  new_agent_role: z.string().optional(),
+});
+export type CodexEventCollabAgentSpawnEnd = z.infer<typeof codexEventCollabAgentSpawnEndSchema>;
+
 /** `event_msg` inner-type discriminant -> schema, for `parser.ts`'s dispatch table. */
 export const codexEventMsgSchemasByType: Record<string, z.ZodType> = {
   token_count: codexEventTokenCountSchema,
@@ -294,6 +359,7 @@ export const codexEventMsgSchemasByType: Record<string, z.ZodType> = {
   turn_complete: codexEventTurnCompleteSchema,
   exec_command_end: codexEventExecCommandEndSchema,
   thread_name_updated: codexEventThreadNameUpdatedSchema,
+  collab_agent_spawn_end: codexEventCollabAgentSpawnEndSchema,
 };
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,31 @@ const EMPTY_FIXTURE = join(
   FIXTURES,
   "empty/rollout-2025-03-01T00-00-00-66666666-6666-6666-6666-666666666666.jsonl",
 );
+const SUBAGENT_DIR = join(FIXTURES, "sessions/2026/07/03");
+const PARENT_FIXTURE = join(
+  SUBAGENT_DIR,
+  "rollout-2026-07-03T09-00-00-77777777-7777-7777-7777-777777777777.jsonl",
+);
+const CHILD_FIXTURE = join(
+  SUBAGENT_DIR,
+  "rollout-2026-07-03T09-00-05-88888888-8888-8888-8888-888888888888.jsonl",
+);
+const GRANDCHILD_FIXTURE = join(
+  SUBAGENT_DIR,
+  "rollout-2026-07-03T09-00-07-99999999-9999-9999-9999-999999999999.jsonl",
+);
+const REVIEW_SUBAGENT_FIXTURE = join(
+  SUBAGENT_DIR,
+  "rollout-2026-07-03T09-00-09-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl",
+);
+const TOP_LEVEL_ONLY_FIXTURE = join(
+  SUBAGENT_DIR,
+  "rollout-2026-07-03T09-00-11-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl",
+);
+const OBJECT_BASE_INSTRUCTIONS_FIXTURE = join(
+  SUBAGENT_DIR,
+  "rollout-2026-07-03T09-00-13-cccccccc-cccc-cccc-cccc-cccccccccccc.jsonl",
+);
 
 describe("parseCodexTranscriptFile", () => {
   it("parses the current-format fixture into normalized records", async () => {
@@ -165,6 +190,119 @@ describe("parseCodexTranscriptFile", () => {
     expect(transcript.format).toBe("empty");
     expect(transcript.records).toEqual([]);
     expect(transcript.warnings).toEqual([]);
+  });
+});
+
+describe("sub-agent linkage (session_meta.source.subagent.thread_spawn)", () => {
+  it("does NOT mark a plain (non-subagent) session_meta as a sub-agent source", async () => {
+    const transcript = await parseCodexTranscriptFile(PARENT_FIXTURE);
+    const sessionMeta = transcript.records[0];
+    expect(sessionMeta).toMatchObject({
+      type: "sessionMeta",
+      isSubagentSource: false,
+    });
+    expect(sessionMeta).not.toHaveProperty("parentThreadId");
+    expect(sessionMeta).not.toHaveProperty("subagentDepth");
+  });
+
+  it("extracts parent_thread_id/depth/agent_nickname/agent_role from source.subagent.thread_spawn", async () => {
+    const transcript = await parseCodexTranscriptFile(CHILD_FIXTURE);
+    const sessionMeta = transcript.records[0];
+    expect(sessionMeta).toMatchObject({
+      type: "sessionMeta",
+      id: "88888888-8888-8888-8888-888888888888",
+      isSubagentSource: true,
+      parentThreadId: "77777777-7777-7777-7777-777777777777",
+      subagentDepth: 1,
+      agentNickname: "Aquinas",
+      agentRole: "explorer",
+    });
+  });
+
+  it("leaves subagentDepth undefined when thread_spawn omits it (grandchild fixture)", async () => {
+    const transcript = await parseCodexTranscriptFile(GRANDCHILD_FIXTURE);
+    const sessionMeta = transcript.records[0];
+    expect(sessionMeta).toMatchObject({
+      isSubagentSource: true,
+      parentThreadId: "88888888-8888-8888-8888-888888888888",
+      agentNickname: "Scout",
+      agentRole: "searcher",
+    });
+    expect(sessionMeta).not.toHaveProperty("subagentDepth");
+  });
+
+  it("marks a source.subagent.review thread as a sub-agent source with no parent id (SubAgentSource variant without thread_spawn)", async () => {
+    const transcript = await parseCodexTranscriptFile(REVIEW_SUBAGENT_FIXTURE);
+    const sessionMeta = transcript.records[0];
+    expect(sessionMeta).toMatchObject({ isSubagentSource: true });
+    expect(sessionMeta).not.toHaveProperty("parentThreadId");
+  });
+
+  it("reads top-level parent_thread_id/agent_nickname/agent_role when source carries no subagent object (other schema versions)", async () => {
+    const transcript = await parseCodexTranscriptFile(TOP_LEVEL_ONLY_FIXTURE);
+    const sessionMeta = transcript.records[0];
+    expect(sessionMeta).toMatchObject({
+      isSubagentSource: false,
+      parentThreadId: "77777777-7777-7777-7777-777777777777",
+      agentNickname: "TopLevelOnly",
+      agentRole: "reviewer",
+    });
+  });
+
+  // Regression test — observed on real ~/.codex data (Codex Desktop
+  // 0.128.0-alpha.1): base_instructions can be `{text: "..."}`, not a bare
+  // string. A strict `z.string()` for that field used to fail validation for
+  // the WHOLE session_meta payload, degrading it to a generic `other` record
+  // and silently losing every field on the line — including the sub-agent
+  // linkage this whole PR is about. See `base_instructions` in schema.ts.
+  it("still parses session_meta (and its sub-agent linkage) when base_instructions is an object, not a string", async () => {
+    const transcript = await parseCodexTranscriptFile(OBJECT_BASE_INSTRUCTIONS_FIXTURE);
+    const sessionMeta = transcript.records[0];
+    expect(sessionMeta).toMatchObject({
+      type: "sessionMeta",
+      id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      isSubagentSource: true,
+      parentThreadId: "77777777-7777-7777-7777-777777777777",
+      agentNickname: "ObjectInstructions",
+      agentRole: "explorer",
+      hasBaseInstructions: true,
+    });
+  });
+});
+
+describe("collab_agent_spawn_end event", () => {
+  it("normalizes collab_agent_spawn_end into a collabSpawnEnd event", async () => {
+    const transcript = await parseCodexTranscriptFile(PARENT_FIXTURE);
+    const spawnEnd = transcript.records.find((r) => r.line === 6);
+    expect(spawnEnd).toMatchObject({
+      type: "eventMsg",
+      event: {
+        kind: "collabSpawnEnd",
+        callId: "call_spawn_child",
+        newThreadId: "88888888-8888-8888-8888-888888888888",
+        newAgentNickname: "Aquinas",
+        newAgentRole: "explorer",
+      },
+    });
+  });
+
+  it("tolerates the other collab_* / sub_agent_activity event types generically", async () => {
+    const transcript = await parseCodexTranscriptFile(PARENT_FIXTURE);
+    const spawnBegin = transcript.records.find((r) => r.line === 5);
+    const waitingBegin = transcript.records.find((r) => r.line === 7);
+    const waitingEnd = transcript.records.find((r) => r.line === 8);
+    expect(spawnBegin).toMatchObject({
+      type: "eventMsg",
+      event: { kind: "other", rawType: "collab_agent_spawn_begin" },
+    });
+    expect(waitingBegin).toMatchObject({
+      type: "eventMsg",
+      event: { kind: "other", rawType: "collab_waiting_begin" },
+    });
+    expect(waitingEnd).toMatchObject({
+      type: "eventMsg",
+      event: { kind: "other", rawType: "collab_waiting_end" },
+    });
   });
 });
 

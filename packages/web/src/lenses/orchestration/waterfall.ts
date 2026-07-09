@@ -1,4 +1,4 @@
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 import { classifyModel } from "../../modelClass.js";
 import {
   displayName,
@@ -70,7 +70,7 @@ interface TimedItem {
  * — decided here rather than skipping the row, so every launched agent is
  * still visible for an audit).
  */
-export function buildWaterfallRows(session: SessionJson): {
+export function buildWaterfallRows(session: AnySessionJson): {
   rows: WaterfallRow[];
   span: { start: number; end: number } | undefined;
 } {
@@ -112,7 +112,13 @@ export function buildWaterfallRows(session: SessionJson): {
   // kind "agent" executions are the SAME runs as the subagent-tree lanes
   // above — including them again would draw every subagent twice. Only
   // non-agent background work (bash, preview-server) gets its own lane.
-  for (const t of session.taskExecutions.filter((t) => t.background && t.kind !== "agent")) {
+  // `taskExecutions` is Claude-only — Codex has no background-task concept,
+  // so its waterfall only ever gets "main" + "agent" lanes.
+  const backgroundTasks =
+    session.source === "claude-code"
+      ? session.taskExecutions.filter((t) => t.background && t.kind !== "agent")
+      : [];
+  for (const t of backgroundTasks) {
     items.push({
       key: `task:${t.taskId}`,
       label: `${t.name !== "" ? t.name : t.taskId} · bg task`,

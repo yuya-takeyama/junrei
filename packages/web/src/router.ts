@@ -1,9 +1,11 @@
 /**
  * Lens tabs shown inside a session shell (the persistent "band" + tab bar).
  * "turns" is Codex-only (per-turn model/duration/token table). Codex now
- * also gets "timeline" (see `codex/timeline.ts` in `@junrei/core`), but has
- * no subagent tree, files/skills, or orchestration concept, so a Codex
- * session shell shows overview/timeline/context/turns — see
+ * also gets "timeline" and "orchestration" (see `codex/orchestration.ts` in
+ * `@junrei/core` — a Codex sub-agent is its own rollout file, not a sidecar,
+ * but the Orchestration lens consumes the same `SubagentNode` forest shape
+ * either way), but still has no files/skills concept, so a Codex session
+ * shell shows overview/timeline/orchestration/context/turns — see
  * `CLAUDE_LENSES`/`CODEX_LENSES` below.
  */
 export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "turns";
@@ -36,8 +38,14 @@ export const CLAUDE_LENSES: readonly Lens[] = [
   "files",
 ];
 
-/** Tab bar for a Codex session shell — no subagent tree, orchestration, or files/skills data exists to show. */
-export const CODEX_LENSES: readonly Lens[] = ["overview", "timeline", "context", "turns"];
+/** Tab bar for a Codex session shell — Claude's tab position for "orchestration", no files/skills data exists to show. */
+export const CODEX_LENSES: readonly Lens[] = [
+  "overview",
+  "timeline",
+  "orchestration",
+  "context",
+  "turns",
+];
 
 function isLens(value: string | undefined): value is Lens {
   return value !== undefined && (LENSES as readonly string[]).includes(value);

@@ -16,8 +16,11 @@ interface Props {
  *
  * Cells are built as a list rather than hardcoded JSX so the last one's
  * right border can be dropped correctly regardless of which cells a given
- * source renders — Codex sessions render five cells (no Subagents: Codex has
- * no subagent tree), Claude Code sessions render six.
+ * source renders. Both sources render the same six cells now that Codex has
+ * a real sub-agent tree (see `codex/orchestration.ts` in `@junrei/core`) —
+ * the Subagents cell always renders (even at 0, styled muted like Claude's
+ * zero-subagent case) rather than being conditional on count, for the same
+ * minimal-branch reasoning as the rest of this component.
  */
 export function StatStrip({ session }: Props) {
   const contextHref = sessionPath(
@@ -110,7 +113,7 @@ export function StatStrip({ session }: Props) {
     );
   } else {
     cells.push(
-      <Cell key="compact" label="Compact / tool err" href={contextHref} last>
+      <Cell key="compact" label="Compact / tool err" href={contextHref}>
         <div className="big mt8">
           {session.compactions.length}
           <span className="mut" style={{ fontSize: "15px" }}>
@@ -119,6 +122,20 @@ export function StatStrip({ session }: Props) {
           </span>
         </div>
         <div className="sub">boundaries / tool</div>
+      </Cell>,
+    );
+    const nestedSubagents = Math.max(0, session.subagentCount - session.subagents.length);
+    cells.push(
+      <Cell
+        key="subagents"
+        label="Subagents"
+        href={sessionPath("codex", session.sessionId, "orchestration")}
+        last
+      >
+        <div className={session.subagentCount === 0 ? "big mt8 mut" : "big mt8"}>
+          {session.subagentCount}
+        </div>
+        <div className="sub">{nestedSubagents} nested</div>
       </Cell>,
     );
   }

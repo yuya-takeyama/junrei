@@ -203,3 +203,81 @@ describe("analyzeCodexSession", () => {
     expect(analysis.codex.rateLimits).toEqual({ primary: { used_percent: 10 } });
   });
 });
+
+describe("analyzeCodexSession — sub-agent orchestration", () => {
+  it("marks a plain (non-subagent) session as isSubagent: false, with no spawnedThreadIds", async () => {
+    const analysis = await analyzeFixture();
+    expect(analysis.codex.isSubagent).toBe(false);
+    expect(analysis.codex.parentThreadId).toBeUndefined();
+    expect(analysis.codex.spawnedThreadIds).toEqual([]);
+  });
+
+  it("collects collab_agent_spawn_end events into spawnedThreadIds (the parent's own rollout)", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/sessions/2026/07/03/rollout-2026-07-03T09-00-00-77777777-7777-7777-7777-777777777777.jsonl",
+      "77777777-7777-7777-7777-777777777777",
+    );
+    expect(analysis.codex.isSubagent).toBe(false);
+    expect(analysis.codex.spawnedThreadIds).toEqual([
+      {
+        threadId: "88888888-8888-8888-8888-888888888888",
+        callId: "call_spawn_child",
+        nickname: "Aquinas",
+        role: "explorer",
+        line: 6,
+        timestamp: "2026-07-03T09:00:05.000Z",
+      },
+    ]);
+  });
+
+  it("marks a sub-agent thread as isSubagent: true, with parentThreadId/agentRole/agentNickname/subagentDepth from source.subagent.thread_spawn", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/sessions/2026/07/03/rollout-2026-07-03T09-00-05-88888888-8888-8888-8888-888888888888.jsonl",
+      "88888888-8888-8888-8888-888888888888",
+    );
+    expect(analysis.codex.isSubagent).toBe(true);
+    expect(analysis.codex.parentThreadId).toBe("77777777-7777-7777-7777-777777777777");
+    expect(analysis.codex.subagentDepth).toBe(1);
+    expect(analysis.codex.agentNickname).toBe("Aquinas");
+    expect(analysis.codex.agentRole).toBe("explorer");
+    // This child is itself a parent to the grandchild fixture.
+    expect(analysis.codex.spawnedThreadIds).toEqual([
+      {
+        threadId: "99999999-9999-9999-9999-999999999999",
+        callId: "call_spawn_grandchild",
+        nickname: "Scout",
+        role: "searcher",
+        line: 4,
+        timestamp: "2026-07-03T09:00:07.000Z",
+      },
+    ]);
+  });
+
+  it("leaves subagentDepth undefined when the wire payload didn't carry one (grandchild fixture)", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/sessions/2026/07/03/rollout-2026-07-03T09-00-07-99999999-9999-9999-9999-999999999999.jsonl",
+      "99999999-9999-9999-9999-999999999999",
+    );
+    expect(analysis.codex.isSubagent).toBe(true);
+    expect(analysis.codex.parentThreadId).toBe("88888888-8888-8888-8888-888888888888");
+    expect(analysis.codex.subagentDepth).toBeUndefined();
+  });
+
+  it("marks a source.subagent.review thread as isSubagent: true even with no parentThreadId", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/sessions/2026/07/03/rollout-2026-07-03T09-00-09-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl",
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    );
+    expect(analysis.codex.isSubagent).toBe(true);
+    expect(analysis.codex.parentThreadId).toBeUndefined();
+  });
+
+  it("treats a top-level-only parentThreadId (no source.subagent object) as isSubagent: true", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/sessions/2026/07/03/rollout-2026-07-03T09-00-11-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl",
+      "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    );
+    expect(analysis.codex.isSubagent).toBe(true);
+    expect(analysis.codex.parentThreadId).toBe("77777777-7777-7777-7777-777777777777");
+  });
+});

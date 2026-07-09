@@ -18,9 +18,15 @@ export function sessionsListQuery(
   return { limit, source: tab };
 }
 
-/** Subagent-count cell text — Codex has no subagent tree, so "0" would misleadingly read as "checked, found none". */
+/**
+ * Subagent-count cell text — shows the real count for both harnesses now
+ * that Codex sub-agent threads have a real count too (see
+ * `codex/orchestration.ts` in `@junrei/core`); a literal "0" still reads
+ * as "checked, found none" rather than "not applicable", so both sources
+ * fall back to an em dash for the common no-delegation case instead.
+ */
 export function subagentCellText(item: SessionListItem): string {
-  return item.source === "codex" ? "—" : String(item.subagentCount);
+  return item.subagentCount > 0 ? String(item.subagentCount) : "—";
 }
 
 /** Compact per-row source label for the "All" tab's badge column. */

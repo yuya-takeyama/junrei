@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   analyzeCodexSession,
   analyzeSession,
+  buildCodexSubagentForest,
   buildCodexTimeline,
   buildSessionData,
   buildTimeline,
@@ -14,6 +15,8 @@ import {
   listCodexSessionFiles,
   listSessionFiles,
   loadSubagentSessionData,
+  type ModelUsageSummary,
+  mergeUsageByModel,
   parseCodexTranscriptFile,
   parseTranscriptFile,
   type RecordDetail,
@@ -26,6 +29,7 @@ import {
   type SubagentNode,
   subagentsDirFor,
   type TimelineEntry,
+  type TokenTotals,
 } from "@junrei/core";
 
 /** Per-model output-token totals (main session + all subagents, recursively). */
@@ -63,16 +67,21 @@ interface SessionListItemBase {
 }
 
 /**
- * `projectDirName` and `subagentCount` are conceptually Claude-only (Codex
- * has no project-dir munging and no subagent tree), but @junrei/web's
- * session-list UI (out of scope for this PR — see docs/roadmap.md) reads
- * both unconditionally without narrowing on `source`. Rather than making
- * them optional (which would force `string | undefined` through
- * `formatProject`/`sessionPath` call sites the web package isn't touched to
- * fix), `CodexSessionListItem` below fills sentinel values: `projectDirName:
- * "codex"` (the same literal segment the detail route uses, so it never
- * collides with a real munged Claude dir) and `subagentCount: 0`. PR3 (web
- * UI) should switch to branching on `source` and can drop this shim then.
+ * `projectDirName` is conceptually Claude-only (Codex has no project-dir
+ * munging), but @junrei/web's session-list UI reads it unconditionally
+ * without narrowing on `source`. Rather than making it optional (which would
+ * force `string | undefined` through `formatProject`/`sessionPath` call
+ * sites the web package isn't touched to fix), `CodexSessionListItem` below
+ * fills a sentinel value: `projectDirName: "codex"` (the same literal
+ * segment the detail route uses, so it never collides with a real munged
+ * Claude dir).
+ *
+ * `subagentCount` used to be a Codex sentinel (`0`, "no subagent concept")
+ * but Codex sub-agent threads (see `@junrei/core`'s `codex/orchestration.ts`)
+ * gave it a real meaning: the direct+recursive count of sub-agent threads
+ * this session spawned. Sub-agent sessions themselves are excluded from the
+ * list entirely (see `codexListItems`) — they surface inside their parent's
+ * Orchestration lens instead, same as Claude subagent sidecars.
  */
 export interface ClaudeSessionListItem extends SessionListItemBase {
   source: "claude-code";
@@ -84,8 +93,8 @@ export interface CodexSessionListItem extends SessionListItemBase {
   source: "codex";
   /** Sentinel — see the comment above `ClaudeSessionListItem`. */
   projectDirName: "codex";
-  /** Sentinel — Codex CLI sessions have no subagent concept. */
-  subagentCount: 0;
+  /** Direct+recursive count of sub-agent threads this session spawned — 0 for a session with none. */
+  subagentCount: number;
   /** True when the rollout file lives under `archived_sessions/` rather than `sessions/YYYY/MM/DD/`. */
   archived: boolean;
 }
@@ -97,31 +106,123 @@ export type AnySessionListItem = ClaudeSessionListItem | CodexSessionListItem;
 export type SessionListItem = AnySessionListItem;
 
 /**
- * Aggregate output tokens per model across the main transcript and every
- * subagent (recursively), so the session-list "model mix" bar reflects the
- * whole session, not just the top-level model.
+ * Aggregate output tokens per model across a main transcript's own usage and
+ * every node in a subagent/sub-agent forest (recursively) — shared by both
+ * harnesses' "model mix" computation (Claude's tree of sidecar subagents,
+ * Codex's tree of sub-agent rollouts), since a `SubagentNode` forest has the
+ * same shape either way (see `@junrei/core`'s `codex/orchestration.ts`).
  */
-export function computeModelMix(analysis: SessionAnalysis): ModelMixEntry[] {
+function mixFromUsageTree(
+  ownByModel: readonly { model: string; outputTokens: number }[],
+  forest: readonly SubagentNode[],
+): ModelMixEntry[] {
   const totals = new Map<string, number>();
   const addUsage = (byModel: readonly { model: string; outputTokens: number }[]) => {
     for (const m of byModel) {
       totals.set(m.model, (totals.get(m.model) ?? 0) + m.outputTokens);
     }
   };
-  addUsage(analysis.usage.byModel);
+  addUsage(ownByModel);
   const visit = (nodes: readonly SubagentNode[]) => {
     for (const node of nodes) {
       addUsage(node.usage.byModel);
       visit(node.children);
     }
   };
-  visit(analysis.subagents);
+  visit(forest);
   return [...totals].map(([model, outputTokens]) => ({ model, outputTokens }));
 }
 
-/** Codex has no subagent tree, so its "model mix" is just its own per-model usage. */
-function codexModelMix(analysis: CodexSessionAnalysis): ModelMixEntry[] {
-  return analysis.usage.byModel.map((m) => ({ model: m.model, outputTokens: m.outputTokens }));
+/**
+ * Aggregate output tokens per model across the main transcript and every
+ * subagent (recursively), so the session-list "model mix" bar reflects the
+ * whole session, not just the top-level model.
+ */
+export function computeModelMix(analysis: SessionAnalysis): ModelMixEntry[] {
+  return mixFromUsageTree(analysis.usage.byModel, analysis.subagents);
+}
+
+/** Same aggregation as `computeModelMix`, but over a Codex sub-agent forest — see `mixFromUsageTree`. */
+function codexModelMix(
+  analysis: CodexSessionAnalysis,
+  forest: readonly SubagentNode[],
+): ModelMixEntry[] {
+  return mixFromUsageTree(analysis.usage.byModel, forest);
+}
+
+/** Recursive node count of a subagent/sub-agent forest — Codex's real `subagentCount`. */
+function countForestNodes(nodes: readonly SubagentNode[]): number {
+  let count = 0;
+  const visit = (list: readonly SubagentNode[]) => {
+    for (const node of list) {
+      count += 1;
+      visit(node.children);
+    }
+  };
+  visit(nodes);
+  return count;
+}
+
+/**
+ * Sum every node's own token/cost totals across a subagent forest
+ * (recursively) — the Codex analog of the `subagentTotals` accumulator
+ * Claude's `analyzeSubagents` builds while walking sidecar transcripts.
+ * `costIsComplete` is AND-ed across the whole tree: any node with unpriced
+ * usage makes the aggregate incomplete too.
+ */
+function sumForestUsage(
+  nodes: readonly SubagentNode[],
+): TokenTotals & { costUsd: number; costIsComplete: boolean } {
+  const total = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+  let costUsd = 0;
+  let costIsComplete = true;
+  const visit = (list: readonly SubagentNode[]) => {
+    for (const node of list) {
+      total.inputTokens += node.usage.total.inputTokens;
+      total.outputTokens += node.usage.total.outputTokens;
+      total.cacheReadTokens += node.usage.total.cacheReadTokens;
+      total.cacheCreationTokens += node.usage.total.cacheCreationTokens;
+      costUsd += node.usage.total.costUsd;
+      if (!node.usage.total.costIsComplete) costIsComplete = false;
+      visit(node.children);
+    }
+  };
+  visit(nodes);
+  return { ...total, costUsd, costIsComplete };
+}
+
+/**
+ * Recompute `totalUsage`/`totalUsageByModel` for a Codex session as "this
+ * session's own usage + every sub-agent in its forest, recursively" — Claude
+ * parity (`analyzeSession` already bakes the same rollup into
+ * `ClaudeSessionAnalysis.totalUsage` at analysis time; Codex can't do that at
+ * analysis time because a sub-agent's rollout is a wholly separate file the
+ * single-session `analyzeCodexSession` never sees, so the rollup happens here
+ * instead, at serve time, over the already-cached per-session analyses —
+ * never mutating them). A forest-less session (`forest.length === 0`, the
+ * common case) is just `analysis.usage.total`/`analysis.usage.byModel`
+ * again — same values `analyzeCodexSession` already produced.
+ */
+function computeCodexForestTotals(
+  analysis: CodexSessionAnalysis,
+  forest: readonly SubagentNode[],
+): {
+  totalUsage: TokenTotals & { costUsd: number; costIsComplete: boolean };
+  totalUsageByModel: ModelUsageSummary[];
+} {
+  const childSum = sumForestUsage(forest);
+  const own = analysis.usage.total;
+  return {
+    totalUsage: {
+      inputTokens: own.inputTokens + childSum.inputTokens,
+      outputTokens: own.outputTokens + childSum.outputTokens,
+      cacheReadTokens: own.cacheReadTokens + childSum.cacheReadTokens,
+      cacheCreationTokens: own.cacheCreationTokens + childSum.cacheCreationTokens,
+      costUsd: own.costUsd + childSum.costUsd,
+      costIsComplete: own.costIsComplete && childSum.costIsComplete,
+    },
+    totalUsageByModel: mergeUsageByModel(analysis.usage.byModel, forest),
+  };
 }
 
 interface CacheEntry {
@@ -202,31 +303,41 @@ function toListItem(analysis: SessionAnalysis, ref: SessionFileRef): ClaudeSessi
   };
 }
 
+/**
+ * `forest` is this session's own sub-agent tree (built by the caller via
+ * `buildCodexSubagentForest` against the full Codex analysis pool). Feeds
+ * `subagentCount`, the `modelMix` bar, AND (Claude parity — see
+ * `computeCodexForestTotals`) the list row's own cost/token figures, so a
+ * parent's "Total cost" column in the session list already reflects what it
+ * spent on delegation, the same way Claude's list rows do.
+ */
 function toCodexListItem(
   analysis: CodexSessionAnalysis,
   ref: CodexSessionFileRef,
+  forest: readonly SubagentNode[],
 ): CodexSessionListItem {
+  const { totalUsage } = computeCodexForestTotals(analysis, forest);
   return {
     source: "codex",
     sessionId: analysis.sessionId,
     projectDirName: "codex",
-    subagentCount: 0,
+    subagentCount: countForestNodes(forest),
     archived: ref.archived,
     userTurnCount: analysis.userTurnCount,
     models: analysis.models,
-    totalCostUsd: analysis.totalUsage.costUsd,
-    costIsComplete: analysis.totalUsage.costIsComplete,
+    totalCostUsd: totalUsage.costUsd,
+    costIsComplete: totalUsage.costIsComplete,
     totalTokens:
-      analysis.totalUsage.inputTokens +
-      analysis.totalUsage.outputTokens +
-      analysis.totalUsage.cacheReadTokens +
-      analysis.totalUsage.cacheCreationTokens,
-    cacheReadTokens: analysis.totalUsage.cacheReadTokens,
+      totalUsage.inputTokens +
+      totalUsage.outputTokens +
+      totalUsage.cacheReadTokens +
+      totalUsage.cacheCreationTokens,
+    cacheReadTokens: totalUsage.cacheReadTokens,
     compactionCount: analysis.compactions.length,
     toolCallCount: analysis.codex.toolCallCount,
     toolErrorCount: analysis.codex.toolErrorCount,
     sizeBytes: ref.sizeBytes,
-    modelMix: codexModelMix(analysis),
+    modelMix: codexModelMix(analysis, forest),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(analysis.title !== undefined && { title: analysis.title }),
     ...(analysis.firstUserPrompt !== undefined && { firstUserPrompt: analysis.firstUserPrompt }),
@@ -280,17 +391,58 @@ async function claudeListItems(): Promise<{ item: ClaudeSessionListItem; mtimeMs
   return out;
 }
 
-async function codexListItems(): Promise<{ item: CodexSessionListItem; mtimeMs: number }[]> {
+interface CodexAnalyzedRef {
+  ref: CodexSessionFileRef;
+  analysis: CodexSessionAnalysis;
+}
+
+/**
+ * Every readable, current-format Codex analysis on this machine — the pool
+ * `buildCodexSubagentForest` needs to resolve a session's sub-agent tree
+ * (a sub-agent's own rollout can be arbitrarily far from its ancestor's file
+ * in mtime order, so building a forest for one session requires having
+ * analyzed all of them first). Legacy/empty-format and unreadable files are
+ * skipped, same as `codexListItems`/`getCodexSession` always did.
+ */
+async function listCodexAnalyzed(): Promise<CodexAnalyzedRef[]> {
   const refs = await listCodexRefs();
-  const out: { item: CodexSessionListItem; mtimeMs: number }[] = [];
+  const out: CodexAnalyzedRef[] = [];
   for (const ref of refs) {
     try {
       const analysis = await analyzeCodexCached(ref);
       if (analysis === undefined) continue; // legacy/empty format — not listable.
-      out.push({ item: toCodexListItem(analysis, ref), mtimeMs: ref.mtimeMs });
+      out.push({ ref, analysis });
     } catch {
       // Unreadable session — skip rather than failing the whole list.
     }
+  }
+  return out;
+}
+
+/**
+ * Sub-agent sessions (`codex.isSubagent`) are excluded from the list — they
+ * surface inside their parent's Orchestration lens instead, same as Claude
+ * subagent sidecars never appear in the top-level session list either. They
+ * stay directly fetchable via `getCodexSession` (deep links still work).
+ *
+ * Exclusion requires an actually-resolvable parent: `review`/`compact`
+ * sub-agent variants carry no parent id, and a `thread_spawn` parent's
+ * rollout can be deleted — hiding those would silently drop the session
+ * (and its cost) from every view, so they are listed like ordinary
+ * sessions instead.
+ */
+async function codexListItems(): Promise<{ item: CodexSessionListItem; mtimeMs: number }[]> {
+  const pool = await listCodexAnalyzed();
+  const analyses = pool.map((p) => p.analysis);
+  const poolIds = new Set(analyses.map((a) => a.sessionId));
+  const out: { item: CodexSessionListItem; mtimeMs: number }[] = [];
+  for (const { ref, analysis } of pool) {
+    const parentId = analysis.codex.parentThreadId;
+    const attachesToParent =
+      analysis.codex.isSubagent && parentId !== undefined && poolIds.has(parentId);
+    if (attachesToParent) continue;
+    const forest = buildCodexSubagentForest(analyses, analysis.sessionId);
+    out.push({ item: toCodexListItem(analysis, ref, forest), mtimeMs: ref.mtimeMs });
   }
   return out;
 }
@@ -357,17 +509,49 @@ async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | un
 }
 
 /**
+ * `CodexSessionAnalysis` plus its sub-agent tree — Claude parity: putting
+ * `subagents`/`subagentCount` directly on the analysis mirrors
+ * `ClaudeSessionAnalysis` (see `@junrei/core`'s `analyze.ts`), so the web's
+ * Orchestration lens can consume either session type with the same field
+ * names. `totalUsage`/`totalUsageByModel` are OVERRIDDEN from the base
+ * `CodexSessionAnalysis` values (see `computeCodexForestTotals`) to include
+ * every sub-agent recursively — the cached single-file analysis itself is
+ * never mutated, this is a fresh object built at serve time.
+ */
+export interface CodexSessionAnalysisWithSubagents extends CodexSessionAnalysis {
+  subagents: SubagentNode[];
+  subagentCount: number;
+}
+
+/**
  * Codex session detail, by session id alone (Codex has no project-dir
  * concept to scope by). Returns `undefined` for an unknown id *or* a
  * legacy/empty-format transcript — both surface as a 404 in `app.ts`.
+ *
+ * Works for both a top-level (parent) session AND a sub-agent session
+ * fetched directly by its own id (deep link) — either way, `subagents` is
+ * built from whatever further sub-agent threads chain back to THIS id, so a
+ * sub-agent that itself delegated further still shows its own children here.
  */
 export async function getCodexSession(
   sessionId: string,
-): Promise<CodexSessionAnalysis | undefined> {
-  const ref = await findCodexRef(sessionId);
-  if (ref === undefined) return undefined;
+): Promise<CodexSessionAnalysisWithSubagents | undefined> {
+  const pool = await listCodexAnalyzed();
+  const found = pool.find((p) => p.analysis.sessionId === sessionId);
+  if (found === undefined) return undefined;
   try {
-    return await analyzeCodexCached(ref);
+    const forest = buildCodexSubagentForest(
+      pool.map((p) => p.analysis),
+      sessionId,
+    );
+    const { totalUsage, totalUsageByModel } = computeCodexForestTotals(found.analysis, forest);
+    return {
+      ...found.analysis,
+      totalUsage,
+      totalUsageByModel,
+      subagents: forest,
+      subagentCount: countForestNodes(forest),
+    };
   } catch {
     return undefined;
   }

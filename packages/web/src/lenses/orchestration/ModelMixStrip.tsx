@@ -1,10 +1,10 @@
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 import { formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import { mainDelegatedSplit, totalTokensOf } from "./agentTree.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
 }
 
 /**

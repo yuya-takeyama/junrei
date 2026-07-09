@@ -1,4 +1,4 @@
-import type { SessionJson } from "../../api.js";
+import type { AnySessionJson } from "../../api.js";
 import { formatTokens } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import {
@@ -14,7 +14,7 @@ import { DetailPanel } from "./DetailPanel.js";
 import { formatCostPair, formatDurationCompact } from "./format.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
   selected: SelectedId;
   onSelect: (id: SelectedId) => void;
 }

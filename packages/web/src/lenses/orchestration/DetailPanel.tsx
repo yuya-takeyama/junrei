@@ -1,8 +1,8 @@
 import { Link } from "react-router";
-import type { SessionJson, SubagentNodeJson } from "../../api.js";
+import type { AnySessionJson, SubagentNodeJson } from "../../api.js";
 import { formatDuration, formatTime, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
-import { agentPath } from "../../router.js";
+import { agentPath, sessionPath } from "../../router.js";
 import {
   displayName,
   findSubagent,
@@ -15,7 +15,7 @@ import {
 } from "./agentTree.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
   selected: SelectedId;
 }
 
@@ -29,10 +29,18 @@ function ModelBadge({ model }: { model: string | undefined }) {
   );
 }
 
-function MainDetail({ session }: { session: SessionJson }) {
+function MainDetail({ session }: { session: AnySessionJson }) {
   const model = primaryModel(session.usage.byModel);
-  const toolCallCount = session.toolStats.reduce((sum, s) => sum + s.callCount, 0);
-  const toolErrorCount = session.toolStats.reduce((sum, s) => sum + s.errorCount, 0);
+  // Claude: per-tool-call stats (toolStats). Codex has no such breakdown —
+  // codex.toolCallCount/toolErrorCount already covers the whole main turn.
+  const toolCallCount =
+    session.source === "claude-code"
+      ? session.toolStats.reduce((sum, s) => sum + s.callCount, 0)
+      : session.codex.toolCallCount;
+  const toolErrorCount =
+    session.source === "claude-code"
+      ? session.toolStats.reduce((sum, s) => sum + s.errorCount, 0)
+      : session.codex.toolErrorCount;
 
   return (
     <>
@@ -68,7 +76,7 @@ function MainDetail({ session }: { session: SessionJson }) {
   );
 }
 
-function AgentDetail({ node, session }: { node: SubagentNodeJson; session: SessionJson }) {
+function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySessionJson }) {
   const durationMs = nodeDurationMs(node);
   const spawnedAt = node.launchedAt ?? node.startedAt;
   const spawnMeta = [
@@ -78,7 +86,15 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: Sessi
   ]
     .filter((p): p is string => p !== undefined)
     .join(" · ");
-  const detailHref = agentPath(session.projectDirName, session.sessionId, node.agentId);
+  // Claude subagents get their own dedicated shell (agent/:agentId — a
+  // sidecar transcript, not a session in its own right). A Codex sub-agent
+  // IS a full session (its own rollout file), so its "full detail" is just
+  // its own session page — `sessionPath("codex", agentId)` — rather than a
+  // separate agent route.
+  const detailHref =
+    session.source === "claude-code"
+      ? agentPath(session.projectDirName, session.sessionId, node.agentId)
+      : sessionPath("codex", node.agentId);
 
   return (
     <>

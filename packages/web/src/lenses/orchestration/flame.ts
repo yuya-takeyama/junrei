@@ -1,4 +1,4 @@
-import type { SessionJson, SubagentNodeJson } from "../../api.js";
+import type { AnySessionJson, SubagentNodeJson } from "../../api.js";
 import { classifyModel } from "../../modelClass.js";
 import {
   displayName,
@@ -35,11 +35,11 @@ function metricOfNode(node: SubagentNodeJson, metric: FlameMetric): number {
   return metric === "cost" ? subtreeCost(node) : subtreeTokens(node);
 }
 
-function metricOfMain(session: SessionJson, metric: FlameMetric): number {
+function metricOfMain(session: AnySessionJson, metric: FlameMetric): number {
   return metric === "cost" ? session.usage.total.costUsd : totalTokensOf(session.usage.total);
 }
 
-function rootTotal(session: SessionJson, metric: FlameMetric): number {
+function rootTotal(session: AnySessionJson, metric: FlameMetric): number {
   return metric === "cost" ? session.totalUsage.costUsd : totalTokensOf(session.totalUsage);
 }
 
@@ -59,7 +59,7 @@ interface Row2Item {
  * 100%-width span and stays x-aligned with row 2). Deeper nesting (depth 3+)
  * isn't shown — the design only specs 3 rows; see 13-orchestration.md.
  */
-export function buildFlameRows(session: SessionJson, metric: FlameMetric): FlameRows {
+export function buildFlameRows(session: AnySessionJson, metric: FlameMetric): FlameRows {
   const total = rootTotal(session, metric);
   const mainModel = primaryModel(session.usage.byModel);
 
