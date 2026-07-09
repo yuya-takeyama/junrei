@@ -46,8 +46,14 @@ plus per-session sidecar dirs (`<sessionUuid>/subagents/agent-*.jsonl` + `.meta.
   via `tool_use_id`; `is_error: null` treated as success).
 - Subagent execution tree: from `subagents/agent-*.jsonl` + `agent-*.meta.json`
   (`toolUseId` links to the parent's `tool_use` block; `spawnDepth` for nesting).
-  Each subagent node carries its own model, prompt, token/cost accounting, and its
-  transcript can be analyzed with the same pipeline recursively.
+  Some Claude Code versions (observed on 2.1.138) write meta.json without
+  `toolUseId`; the analyzer then recovers the link from the parent-side
+  `toolUseResult.agentId` (present for sync and async launches alike). The only
+  case left unlinked is a launch whose `tool_result` never landed in the parent
+  transcript (session interrupted mid-agent) — its return is honestly reported
+  as not captured. Each subagent node carries its own model, prompt, token/cost
+  accounting, and its transcript can be analyzed with the same pipeline
+  recursively.
 
 **Differentiators (from interview):**
 
