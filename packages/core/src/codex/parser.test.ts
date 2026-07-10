@@ -59,7 +59,6 @@ describe("parseCodexTranscriptFile", () => {
       type: "sessionMeta",
       line: 1,
       id: "11111111-1111-1111-1111-111111111111",
-      sessionId: "11111111-1111-1111-1111-111111111111",
       cwd: "/Users/test/codex-proj",
       originator: "codex_cli_rs",
       cliVersion: "0.55.0",
@@ -67,6 +66,8 @@ describe("parseCodexTranscriptFile", () => {
       hasBaseInstructions: false,
       git: { branch: "main", commitHash: "abc123" },
     });
+    // Older payloads (this fixture: cli_version 0.55.0) carry no `session_id`.
+    expect(sessionMeta).not.toHaveProperty("rootSessionId");
   });
 
   it("accepts the turn_started/task_complete/turn_complete wire aliases", async () => {
@@ -200,6 +201,8 @@ describe("sub-agent linkage (session_meta.source.subagent.thread_spawn)", () => 
     expect(sessionMeta).toMatchObject({
       type: "sessionMeta",
       isSubagentSource: false,
+      // A root session's `session_id` is its own id.
+      rootSessionId: "77777777-7777-7777-7777-777777777777",
     });
     expect(sessionMeta).not.toHaveProperty("parentThreadId");
     expect(sessionMeta).not.toHaveProperty("subagentDepth");
@@ -210,7 +213,12 @@ describe("sub-agent linkage (session_meta.source.subagent.thread_spawn)", () => 
     const sessionMeta = transcript.records[0];
     expect(sessionMeta).toMatchObject({
       type: "sessionMeta",
+      // `id` stays this thread's OWN id even though the wire payload also
+      // carries `session_id` = the root's id (kept as rootSessionId) —
+      // conflating them collapsed every thread of a conversation into one
+      // sessionId (duplicate session-list rows on real ~/.codex data).
       id: "88888888-8888-8888-8888-888888888888",
+      rootSessionId: "77777777-7777-7777-7777-777777777777",
       isSubagentSource: true,
       parentThreadId: "77777777-7777-7777-7777-777777777777",
       subagentDepth: 1,

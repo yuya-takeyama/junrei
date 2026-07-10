@@ -51,9 +51,18 @@ export interface CodexGitInfoNormalized {
 
 export interface CodexSessionMetaRecord extends CodexRecordBase {
   type: "sessionMeta";
+  /** This rollout's own thread id (matches the filename UUID) — THE session identity. */
   id: string;
-  /** `session_id` when present, else `id`. */
-  sessionId: string;
+  /**
+   * Top-level `session_id`, when the wire payload carries one — the ROOT
+   * session id of the conversation tree this thread belongs to. Equals `id`
+   * on a root session, but on a sub-agent thread it's the root ancestor's
+   * id, NOT this thread's own — so it must never be used as this rollout's
+   * identity (a session with N sub-agent threads would collapse into N+1
+   * "sessions" sharing one id; observed on real ~/.codex data as duplicate
+   * session-list rows). Use `id` for identity.
+   */
+  rootSessionId?: string;
   forkedFromId?: string;
   /**
    * Parent thread id, from whichever location the wire payload carries it —
@@ -306,7 +315,7 @@ function normalizeSessionMeta(
     line,
     type: "sessionMeta",
     id: p.id,
-    sessionId: p.session_id ?? p.id,
+    ...(p.session_id !== undefined && { rootSessionId: p.session_id }),
     hasBaseInstructions: p.base_instructions !== undefined,
     isSubagentSource: subagentSource.isSubagentSource,
     ...(timestamp !== undefined && { timestamp }),

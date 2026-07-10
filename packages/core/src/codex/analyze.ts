@@ -486,7 +486,13 @@ export function analyzeCodexSession(
 
   return {
     source: "codex",
-    sessionId: sessionMeta?.sessionId ?? ref.sessionId,
+    // Identity is the rollout's OWN id (meta `id` == filename UUID), never
+    // `rootSessionId`: on a sub-agent thread the latter is the root
+    // ancestor's id, and using it made every thread of one conversation
+    // claim the same sessionId — duplicate session-list rows, a forest
+    // builder that couldn't match parentThreadId (a thread id) against any
+    // analysis, and detail lookups resolving to an arbitrary thread.
+    sessionId: sessionMeta?.id ?? ref.sessionId,
     filePath: transcript.filePath,
     userTurnCount,
     models,

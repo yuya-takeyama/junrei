@@ -186,6 +186,19 @@ describe("listSessions (source filter + Codex merge)", () => {
     expect(copies[0] && "archived" in copies[0] && copies[0].archived).toBe(false);
   });
 
+  // Regression: real Codex Desktop rollouts stamp every sub-agent thread's
+  // session_meta with `session_id` = the ROOT session's id (the 77777777…
+  // fixtures mirror that). Treating that field as the thread's own identity
+  // made a depth-2 thread's parent unresolvable (so it escaped sub-agent
+  // exclusion) and surfaced it as an extra row carrying the ROOT's sessionId —
+  // the web's session list rendered duplicate React keys
+  // (`codex/codex/<id>`) for every such conversation.
+  it("never lists the same (source, sessionId) twice, even when sub-agent threads share the root's session_id", async () => {
+    const items = await listSessions(50, "all");
+    const keys = items.map((i) => `${i.source}:${i.sessionId}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
   it("source: 'codex' reports archived: true only for the archived_sessions fixture", async () => {
     const items = await listSessions(50, "codex");
     const archived = items.find((i) => i.sessionId === "33333333-3333-3333-3333-333333333333");
