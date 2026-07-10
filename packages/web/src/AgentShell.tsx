@@ -14,15 +14,16 @@ import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
 import { FirstPromptPanel } from "./lenses/FirstPromptPanel.js";
 import {
+  activeModels,
   displayName,
   findAgentPath,
   nodeDurationMs,
   spawnedByLabel,
   totalTokensOf,
 } from "./lenses/orchestration/agentTree.js";
+import { ModelBadges } from "./lenses/orchestration/ModelBadges.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
-import { classifyModel, modelShortLabel } from "./modelClass.js";
 import {
   agentPath,
   agentRecordPath,
@@ -33,16 +34,6 @@ import {
 } from "./router.js";
 import { Band } from "./shell/Band.js";
 import { LensTabs } from "./shell/LensTabs.js";
-
-function ModelBadge({ model }: { model: string | undefined }) {
-  if (model === undefined) return null;
-  return (
-    <span className="mbdg">
-      <span className={`mdot c-${classifyModel(model)}`} />
-      {modelShortLabel(model)}
-    </span>
-  );
-}
 
 interface Crumb {
   key: string;
@@ -371,7 +362,7 @@ export function AgentShell() {
                 <h1 className="ttl" style={{ fontSize: "21px" }}>
                   {displayName(node)}
                 </h1>
-                <ModelBadge model={node.model} />
+                <ModelBadges models={activeModels(node.usage.byModel)} />
               </div>
               <AgentMetaLine node={node} session={session} />
             </div>
