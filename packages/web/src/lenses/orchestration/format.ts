@@ -17,7 +17,7 @@ export function formatDurationCompact(ms: number): string {
   return `${seconds}s`;
 }
 
-/** "self/total" cost cell, e.g. "0.94/0.94", "17.29/23.41" — no $ sign, per the `.tn` grid spec. */
+/** "self/total" cost cell, e.g. "$0.94/$0.94", "$17.29/$23.41". */
 export function formatCostPair(self: number, total: number): string {
-  return `${self.toFixed(2)}/${total.toFixed(2)}`;
+  return `$${self.toFixed(2)}/$${total.toFixed(2)}`;
 }
