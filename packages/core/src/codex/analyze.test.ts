@@ -255,6 +255,12 @@ describe("analyzeCodexSession — sub-agent orchestration", () => {
       "../../test/fixtures/codex/sessions/2026/07/03/rollout-2026-07-03T09-00-05-88888888-8888-8888-8888-888888888888.jsonl",
       "88888888-8888-8888-8888-888888888888",
     );
+    // Identity regression: the fixture's session_meta carries `session_id` =
+    // the ROOT session's id (77777777…, as real Codex Desktop writes it);
+    // preferring it over the thread's own `id` made every thread of one
+    // conversation claim the root's sessionId — duplicate session-list rows
+    // and an unbuildable sub-agent forest.
+    expect(analysis.sessionId).toBe("88888888-8888-8888-8888-888888888888");
     expect(analysis.codex.isSubagent).toBe(true);
     expect(analysis.codex.parentThreadId).toBe("77777777-7777-7777-7777-777777777777");
     expect(analysis.codex.subagentDepth).toBe(1);
