@@ -21,7 +21,13 @@ interface Props {
  * a real sub-agent tree (see `codex/orchestration.ts` in `@junrei/core`) —
  * the Subagents cell always renders (even at 0, styled muted like Claude's
  * zero-subagent case) rather than being conditional on count, for the same
- * minimal-branch reasoning as the rest of this component.
+ * minimal-branch reasoning as the rest of this component. The Total-cost
+ * subline is likewise source-uniform: `totalUsage` folds in descendant
+ * threads for both sources, so the delegated split from `session.delegation`
+ * is the honest caption for either — a static "this session" label would
+ * misread a Codex parent whose total includes sub-agent threads. The est.
+ * marker on the dollar figure stays a `capsFor` concern (Codex costs are
+ * list-price estimates), independent of this split.
  */
 export function StatStrip({ session }: Props) {
   const ref = sessionRefOf(session);
@@ -37,14 +43,10 @@ export function StatStrip({ session }: Props) {
         {session.totalUsage.costIsComplete ? "" : "*"}
         {capsFor(session).costIsEstimated && <EstBadge />}
       </div>
-      {session.source === "claude-code" ? (
-        <div className="sub num">
-          {formatUsd(session.delegation.subagents.costUsd ?? 0)} delegated
-          {delegatedShare !== undefined && ` — ${delegatedShare}`}
-        </div>
-      ) : (
-        <div className="sub">this session</div>
-      )}
+      <div className="sub num">
+        {formatUsd(session.delegation.subagents.costUsd ?? 0)} delegated
+        {delegatedShare !== undefined && ` — ${delegatedShare}`}
+      </div>
     </Cell>,
   ];
 
