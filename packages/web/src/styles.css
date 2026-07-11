@@ -775,9 +775,10 @@ button.tool-hd {
 
 .tn {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 88px 108px 56px 56px;
+  grid-template-columns: minmax(220px, 1fr) 88px 108px 56px 56px;
   gap: 8px;
   align-items: center;
+  min-width: 520px;
   padding: 7px 12px;
   font-size: 12px;
   border-bottom: 1px dotted var(--bd);
@@ -801,6 +802,55 @@ button.tn:hover {
 .tn.on {
   background: var(--pan);
   box-shadow: inset 2px 0 0 var(--amb);
+}
+.tree-panel {
+  overflow-x: auto;
+}
+.tree-cell {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.tree-connectors {
+  align-self: stretch;
+  display: flex;
+  flex: 0 0 auto;
+}
+.tree-guide,
+.tree-branch {
+  position: relative;
+  align-self: stretch;
+  flex: 0 0 18px;
+}
+.tree-guide.has-line::before,
+.tree-branch::before,
+.tree-branch::after {
+  content: "";
+  position: absolute;
+  background: var(--bd);
+}
+.tree-guide.has-line::before,
+.tree-branch::before {
+  left: 8px;
+  width: 1px;
+}
+.tree-guide.has-line::before {
+  top: -7px;
+  bottom: -7px;
+}
+.tree-branch::before {
+  top: -7px;
+  bottom: -7px;
+}
+.tree-branch.last::before {
+  bottom: 50%;
+}
+.tree-branch::after {
+  top: calc(50% - 0.5px);
+  left: 8px;
+  width: 10px;
+  height: 1px;
 }
 .pan.f1 > .tn:last-child {
   border-bottom: 0;

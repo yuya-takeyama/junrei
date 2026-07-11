@@ -67,6 +67,11 @@ describe("flattenSubagents", () => {
       "│ └ lint-fixer",
       "└ doc-scanner",
     ]);
+    expect(rows.map((r) => [r.id, r.ancestorIsLast, r.isLast])).toEqual([
+      ["test-writer", [], false],
+      ["lint-fixer", [false], true],
+      ["doc-scanner", [], true],
+    ]);
   });
 });
 

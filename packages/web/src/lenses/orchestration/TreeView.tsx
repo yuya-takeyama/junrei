@@ -20,8 +20,8 @@ interface Props {
 }
 
 /**
- * Master-detail Tree view — left `.tn` grid (main + subagents, depth-first,
- * box-drawn) plus the right 400px selected-agent detail panel. See
+ * Master-detail Tree view — left `.tn` grid (main + subagents, depth-first)
+ * with CSS-drawn connectors, plus the right 400px selected-agent detail panel. See
  * design-spec/13-orchestration.md.
  */
 export function TreeView({ session, selected, onSelect }: Props) {
@@ -29,8 +29,8 @@ export function TreeView({ session, selected, onSelect }: Props) {
   const mainModels = activeModels(session.usage.byModel);
 
   return (
-    <div className="hpad fx gap16 mt16">
-      <div className="pan f1" style={{ minWidth: 0, padding: "6px 0" }}>
+    <div className="hpad fx gap16 mt16" style={{ alignItems: "flex-start" }}>
+      <div className="pan f1 tree-panel" style={{ minWidth: 0, padding: "6px 0" }}>
         <div className="tn hdr">
           <span className="lbl">Agent</span>
           <span className="lbl">Model</span>
@@ -72,9 +72,25 @@ export function TreeView({ session, selected, onSelect }: Props) {
               className={selected === row.id ? "tn on" : "tn"}
               onClick={() => onSelect(row.id)}
             >
-              <span style={{ paddingLeft: `${row.depth * 18}px` }} className="nowrap">
-                {row.prefix}
-                {row.node.description ?? row.node.agentType ?? row.node.agentId}
+              <span className="tree-cell">
+                <span className="tree-connectors" aria-hidden="true">
+                  {row.ancestorIsLast.map((ancestorIsLast, index) => {
+                    const lineage = row.ancestorIsLast
+                      .slice(0, index + 1)
+                      .map((isLast) => (isLast ? "last" : "more"))
+                      .join("-");
+                    return (
+                      <span
+                        className={ancestorIsLast ? "tree-guide" : "tree-guide has-line"}
+                        key={`${row.id}-${lineage}`}
+                      />
+                    );
+                  })}
+                  <span className={row.isLast ? "tree-branch last" : "tree-branch"} />
+                </span>
+                <span className="nowrap">
+                  {row.node.description ?? row.node.agentType ?? row.node.agentId}
+                </span>
               </span>
               {models.length > 0 ? (
                 <ModelBadges models={models} />

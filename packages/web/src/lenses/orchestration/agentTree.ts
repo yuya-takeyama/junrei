@@ -66,6 +66,10 @@ export interface FlatTreeRow {
   depth: number;
   /** Box-drawing prefix (├/│/└ + spacing), empty for the synthetic "main" row. */
   prefix: string;
+  /** Whether each ancestor is the final sibling in its own list, root-first. */
+  ancestorIsLast: readonly boolean[];
+  /** Whether this node is the final sibling in its own list. */
+  isLast: boolean;
   node: SubagentNodeJson;
   /** True when this node has at least one ancestor — used to prefix waterfall labels too. */
   nested: boolean;
@@ -89,6 +93,8 @@ export function flattenSubagents(nodes: readonly SubagentNodeJson[]): FlatTreeRo
         id: node.agentId,
         depth,
         prefix: buildPrefix(ancestorIsLast, isLast),
+        ancestorIsLast,
+        isLast,
         node,
         nested: depth > 1,
       });
