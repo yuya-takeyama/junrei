@@ -5,6 +5,7 @@ import {
   computeChipCounts,
   DEFAULT_CHIPS,
   isEntryVisible,
+  toggleChip,
 } from "./timelineFilters.js";
 
 const USER: TimelineEntry = { kind: "user", line: 1, text: "hi", truncated: false };
@@ -107,6 +108,38 @@ describe("computeChipCounts", () => {
       subagent: 1,
       error: 2,
       compaction: 1,
+    });
+  });
+});
+
+describe("toggleChip", () => {
+  it("focuses the clicked chip when every chip is enabled", () => {
+    expect(toggleChip(DEFAULT_CHIPS, "user")).toEqual({
+      user: true,
+      assistant: false,
+      tool: false,
+      subagent: false,
+      error: false,
+      compaction: false,
+    });
+  });
+
+  it("adds another chip after the initial focused selection", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "user");
+
+    expect(toggleChip(focused, "assistant")).toEqual({
+      ...focused,
+      assistant: true,
+    });
+  });
+
+  it("still removes an enabled chip from a partial selection", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "user");
+    const combined = toggleChip(focused, "assistant");
+
+    expect(toggleChip(combined, "user")).toEqual({
+      ...combined,
+      user: false,
     });
   });
 });

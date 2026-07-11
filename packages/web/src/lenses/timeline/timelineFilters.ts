@@ -25,6 +25,25 @@ export const DEFAULT_CHIPS: ChipState = {
 };
 
 /**
+ * Clicking a chip while every chip is enabled starts a focused selection.
+ * Once focused, subsequent clicks add or remove individual kinds normally.
+ */
+export function toggleChip(chips: ChipState, key: keyof ChipState): ChipState {
+  if (Object.values(chips).every(Boolean)) {
+    return {
+      user: key === "user",
+      assistant: key === "assistant",
+      tool: key === "tool",
+      subagent: key === "subagent",
+      error: key === "error",
+      compaction: key === "compaction",
+    };
+  }
+
+  return { ...chips, [key]: !chips[key] };
+}
+
+/**
  * Kinds included at the "minimal" dial stop — narrative-only: user turns,
  * assistant prose, subagent launches, and compaction breaks. Tool calls and
  * thinking are hidden. "user-only" further restricts to just `user`; "full"
