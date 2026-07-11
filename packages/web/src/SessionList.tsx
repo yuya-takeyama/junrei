@@ -153,8 +153,8 @@ export function SessionList() {
   return (
     <div>
       <Band
-        left={<span className="mono fs11 mut">{"// session recorder"}</span>}
-        right={<span className="mono fs11 mut">local · ~/.claude/projects</span>}
+        left={<span className="mono fs11 mut">{"// agent statistics analyzer"}</span>}
+        right={<span className="mono fs11 mut">local · ~/.claude · ~/.codex</span>}
       />
       <div className="fx ac jb hpad gap12" style={{ padding: "18px 28px 14px", flexWrap: "wrap" }}>
         <h1 className="ttl" style={{ fontSize: "20px" }}>
