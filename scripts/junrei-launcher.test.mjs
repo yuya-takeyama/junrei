@@ -8,6 +8,7 @@ import {
   findAvailablePort,
   isPortAvailable,
   normalPorts,
+  reserveDevPorts,
 } from "./junrei-launcher.mjs";
 
 test("findAvailablePort increments until its probe reports a free port", async () => {
@@ -55,6 +56,16 @@ test("isPortAvailable detects an IPv6 wildcard listener used by the API server",
     await new Promise((resolve) => server.close(resolve));
   }
   assert.equal(await isPortAvailable(address.port), true);
+});
+
+test("reserveDevPorts gives simultaneous launchers distinct port pairs", async () => {
+  const [first, second] = await Promise.all([reserveDevPorts(), reserveDevPorts()]);
+  try {
+    assert.notEqual(first.ports.serverPort, second.ports.serverPort);
+    assert.notEqual(first.ports.webPort, second.ports.webPort);
+  } finally {
+    await Promise.all([first.release(), second.release()]);
+  }
 });
 
 test("normalPorts honors explicit ports and maps the API port to the web proxy", () => {

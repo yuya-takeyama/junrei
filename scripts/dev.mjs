@@ -1,5 +1,5 @@
-import { allocateDevPorts, launchWorkspaceDev, printEndpoints } from "./junrei-launcher.mjs";
+import { launchWorkspaceDev, printEndpoints, reserveDevPorts } from "./junrei-launcher.mjs";
 
-const ports = await allocateDevPorts();
+const { ports, release } = await reserveDevPorts();
 printEndpoints("dev", ports);
-launchWorkspaceDev(ports);
+launchWorkspaceDev(ports, release);
