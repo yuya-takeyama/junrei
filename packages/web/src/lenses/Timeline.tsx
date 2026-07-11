@@ -9,6 +9,7 @@ import {
   type DetailDial,
   DIAL_STOPS,
   isEntryVisible,
+  toggleChip,
 } from "./timeline/timelineFilters.js";
 
 interface Props {
@@ -174,7 +175,7 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
               key={key}
               type="button"
               className={chips[key] ? "chip on" : "chip"}
-              onClick={() => setChips((prev) => ({ ...prev, [key]: !prev[key] }))}
+              onClick={() => setChips((prev) => toggleChip(prev, key))}
             >
               {tone === undefined ? (
                 <span>
