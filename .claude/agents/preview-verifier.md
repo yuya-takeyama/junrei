@@ -19,9 +19,10 @@ verifier, not a fixer: diagnose and report, never edit source files.
 
 - If the preview tools are deferred, load them ALL in one ToolSearch call
   (query "preview", max_results 20) — not one at a time.
-- Find running servers with `preview_list` first. Junrei dev servers (API on
-  7867, web on 5873) are usually already up — reuse them. Only `preview_start`
-  (config in `.claude/launch.json`) if nothing is running.
+- Find running servers with `preview_list` first and reuse the matching Junrei
+  Web server regardless of port. If nothing is running, launch `pnpm dev` from
+  the repository root; it prints and assigns isolated API/Web ports. Do not
+  assume 7867/5873 or manually select ports.
 - NEVER call `preview_stop`: the user watches the preview live and the servers
   must stay up after you finish.
 

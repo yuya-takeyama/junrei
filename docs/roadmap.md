@@ -70,6 +70,10 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   execution to cheaper models (haiku/sonnet/opus) per task, keep the expensive
   orchestrator for planning/judging; grounded in official docs (model-config,
   advisor tool, managed-agents multi-agent) and measured with Junrei itself
+- ✅ Isolated worktree development launcher: `pnpm dev` incrementally assigns
+  free API/Web ports and prints browser-ready URLs; `junrei-browser-test`
+  shares that contract between Codex in-app Browser checks and Claude Code's
+  `preview-verifier`
 
 ## v2 — Concept & IA redesign
 
