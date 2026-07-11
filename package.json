@@ -5,12 +5,13 @@
   "type": "module",
   "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/start.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test && node --test scripts/junrei-launcher.test.mjs && ruby scripts/validate-skills.rb"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",

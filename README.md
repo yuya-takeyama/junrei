@@ -20,12 +20,21 @@ Tooling is managed with [aqua](https://aquaproj.github.io/):
 ```sh
 aqua i -l
 pnpm install
-pnpm dev        # starts the API server and the Vite dev server
+pnpm dev        # starts the API server and Vite on incrementally selected free ports
 ```
 
-- Web UI (dev): http://localhost:5873 (override with `JUNREI_WEB_PORT`)
-- API server: http://localhost:7867 — `JUNREI_PORT` overrides; if the default
-  port is taken, an OS-assigned free port is used and printed on startup.
+`pnpm dev` starts from API port 7868 and Web port 5874, incrementing each until
+it finds a free port. It prints the resolved Web, API, and MCP URLs before the
+servers start, so agents can navigate to the exact Web URL without probing.
+
+Use `pnpm start` for the normal fixed-port mode (hot reload remains enabled):
+
+- Web UI: http://localhost:5873 (override with `JUNREI_WEB_PORT`)
+- API server: http://localhost:7867 (override with `JUNREI_PORT`)
+
+`JUNREI_SERVER_PORT` remains accepted as an API-port alias for existing Web
+proxy configuration. Both commands configure the Web proxy to use the resolved
+API port.
 
 ```sh
 pnpm typecheck

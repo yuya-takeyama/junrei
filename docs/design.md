@@ -117,8 +117,11 @@ Rationale:
 
 ### Port strategy
 
-`JUNREI_PORT` env var wins; otherwise try the default (7867) and fall back to an
-OS-assigned ephemeral port when taken. The server always prints the resolved URL.
+`pnpm start` uses API port 7867 and Web port 5873 by default; override them with
+`JUNREI_PORT` and `JUNREI_WEB_PORT`. `pnpm dev` is the concurrent-worktree mode:
+it searches from 7868/5874 upward for free API/Web ports and prints the resolved
+Web, API, and MCP URLs before starting the servers. The Vite proxy always uses
+the same resolved API port.
 
 ### Session log parsing notes (observed CC 2.1.138–2.1.202)
 
