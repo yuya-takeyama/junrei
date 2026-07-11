@@ -334,7 +334,7 @@ export function computeRepetitions(data: SessionData): RepetitionFinding[] {
   const failuresByKey = new Map<string, ToolCall[]>();
   for (const call of calls) {
     if (call.result?.isError !== true) continue;
-    const key = `${call.name} ${JSON.stringify(call.input)}`;
+    const key = `${call.name} ${JSON.stringify(call.input)}`;
     const list = failuresByKey.get(key) ?? [];
     list.push(call);
     failuresByKey.set(key, list);
