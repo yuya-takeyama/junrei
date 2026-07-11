@@ -14,8 +14,14 @@ const CLAUDE_FIXTURES_DIR = join(
 const CODEX_HOME = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/codex-home");
 
 // Git does not preserve mtimes, so a fresh checkout (CI) would give every
-// fixture the same checkout-time mtime. The merge-order tests below need a
-// deterministic Claude/Codex interleaving, so stamp it explicitly.
+// fixture the same checkout-time mtime. The list itself sorts by session
+// START time (`startedAt` from the transcript), but mtimes still matter in
+// two places the tests below exercise: the Claude adapter picks WHICH
+// transcripts to analyze for a page by a file-timestamp proxy
+// (min(birthtime, mtime) — see `startProxyMs` in sources/claude.ts), and
+// `listCodexRefs` breaks live/archived duplicates by mtime. Keep the Claude
+// stamps in the same relative order as the fixtures' `startedAt` values so
+// the proxy window never excludes a session the real order would include.
 const FIXTURE_MTIMES: Array<[string, number]> = [
   [
     join(
@@ -71,10 +77,9 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
   // Orchestration fixtures (see the "getCodexSession — sub-agent
   // orchestration" describe block below for the detailed forest/aggregation
   // assertions): 77777777 spawns 88888888
-  // (Aquinas, depth 1), which spawns 99999999 (Scout, depth 2). Stamped
-  // NEWER than every fixture above so the parent (77777777, the only one of
-  // the three that's listable — the sub-agents are excluded) sorts first in
-  // "all", without disturbing the interleaving asserted above.
+  // (Aquinas, depth 1), which spawns 99999999 (Scout, depth 2). Only the
+  // parent (77777777) is listable — the sub-agents are excluded — and its
+  // 2026-07-03 startedAt makes it the newest Codex row in "all".
   [
     join(
       CODEX_HOME,
@@ -97,8 +102,9 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
     1_767_194_200,
   ],
   // Orphaned sub-agent (thread_spawn parent 55555555 has no rollout in the
-  // pool): must be rescued into the list, not silently dropped. Stamped
-  // OLDEST so it appends to the end of the merged order asserted above.
+  // pool): must be rescued into the list, not silently dropped. Its
+  // 2026-07-01T08:00 startedAt is the oldest of the Codex fixtures, so it
+  // sorts last in the merged order asserted below.
   [
     join(
       CODEX_HOME,
@@ -106,15 +112,17 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
     ),
     1_767_193_100,
   ],
-  // Skill-injection fixture (core issue #27) — unrelated to the Claude/Codex
-  // interleaving under test here. Stamped OLDER than everything else so it
-  // appends after codex:66666666 without disturbing the asserted order above.
+  // Skill-injection fixture (core issue #27). Its transcript starts at
+  // 2026-07-09T04:00 — the NEWEST startedAt of every fixture — so its stamp
+  // must rank first among the Claude files too, or the proxy-ordered
+  // analysis window (limit=3 in the merge test below) would skip the very
+  // session the start-time order puts on page one.
   [
     join(
       CLAUDE_FIXTURES_DIR,
       "projects/-Users-test-proj/44444444-4444-4444-4444-444444444445.jsonl",
     ),
-    1_767_193_000,
+    1_767_193_520,
   ],
 ];
 
@@ -148,13 +156,16 @@ describe("listSessions (source filter + Codex merge)", () => {
   });
 
   it("source: 'codex' lists only Codex sessions, skipping the legacy-format fixture and excluding sub-agent sessions", async () => {
-    const items = await listSessions(50, "codex");
+    const { sessions: items, total } = await listSessions(50, "codex");
     // 11111111, 22222222, 33333333 (archived), 77777777 (parent), 66666666
     // (orphaned sub-agent, rescued) — 44444444 is legacy, skipped;
     // 88888888/99999999 (77777777's sub-agents) are excluded from the list —
     // they surface inside 77777777's own subagentCount/Orchestration data
     // instead, same as Claude sidecars.
     expect(items.length).toBe(5);
+    // `total` counts listable sessions, so legacy/sub-agent exclusions apply
+    // to it too — not the 8 rollout files on disk.
+    expect(total).toBe(5);
     for (const item of items) {
       expect(item.source).toBe("codex");
     }
@@ -170,7 +181,7 @@ describe("listSessions (source filter + Codex merge)", () => {
   });
 
   it("rescues a sub-agent whose parent rollout is missing into the list instead of dropping it", async () => {
-    const items = await listSessions(50, "codex");
+    const { sessions: items } = await listSessions(50, "codex");
     const orphan = items.find((i) => i.sessionId === "66666666-6666-6666-6666-666666666666");
     // Its thread_spawn parent (55555555…) has no rollout in the pool, so the
     // session would otherwise be invisible everywhere and its cost lost.
@@ -180,7 +191,7 @@ describe("listSessions (source filter + Codex merge)", () => {
   });
 
   it("dedups a session present both live and archived — live wins even when archived is newer", async () => {
-    const items = await listSessions(50, "codex");
+    const { sessions: items } = await listSessions(50, "codex");
     const copies = items.filter((i) => i.sessionId === "11111111-1111-1111-1111-111111111111");
     expect(copies).toHaveLength(1);
     expect(copies[0] && "archived" in copies[0] && copies[0].archived).toBe(false);
@@ -194,13 +205,13 @@ describe("listSessions (source filter + Codex merge)", () => {
   // the web's session list rendered duplicate React keys
   // (`codex/codex/<id>`) for every such conversation.
   it("never lists the same (source, sessionId) twice, even when sub-agent threads share the root's session_id", async () => {
-    const items = await listSessions(50, "all");
+    const { sessions: items } = await listSessions(50, "all");
     const keys = items.map((i) => `${i.source}:${i.sessionId}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("source: 'codex' reports archived: true only for the archived_sessions fixture", async () => {
-    const items = await listSessions(50, "codex");
+    const { sessions: items } = await listSessions(50, "codex");
     const archived = items.find((i) => i.sessionId === "33333333-3333-3333-3333-333333333333");
     const live = items.find((i) => i.sessionId === "11111111-1111-1111-1111-111111111111");
     expect(archived?.source).toBe("codex");
@@ -209,50 +220,69 @@ describe("listSessions (source filter + Codex merge)", () => {
   });
 
   it("source: 'claude-code' lists only Claude sessions (unchanged behavior)", async () => {
-    const items = await listSessions(50, "claude-code");
+    const { sessions: items, total } = await listSessions(50, "claude-code");
     // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture, #27).
     expect(items.length).toBe(4);
+    expect(total).toBe(4);
     for (const item of items) {
       expect(item.source).toBe("claude-code");
     }
   });
 
-  it('source "all" merges both sets, newest first by file mtime, limit applied after the merge', async () => {
-    // Fixture mtimes (see the test setup that touches these files) interleave
-    // Claude and Codex sessions: codex-77777777 (newest — the orchestration
-    // parent fixture) > codex-33333333(archived) > claude-33333333 >
-    // codex-22222222 > claude-22222222 > codex-11111111 > claude-11111111 >
-    // codex-66666666 (oldest of the interleaved set — the rescued orphan
-    // sub-agent) > claude-44444444…445 (the skill-injection fixture, stamped
-    // oldest of all so it doesn't disturb that interleaving).
+  it('source "all" merges both sets, newest first by session START time, limit and offset applied after the merge', async () => {
+    // The list sorts by each session's `startedAt` (first transcript
+    // timestamp), NOT by the stamped file mtimes: every Claude fixture
+    // starts on 2026-07-09 (44444444…445 at 04:00 — the newest of all,
+    // despite being the skill-injection fixture) while the Codex rollouts
+    // start 2026-07-01..03, so all Claude rows precede all Codex rows
+    // regardless of how the mtime stamps interleave the two sources.
     // 88888888/99999999 don't appear — they're 77777777's sub-agents,
     // excluded from the list.
     const all = await listSessions(50, "all");
-    expect(all.length).toBe(9);
-    expect(all.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+    expect(all.total).toBe(9);
+    expect(all.sessions.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "claude-code:44444444",
+      "claude-code:33333333",
+      "claude-code:22222222",
+      "claude-code:11111111",
       "codex:77777777",
       "codex:33333333",
-      "claude-code:33333333",
       "codex:22222222",
-      "claude-code:22222222",
       "codex:11111111",
-      "claude-code:11111111",
       "codex:66666666",
-      "claude-code:44444444",
     ]);
 
-    // limit=3 must cut the *merged* series, not take 3 from each source first.
+    // limit=3 must cut the *merged* series, not take 3 from each source
+    // first — and `total` still reports the full count, not the page's.
     const limited = await listSessions(3, "all");
-    expect(limited.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+    expect(limited.total).toBe(9);
+    expect(limited.sessions.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "claude-code:44444444",
+      "claude-code:33333333",
+      "claude-code:22222222",
+    ]);
+
+    // offset pages through the same merged series — this window ([3, 6))
+    // straddles the Claude/Codex boundary, which per-source offsetting
+    // would get wrong.
+    const paged = await listSessions(3, "all", 3);
+    expect(paged.total).toBe(9);
+    expect(paged.sessions.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "claude-code:11111111",
       "codex:77777777",
       "codex:33333333",
-      "claude-code:33333333",
     ]);
+
+    // An offset past the end yields an empty page but keeps `total`, so a
+    // stale deep-page URL can still render a working pager.
+    const past = await listSessions(3, "all", 100);
+    expect(past.sessions).toEqual([]);
+    expect(past.total).toBe(9);
   });
 
   it('source omitted means "all" (no back-compat Claude-only default)', async () => {
-    const items = await listSessions(50);
-    const all = await listSessions(50, "all");
+    const { sessions: items } = await listSessions(50);
+    const { sessions: all } = await listSessions(50, "all");
     expect(items.length).toBe(all.length);
     expect(items.some((i) => i.source === "codex")).toBe(true);
     expect(items.some((i) => i.source === "claude-code")).toBe(true);
@@ -262,8 +292,9 @@ describe("listSessions (source filter + Codex merge)", () => {
     const previous = process.env.CODEX_HOME;
     process.env.CODEX_HOME = join(CODEX_HOME, "does-not-exist");
     try {
-      const items = await listSessions(50, "codex");
-      expect(items).toEqual([]);
+      const page = await listSessions(50, "codex");
+      expect(page.sessions).toEqual([]);
+      expect(page.total).toBe(0);
     } finally {
       process.env.CODEX_HOME = previous;
     }

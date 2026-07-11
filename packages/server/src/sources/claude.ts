@@ -106,19 +106,48 @@ async function listClaudeRefs(): Promise<ClaudeSessionFileRef[]> {
   return listSessionFiles(dirs);
 }
 
-export async function claudeListItems(): Promise<
-  { item: ClaudeSessionListItem; mtimeMs: number }[]
-> {
-  const refs = await listClaudeRefs();
-  const out: { item: ClaudeSessionListItem; mtimeMs: number }[] = [];
+/**
+ * Session-start ordering key for a ref that hasn't been analyzed yet — file
+ * birth time when the filesystem tracks it (session files are created at
+ * session start), `mtimeMs` otherwise. Clamped to `mtimeMs` because a file
+ * can't have been written before it started (guards copied/synced files whose
+ * birth time is the copy time).
+ */
+function startProxyMs(ref: ClaudeSessionFileRef): number {
+  return ref.birthtimeMs > 0 ? Math.min(ref.birthtimeMs, ref.mtimeMs) : ref.mtimeMs;
+}
+
+/**
+ * List Claude sessions as `{ entries, total }` — entries carry `sortMs` (the
+ * session's start time in epoch ms, see `ListingAdapter` in sessions.ts).
+ *
+ * `max` bounds how many transcripts get ANALYZED, not just how many rows come
+ * back: refs are ordered by `startProxyMs` (no parsing needed) and analysis
+ * stops once `max` items exist, so a first page of 50 costs ~50 transcript
+ * parses instead of every session on the machine. `total` is the full ref
+ * count — cheap (stat-level) and what pagination needs. It can overcount by
+ * however many unreadable files got skipped; a short last page is the
+ * accepted trade for not parsing everything just to count.
+ */
+export async function claudeListItems(
+  max?: number,
+): Promise<{ entries: { item: ClaudeSessionListItem; sortMs: number }[]; total: number }> {
+  const refs = [...(await listClaudeRefs())].sort((a, b) => startProxyMs(b) - startProxyMs(a));
+  const entries: { item: ClaudeSessionListItem; sortMs: number }[] = [];
   for (const ref of refs) {
+    if (max !== undefined && entries.length >= max) break;
     try {
-      out.push({ item: toListItem(await analyzeCached(ref), ref), mtimeMs: ref.mtimeMs });
+      const analysis = await analyzeCached(ref);
+      const startedMs = analysis.startedAt === undefined ? NaN : Date.parse(analysis.startedAt);
+      entries.push({
+        item: toListItem(analysis, ref),
+        sortMs: Number.isNaN(startedMs) ? startProxyMs(ref) : startedMs,
+      });
     } catch {
       // Unreadable session — skip rather than failing the whole list.
     }
   }
-  return out;
+  return { entries, total: refs.length };
 }
 
 async function findRef(
@@ -164,6 +193,7 @@ async function findAgentRef(
       filePath,
       projectDirName,
       mtimeMs: stats.mtimeMs,
+      birthtimeMs: stats.birthtimeMs,
       sizeBytes: stats.size,
     };
   } catch {

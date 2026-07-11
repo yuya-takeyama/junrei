@@ -16,8 +16,9 @@ import { capsFor } from "./sourceCaps.js";
 export function sessionsListQuery(
   tab: SourceTab,
   limit: string,
-): { limit: string; source: SourceTab } {
-  return { limit, source: tab };
+  offset: string,
+): { limit: string; offset: string; source: SourceTab } {
+  return { limit, offset, source: tab };
 }
 
 /**

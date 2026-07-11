@@ -124,6 +124,12 @@ extract — so the missing signals shipped as one same-day PR series instead.
 - ✅ `get_repo_overview` MCP tool (shares `getRepoOverview` with the HTTP
   route) + tool-description cost semantics (`cacheWriteCostUsd` included in
   `costUsd`; `costIsComplete=false` = lower bound) (#43)
+- ✅ Session-list pagination + start-time sort — list order is now session
+  `startedAt` desc (was file mtime); `GET /api/sessions` gains `offset` and
+  returns `{ sessions, total }`; the Claude adapter analyzes only enough
+  transcripts to fill the requested page (file-birthtime start proxy picks
+  the candidates), so first paint stops parsing every session on disk; web
+  list loads 50/page (was 200 in one shot) with a `?page=` pager — this PR
 
 ## Codex CLI sessions
 

@@ -225,12 +225,17 @@ export function createMcpServer(): McpServer {
         source: z
           .enum(["claude-code", "codex", "all"])
           .optional()
-          .describe("Restrict to one harness; omit for both, merged and sorted by recency"),
+          .describe(
+            "Restrict to one harness; omit for both, merged and sorted by start time (newest first)",
+          ),
       },
     },
     // Omitted source = merged view, same default as the HTTP API — items
-    // self-describe via `source`.
-    async ({ limit, source }) => jsonResult(await listSessions(limit ?? 20, source ?? "all")),
+    // self-describe via `source`. The tool keeps returning a bare array
+    // (not the HTTP route's `{ sessions, total }` page envelope) so existing
+    // MCP consumers' parsing doesn't break.
+    async ({ limit, source }) =>
+      jsonResult((await listSessions(limit ?? 20, source ?? "all")).sessions),
   );
 
   server.registerTool(

@@ -8,6 +8,7 @@ import { classifyModel } from "./modelClass.js";
 import { RepoOverviewBand } from "./RepoOverviewBand.js";
 import {
   ALL_REPOS,
+  parseListPage,
   parseRepoParam,
   parseSourceTab,
   type SourceTab,
@@ -26,7 +27,13 @@ import {
 import { Band } from "./shell/Band.js";
 import { EstBadge } from "./shell/EstBadge.js";
 
-const LIST_LIMIT = "200";
+/**
+ * Rows per page. Kept small on purpose: the server only ANALYZES enough
+ * transcripts to fill the requested page (see `claudeListItems` in
+ * `@junrei/server`), so this number is what the first paint waits on —
+ * deeper pages stay reachable via the pager below the list.
+ */
+const LIST_LIMIT = 50;
 
 const SOURCE_TAB_LABEL: Record<SourceTab, string> = {
   all: "All",
@@ -83,15 +90,18 @@ function NumCell({
 
 export function SessionList() {
   const [sessions, setSessions] = useState<SessionListItem[] | null>(null);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [searchParams, setSearchParams] = useSearchParams();
-  // Persisted in the URL (`?source=`/`?repo=`) rather than component state so
-  // a reload or shared link keeps the selection — same pattern as the lens
-  // segment / `?record=` param elsewhere in the router (see router.ts).
+  // Persisted in the URL (`?source=`/`?repo=`/`?page=`) rather than component
+  // state so a reload or shared link keeps the selection — same pattern as
+  // the lens segment / `?record=` param elsewhere in the router (see
+  // router.ts).
   const sourceTab = parseSourceTab(searchParams.get("source"));
   const repoFilter = parseRepoParam(searchParams.get("repo"));
+  const page = parseListPage(searchParams.get("page"));
 
   useEffect(() => {
     setSessions(null);
@@ -104,11 +114,16 @@ export function SessionList() {
     // `listSessions` in sessions.ts), which would silently hide Codex rows
     // even on the "All" tab.
     client.api.sessions
-      .$get({ query: sessionsListQuery(sourceTab, LIST_LIMIT) })
+      .$get({
+        query: sessionsListQuery(sourceTab, String(LIST_LIMIT), String((page - 1) * LIST_LIMIT)),
+      })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
         const body = await res.json();
-        if (!stale) setSessions(body.sessions);
+        if (!stale) {
+          setSessions(body.sessions);
+          setTotal(body.total);
+        }
       })
       .catch((e: unknown) => {
         if (!stale) setError(String(e));
@@ -116,7 +131,7 @@ export function SessionList() {
     return () => {
       stale = true;
     };
-  }, [sourceTab]);
+  }, [sourceTab, page]);
 
   const repoOptions = useMemo(() => {
     if (sessions === null) return [];
@@ -150,6 +165,16 @@ export function SessionList() {
     setDateFilter(DATE_FILTER_CYCLE[(index + 1) % DATE_FILTER_CYCLE.length] ?? "all");
   };
 
+  const pageCount = Math.max(1, Math.ceil(total / LIST_LIMIT));
+  const goToPage = (next: number) => {
+    const params = new URLSearchParams(searchParams);
+    // Page 1 is the canonical no-param URL, same as the "all" source tab.
+    if (next <= 1) params.delete("page");
+    else params.set("page", String(next));
+    setSearchParams(params);
+    window.scrollTo(0, 0);
+  };
+
   return (
     <div>
       <Band
@@ -170,6 +195,10 @@ export function SessionList() {
                 const next = new URLSearchParams(searchParams);
                 if (tab === "all") next.delete("source");
                 else next.set("source", tab);
+                // Each tab is its own paginated series — a page number from
+                // the previous tab would land on arbitrary rows (or past the
+                // end) in the new one.
+                next.delete("page");
                 setSearchParams(next);
               }}
             >
@@ -210,7 +239,7 @@ export function SessionList() {
             aria-label="Search by title"
           />
           <span className="mono fs11 mut num nowrap">
-            {sessions === null ? "…" : filtered.length} sessions
+            {sessions === null ? "…" : `${String(filtered.length)} of ${String(total)}`} sessions
           </span>
         </div>
       </div>
@@ -289,6 +318,34 @@ export function SessionList() {
               <NumCell value={s.compactionCount} />
             </Link>
           ))}
+        </div>
+      )}
+
+      {sessions !== null && pageCount > 1 && (
+        <div className="fx ac gap12" style={{ justifyContent: "center", padding: "16px 28px" }}>
+          <button
+            type="button"
+            className="chip"
+            disabled={page <= 1}
+            onClick={() => {
+              goToPage(page - 1);
+            }}
+          >
+            ‹ prev
+          </button>
+          <span className="mono fs11 mut num nowrap">
+            page {page} / {pageCount}
+          </span>
+          <button
+            type="button"
+            className="chip"
+            disabled={page >= pageCount}
+            onClick={() => {
+              goToPage(page + 1);
+            }}
+          >
+            next ›
+          </button>
         </div>
       )}
     </div>
