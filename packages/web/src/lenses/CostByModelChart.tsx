@@ -4,6 +4,7 @@ import { formatUsd } from "../format.js";
 import { classifyModel, modelShortLabel } from "../modelClass.js";
 import { sessionPath, sessionRefOf } from "../router.js";
 import { EstBadge } from "../shell/EstBadge.js";
+import { capsFor } from "../sourceCaps.js";
 
 interface Props {
   session: AnySessionJson;
@@ -19,13 +20,11 @@ export function CostByModelChart({ session }: Props) {
   const totalCost = session.totalUsage.costUsd;
   const mainCost = session.usage.total.costUsd;
   const delegatedCost = Math.max(0, totalCost - mainCost);
-  // Codex has no delegation/orchestration concept (no subagent tree), so the
-  // "main / delegated" split and the "→ orchestration" link are meaningless
-  // there — both are Claude-only.
-  const isClaudeCode = session.source === "claude-code";
-  const orchestrationHref = isClaudeCode
-    ? sessionPath(sessionRefOf(session), "orchestration")
-    : undefined;
+  // Both sources have a real sub-agent tree now (Codex: collab threads folded
+  // in by `codex/orchestration.ts` in `@junrei/core`), so the main/delegated
+  // split and the "→ orchestration" link apply to both; at 0 subagents the
+  // Orchestration lens renders its own empty state, same as for Claude.
+  const orchestrationHref = sessionPath(sessionRefOf(session), "orchestration");
 
   return (
     <div className="hpad mt16">
@@ -33,21 +32,13 @@ export function CostByModelChart({ session }: Props) {
         <div className="chartcap">
           <span className="lbl">Cost by model</span>
           <span className="fx ac gap12">
-            {isClaudeCode ? (
-              <span className="mono fs11 mut">
-                main {formatUsd(mainCost)} · delegated {formatUsd(delegatedCost)}
-              </span>
-            ) : (
-              <span className="mono fs11 mut">
-                {formatUsd(totalCost)}
-                <EstBadge />
-              </span>
-            )}
-            {orchestrationHref !== undefined && (
-              <Link className="linkc mono fs11" to={orchestrationHref}>
-                → orchestration
-              </Link>
-            )}
+            <span className="mono fs11 mut">
+              main {formatUsd(mainCost)} · delegated {formatUsd(delegatedCost)}
+              {capsFor(session).costIsEstimated && <EstBadge />}
+            </span>
+            <Link className="linkc mono fs11" to={orchestrationHref}>
+              → orchestration
+            </Link>
           </span>
         </div>
         {rows.length === 0 ? (
