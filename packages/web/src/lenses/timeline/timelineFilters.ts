@@ -25,8 +25,18 @@ export const DEFAULT_CHIPS: ChipState = {
 };
 
 /**
- * Clicking a chip while every chip is enabled starts a focused selection.
- * Once focused, subsequent clicks add or remove individual kinds normally.
+ * Chip click state machine, with S = the set of enabled chips and k = the
+ * clicked chip:
+ *
+ *   1. S = all enabled        -> { k }         start a focused selection
+ *   2. k not in S             -> S + { k }     add to the selection
+ *   3. k in S and |S| >= 2    -> S - { k }     remove from the selection
+ *   4. S = { k }              -> all enabled   reset to the default view
+ *
+ * Rule 4 exists because an all-disabled timeline is meaningless; deselecting
+ * the last chip reads as "clear the filter", so it restores the default
+ * all-enabled state instead. This also makes the all-disabled state
+ * unreachable.
  */
 export function toggleChip(chips: ChipState, key: keyof ChipState): ChipState {
   if (Object.values(chips).every(Boolean)) {
@@ -40,7 +50,9 @@ export function toggleChip(chips: ChipState, key: keyof ChipState): ChipState {
     };
   }
 
-  return { ...chips, [key]: !chips[key] };
+  const next = { ...chips, [key]: !chips[key] };
+  if (!Object.values(next).some(Boolean)) return { ...DEFAULT_CHIPS };
+  return next;
 }
 
 /**

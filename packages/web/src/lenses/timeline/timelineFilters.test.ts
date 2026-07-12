@@ -142,4 +142,26 @@ describe("toggleChip", () => {
       user: false,
     });
   });
+
+  it("resets to all enabled when the sole enabled chip is clicked", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "user");
+
+    expect(toggleChip(focused, "user")).toEqual(DEFAULT_CHIPS);
+  });
+
+  it("round-trips: focus then re-click returns to the default state", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "tool");
+    const reset = toggleChip(focused, "tool");
+
+    expect(reset).toEqual(DEFAULT_CHIPS);
+    // A fresh click after the reset starts a new focused selection again.
+    expect(toggleChip(reset, "error")).toEqual({
+      user: false,
+      assistant: false,
+      tool: false,
+      subagent: false,
+      error: true,
+      compaction: false,
+    });
+  });
 });
