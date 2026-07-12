@@ -76,19 +76,25 @@ function kindAllowedByDial(kind: TimelineEntry["kind"], dial: DetailDial): boole
 
 /**
  * Chip visibility per entry. Only 6 chips exist (user/assistant/tool/
- * subagent/error/compaction) — `thinking` and `task-notification` have no
- * dedicated chip and are gated by the dial alone. A `tool-call` in error
- * status belongs to the "error" chip's domain, not "tool"'s, so toggling
- * "tool" off still leaves failed calls visible until "error" is also off.
+ * subagent/error/compaction), so kinds without a dedicated chip join the
+ * nearest domain: `thinking` is assistant output, and `task-notification`
+ * is the completion signal of a tool-launched background task. Every kind
+ * belongs to exactly one chip, so focusing a single chip never leaks other
+ * kinds. A `tool-call` in error status belongs to the "error" chip's
+ * domain, not "tool"'s, so toggling "tool" off still leaves failed calls
+ * visible until "error" is also off.
  */
 export function chipAllows(entry: TimelineEntry, chips: ChipState): boolean {
   switch (entry.kind) {
     case "user":
       return chips.user;
     case "assistant-text":
+    case "thinking":
       return chips.assistant;
     case "tool-call":
       return entry.status === "error" ? chips.error : chips.tool;
+    case "task-notification":
+      return chips.tool;
     case "subagent-launch":
       return chips.subagent;
     case "compaction":
@@ -117,6 +123,8 @@ export interface ChipCounts {
  * Live per-chip counts — computed over the *whole* session regardless of the
  * current dial/chip state, so the chip row always reads as "how many of
  * these exist in this session", not "how many currently pass the filter".
+ * Buckets mirror `chipAllows` exactly, so a chip's count is the number of
+ * entries it controls.
  */
 export function computeChipCounts(entries: readonly TimelineEntry[]): ChipCounts {
   const counts: ChipCounts = {
@@ -133,11 +141,15 @@ export function computeChipCounts(entries: readonly TimelineEntry[]): ChipCounts
         counts.user += 1;
         break;
       case "assistant-text":
+      case "thinking":
         counts.assistant += 1;
         break;
       case "tool-call":
         if (entry.status === "error") counts.error += 1;
         else counts.tool += 1;
+        break;
+      case "task-notification":
+        counts.tool += 1;
         break;
       case "subagent-launch":
         counts.subagent += 1;
