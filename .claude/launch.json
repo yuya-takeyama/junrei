@@ -12,25 +12,6 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@junrei/server", "dev"],
       "port": 7867
-    },
-    {
-      "name": "junrei-web-alt",
-      "runtimeExecutable": "env",
-      "runtimeArgs": [
-        "JUNREI_WEB_PORT=5874",
-        "JUNREI_SERVER_PORT=7868",
-        "pnpm",
-        "--filter",
-        "@junrei/web",
-        "dev"
-      ],
-      "port": 5874
-    },
-    {
-      "name": "junrei-server-alt",
-      "runtimeExecutable": "env",
-      "runtimeArgs": ["JUNREI_PORT=7868", "pnpm", "--filter", "@junrei/server", "dev"],
-      "port": 7868
     }
   ]
 }
