@@ -4,7 +4,9 @@ paths = Dir[".claude/skills/*/SKILL.md"]
 abort "No skills found under .claude/skills" if paths.empty?
 
 paths.each do |path|
-  frontmatter = File.read(path)[/\A---\s*\n(.*?)^---\s*$/m, 1]
+  # Explicit encoding: File.read defaults to the locale encoding, which is
+  # US-ASCII in locale-less shells (e.g. CI) and crashes on Japanese text.
+  frontmatter = File.read(path, encoding: "UTF-8")[/\A---\s*\n(.*?)^---\s*$/m, 1]
   abort "#{path}: missing YAML frontmatter" if frontmatter.nil?
 
   data = YAML.safe_load(frontmatter, permitted_classes: [], aliases: false)
