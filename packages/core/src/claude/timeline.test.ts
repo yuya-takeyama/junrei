@@ -1,10 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseClaudeTranscriptFile } from "./parser.js";
-import type { SessionData } from "./session-data.js";
-import { buildSessionData } from "./session-data.js";
-import { loadSubagentSessionData } from "./subagents.js";
 import type {
   ApiErrorEntry,
   AssistantTextEntry,
@@ -14,10 +10,17 @@ import type {
   ThinkingEntry,
   ToolCallEntry,
   UserEntry,
-} from "./timeline.js";
-import { buildTimeline, getRecordDetail } from "./timeline.js";
+} from "../shared/timeline.js";
+import { parseClaudeTranscriptFile } from "./parser.js";
+import type { SessionData } from "./session-data.js";
+import { buildSessionData } from "./session-data.js";
+import { loadSubagentSessionData } from "./subagents.js";
+import { buildClaudeTimeline, getClaudeRecordDetail } from "./timeline.js";
 
-const FIXTURE_PROJECTS = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/projects");
+const FIXTURE_PROJECTS = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/projects",
+);
 const SESSION_FILE = join(
   FIXTURE_PROJECTS,
   "-Users-test-proj/11111111-1111-1111-1111-111111111111.jsonl",
@@ -33,10 +36,10 @@ async function loadMainData(): Promise<SessionData> {
   return buildSessionData(transcript);
 }
 
-describe("buildTimeline", () => {
+describe("buildClaudeTimeline", () => {
   it("produces one entry per record/block, in source order, without a mainFilePath", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
 
     // First entry is the human prompt.
     const first = entries[0] as UserEntry;
@@ -57,7 +60,7 @@ describe("buildTimeline", () => {
 
   it("distinguishes plain user prompts from tool-result carriers", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const userEntries = entries.filter((e): e is UserEntry => e.kind === "user");
     // 3 genuine human turns (the 3rd being a slash-command record, whose raw
     // `<command-name>...</command-name>` text is a real user record with
@@ -72,7 +75,7 @@ describe("buildTimeline", () => {
 
   it("captures thinking blocks with the full retained text", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
     expect(thinking?.text).toBe("let me look");
     expect(thinking?.truncated).toBe(false);
@@ -83,7 +86,7 @@ describe("buildTimeline", () => {
 
   it("builds tool-call entries with status, summaries, and duration", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const toolCalls = entries.filter((e): e is ToolCallEntry => e.kind === "tool-call");
 
     const read1 = toolCalls.find((c) => c.toolUseId === "toolu_read1");
@@ -107,7 +110,7 @@ describe("buildTimeline", () => {
 
   it("marks a tool call with no result as missing-result", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const webfetch = entries.find(
       (e): e is ToolCallEntry => e.kind === "tool-call" && e.toolUseId === "toolu_webfetch1",
     );
@@ -119,7 +122,7 @@ describe("buildTimeline", () => {
 
   it("prices assistant text by the message's own usage", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const assistantTexts = entries.filter(
       (e): e is AssistantTextEntry => e.kind === "assistant-text",
     );
@@ -137,7 +140,7 @@ describe("buildTimeline", () => {
 
   it("recognizes compaction boundaries", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const compaction = entries.find((e): e is CompactionEntry => e.kind === "compaction");
     expect(compaction?.trigger).toBe("auto");
     expect(compaction?.preTokens).toBe(150000);
@@ -147,7 +150,7 @@ describe("buildTimeline", () => {
 
   it("surfaces api_error records with a short message", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const apiError = entries.find((e): e is ApiErrorEntry => e.kind === "api-error");
     expect(apiError?.message).toBe("529 Overloaded");
     expect(apiError?.line).toBe(7);
@@ -155,7 +158,7 @@ describe("buildTimeline", () => {
 
   it("builds task-notification entries anchored to the launching tool call", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const notifications = entries.filter(
       (e): e is TaskNotificationEntry => e.kind === "task-notification",
     );
@@ -178,7 +181,7 @@ describe("buildTimeline", () => {
 
   it("builds a subagent-launch entry from in-band data alone when mainFilePath is omitted", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const launch = entries.find(
       (e): e is SubagentLaunchEntry =>
         e.kind === "subagent-launch" && e.toolUseId === "toolu_agent1",
@@ -204,7 +207,7 @@ describe("buildTimeline", () => {
 
   it("resolves subagent usage/cost/duration when mainFilePath is given", async () => {
     const data = await loadMainData();
-    const entries = await buildTimeline(data, { mainFilePath: SESSION_FILE });
+    const entries = await buildClaudeTimeline(data, { mainFilePath: SESSION_FILE });
     const launch = entries.find(
       (e): e is SubagentLaunchEntry =>
         e.kind === "subagent-launch" && e.toolUseId === "toolu_agent1",
@@ -225,7 +228,7 @@ describe("buildTimeline", () => {
   it("keeps correct linkage when a tool_result precedes its tool_use in file order", async () => {
     const transcript = await parseClaudeTranscriptFile(OUT_OF_ORDER_FILE);
     const data = buildSessionData(transcript);
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const toolCalls = entries.filter((e): e is ToolCallEntry => e.kind === "tool-call");
     expect(toolCalls).toHaveLength(2);
     expect(toolCalls.every((c) => c.status === "error")).toBe(true);
@@ -234,7 +237,7 @@ describe("buildTimeline", () => {
   it("captures returnedChars for a SYNCHRONOUS subagent launch", async () => {
     const transcript = await parseClaudeTranscriptFile(OUT_OF_ORDER_FILE);
     const data = buildSessionData(transcript);
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const launch = entries.find(
       (e): e is SubagentLaunchEntry =>
         e.kind === "subagent-launch" && e.toolUseId === "toolu_agent_sync1",
@@ -286,7 +289,7 @@ describe("buildTimeline", () => {
       apiErrors: [],
       warningCount: 0,
     };
-    const entries = await buildTimeline(data);
+    const entries = await buildClaudeTimeline(data);
     const user = entries.find((e): e is UserEntry => e.kind === "user");
     const assistant = entries.find((e): e is AssistantTextEntry => e.kind === "assistant-text");
     const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
@@ -299,7 +302,7 @@ describe("buildTimeline", () => {
     expect(thinking?.charCount).toBe(800); // full length, unlike the truncated preview text
 
     // Record detail keeps the FULL thinking text, unlike the timeline entry's preview.
-    const detail = await getRecordDetail(data, 3);
+    const detail = await getClaudeRecordDetail(data, 3);
     expect(detail?.kind).toBe("thinking");
     expect(detail && "text" in detail ? detail.text : undefined).toBe(longText);
   });
@@ -307,7 +310,9 @@ describe("buildTimeline", () => {
   it("builds a timeline for a subagent's own transcript", async () => {
     const subData = await loadSubagentSessionData(SESSION_FILE, AGENT_ID);
     expect(subData).toBeDefined();
-    const entries = await buildTimeline(subData as SessionData, { mainFilePath: SESSION_FILE });
+    const entries = await buildClaudeTimeline(subData as SessionData, {
+      mainFilePath: SESSION_FILE,
+    });
     const kinds = entries.map((e) => e.kind);
     // A 2nd tool-call (Read /p/foo.ts) was appended for file-access merge coverage.
     expect(kinds).toEqual(["user", "tool-call", "assistant-text", "tool-call"]);
@@ -319,10 +324,10 @@ describe("buildTimeline", () => {
   });
 });
 
-describe("getRecordDetail", () => {
+describe("getClaudeRecordDetail", () => {
   it("returns full tool-call detail with linkage", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 3); // Read tool_use line
+    const detail = await getClaudeRecordDetail(data, 3); // Read tool_use line
     expect(detail?.kind).toBe("tool-call");
     if (detail?.kind !== "tool-call") throw new Error("expected tool-call");
     expect(detail.toolUseId).toBe("toolu_read1");
@@ -336,7 +341,7 @@ describe("getRecordDetail", () => {
 
   it("returns full assistant-text detail", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 27); // "All done." assistant record
+    const detail = await getClaudeRecordDetail(data, 27); // "All done." assistant record
     expect(detail?.kind).toBe("assistant-text");
     if (detail?.kind !== "assistant-text") throw new Error("expected assistant-text");
     expect(detail.text).toBe("All done.");
@@ -347,7 +352,7 @@ describe("getRecordDetail", () => {
 
   it("returns full subagent-launch detail, unresolved without mainFilePath", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 21); // Agent tool_use line
+    const detail = await getClaudeRecordDetail(data, 21); // Agent tool_use line
     expect(detail?.kind).toBe("subagent-launch");
     if (detail?.kind !== "subagent-launch") throw new Error("expected subagent-launch");
     expect(detail.agentId).toBeUndefined();
@@ -359,7 +364,7 @@ describe("getRecordDetail", () => {
 
   it("resolves subagent-launch detail with mainFilePath", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 21, { mainFilePath: SESSION_FILE });
+    const detail = await getClaudeRecordDetail(data, 21, { mainFilePath: SESSION_FILE });
     if (detail?.kind !== "subagent-launch") throw new Error("expected subagent-launch");
     expect(detail.agentId).toBe(AGENT_ID);
     expect(detail.model).toBe("claude-haiku-4-5-20251001");
@@ -369,7 +374,7 @@ describe("getRecordDetail", () => {
 
   it("returns compaction detail", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 19);
+    const detail = await getClaudeRecordDetail(data, 19);
     expect(detail?.kind).toBe("compaction");
     if (detail?.kind !== "compaction") throw new Error("expected compaction");
     expect(detail.trigger).toBe("auto");
@@ -379,7 +384,7 @@ describe("getRecordDetail", () => {
 
   it("returns api-error detail with status and retry attempt", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 7);
+    const detail = await getClaudeRecordDetail(data, 7);
     expect(detail?.kind).toBe("api-error");
     if (detail?.kind !== "api-error") throw new Error("expected api-error");
     expect(detail.message).toBe("529 Overloaded");
@@ -389,13 +394,13 @@ describe("getRecordDetail", () => {
 
   it("returns undefined for a tool-result-only carrier line (not independently addressable)", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 4); // tool_result for toolu_read1
+    const detail = await getClaudeRecordDetail(data, 4); // tool_result for toolu_read1
     expect(detail).toBeUndefined();
   });
 
   it("returns undefined for a line that doesn't exist", async () => {
     const data = await loadMainData();
-    const detail = await getRecordDetail(data, 99999);
+    const detail = await getClaudeRecordDetail(data, 99999);
     expect(detail).toBeUndefined();
   });
 });

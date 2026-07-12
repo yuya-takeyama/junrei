@@ -96,11 +96,27 @@ pnpm workspace monorepo, TypeScript strict everywhere:
 
 ```
 packages/
-  core/    Session log discovery, streaming JSONL parser, metric computation,
+  core/    Session log discovery, streaming JSONL parsers, metric computation,
            pricing/cost engine. Pure TypeScript, no I/O framework deps.
+           src/ is three peer trees, each with its own barrel (index.ts):
+             shared/  agent-agnostic vocabulary and helpers (token/usage
+                      types, timeline/record-detail shapes, pricing, repo
+                      identity, search-field flattening, delegation split).
+                      Never imports claude/ or codex/.
+             claude/  everything Claude-Code-specific (JSONL parser, session
+                      analysis, subagent-sidecar resolution, timeline
+                      builder). May import shared/, never codex/.
+             codex/   everything Codex-specific (rollout parser, session
+                      analysis, sub-agent-thread forest, timeline builder).
+                      May import shared/, never claude/.
+           The top-level src/index.ts re-exports all three barrels plus the
+           `AnySessionAnalysis` discriminated union.
   server/  Hono (Node) server: REST API for the web UI, MCP endpoint
            (Streamable HTTP, official @modelcontextprotocol/sdk), serves the
-           built SPA in production.
+           built SPA in production. `sources/claude.ts` and `sources/codex.ts`
+           each implement the `SourceAdapter` contract (`sources/shared.ts`)
+           via `satisfies`, so the two harnesses are peer implementations
+           app.ts/sessions.ts dispatch to instead of branching on `source`.
   web/     Vite + React SPA. Talks to the server API (typed via Hono RPC client).
 ```
 
@@ -114,6 +130,15 @@ Rationale:
 - **Parsing is tolerant by design**: unknown record types, missing fields, and
   malformed lines are skipped but counted (surfaced as `parseWarnings`), since the
   log schema changes across Claude Code versions.
+- **shared/claude/codex as peer trees**: Claude Code and Codex CLI support grew
+  organically with Codex modules nested under `core/src/codex/` while
+  Claude-specific modules sat at the top level, so Codex quietly imported
+  Claude-only files just to reach genuinely shared vocabulary (token totals,
+  timeline entry shapes, the subagent-forest node). Promoting that vocabulary
+  into `shared/` and making `claude/` a real peer of `codex/` makes the
+  boundary structural: an architecture test (`core/test/architecture.test.ts`)
+  scans imports and fails the build if either harness reaches into the other,
+  or if `shared/` reaches into either.
 
 ### Port strategy
 

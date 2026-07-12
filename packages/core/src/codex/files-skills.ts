@@ -37,8 +37,8 @@ import type {
   FileAccessEntry,
   FileAccessResult,
   SkillInvocation,
-} from "../metrics.js";
-import { foldFileAccess, mergeFileAccess } from "../metrics.js";
+} from "../shared/metrics.js";
+import { foldFileAccess, mergeFileAccess } from "../shared/metrics.js";
 import type { CodexTranscript } from "./parser.js";
 
 // ---------------------------------------------------------------------------
@@ -220,7 +220,7 @@ function toAggMap(entries: readonly FileAccessEntry[]): Map<string, FileAccessAg
  * thread's — the Codex analog of Claude's `analyzeSubagents` (analyze.ts),
  * just running at serve time (see `getCodexSession` on the server) instead
  * of analysis time, since a Codex sub-agent is a sibling rollout file
- * discovered from the whole session pool rather than a sidecar `analyzeSession`
+ * discovered from the whole session pool rather than a sidecar `analyzeClaudeSession`
  * can walk on its own. `main`/`subagents` are each already-merged
  * `FileAccessEntry[]` (one session's own `computeCodexFileAccess` output,
  * already run through `mergeFileAccess` once at analysis time — see

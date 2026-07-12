@@ -9,7 +9,7 @@ import type {
   ThinkingEntry,
   ToolCallEntry,
   UserEntry,
-} from "../timeline.js";
+} from "../shared/timeline.js";
 import { parseCodexTranscriptFile } from "./parser.js";
 import { buildCodexTimeline, getCodexRecordDetail } from "./timeline.js";
 

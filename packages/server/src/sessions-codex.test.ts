@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getCodexSession, listSessions } from "./sessions.js";
 
 // Mirrors app.test.ts's CLAUDE_CONFIG_DIR pattern: point both env vars at
-// fixture trees so resolveProjectsDirs/resolveCodexHome (both read per-call,
+// fixture trees so resolveClaudeProjectsDirs/resolveCodexHome (both read per-call,
 // not cached at module load) resolve the same fixtures across every test.
 const CLAUDE_FIXTURES_DIR = join(
   dirname(fileURLToPath(import.meta.url)),

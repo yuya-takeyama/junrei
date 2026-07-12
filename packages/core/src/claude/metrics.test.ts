@@ -1,14 +1,8 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  computeFileAccess,
-  computeSkillInvocations,
-  computeUsage,
-  type FileAccessAgg,
-  foldFileAccess,
-  mergeFileAccess,
-} from "./metrics.js";
+import { type FileAccessAgg, foldFileAccess, mergeFileAccess } from "../shared/metrics.js";
+import { computeFileAccess, computeSkillInvocations, computeUsage } from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
 import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
@@ -46,7 +40,10 @@ function sessionDataWithRecords(records: SessionData["records"]): SessionData {
   };
 }
 
-const FIXTURE_PROJECTS = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/projects");
+const FIXTURE_PROJECTS = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/projects",
+);
 const SESSION_FILE = join(
   FIXTURE_PROJECTS,
   "-Users-test-proj/11111111-1111-1111-1111-111111111111.jsonl",

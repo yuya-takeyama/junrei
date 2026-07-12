@@ -6,15 +6,7 @@
  * and counted, never fatal.
  */
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  /** Ephemeral cache-creation breakdown when present. */
-  cacheCreation5mTokens?: number;
-  cacheCreation1hTokens?: number;
-}
+import type { ParseWarning, TokenUsage } from "../shared/types.js";
 
 export interface ContentBlockText {
   kind: "text";
@@ -157,7 +149,7 @@ export interface OtherRecord {
   type: string;
 }
 
-export type SessionRecord =
+export type ClaudeSessionRecord =
   | UserRecord
   | AssistantRecord
   | SystemRecord
@@ -165,13 +157,8 @@ export type SessionRecord =
   | NotificationCarrierRecord
   | OtherRecord;
 
-export interface ParseWarning {
-  line: number;
-  reason: string;
-}
-
-export interface Transcript {
+export interface ClaudeTranscript {
   filePath: string;
-  records: SessionRecord[];
+  records: ClaudeSessionRecord[];
   warnings: ParseWarning[];
 }

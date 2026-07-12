@@ -1,11 +1,15 @@
-import { computeDelegationSummary } from "../delegation.js";
-import type { ContextPoint, ModelUsageSummary, TokenTotals, UsageSummary } from "../metrics.js";
-import { mergeFileAccess } from "../metrics.js";
-import { estimateCostComponents } from "../pricing/pricing.js";
-import { deriveRepoIdentity } from "../repo.js";
-import type { SessionAnalysisCore } from "../session-analysis.js";
-import type { CompactionEvent } from "../session-data.js";
-import type { TokenUsage } from "../types.js";
+import { computeDelegationSummary } from "../shared/delegation.js";
+import type {
+  ContextPoint,
+  ModelUsageSummary,
+  TokenTotals,
+  UsageSummary,
+} from "../shared/metrics.js";
+import { mergeFileAccess } from "../shared/metrics.js";
+import { estimateCostComponents } from "../shared/pricing/pricing.js";
+import { deriveRepoIdentity } from "../shared/repo.js";
+import type { CompactionEvent, SessionAnalysisCore } from "../shared/session-analysis.js";
+import type { TokenUsage } from "../shared/types.js";
 import type { CodexSessionFileRef } from "./discovery.js";
 import { computeCodexFileAccess, computeCodexSkillInvocations } from "./files-skills.js";
 import type {
@@ -34,7 +38,7 @@ export function isSyntheticUserText(text: string): boolean {
   return SYNTHETIC_USER_TEXT_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
 
-/** Per-turn token composition & duration — Codex's analog of the Claude `TurnUsage`. */
+/** Per-turn token composition & duration — Codex's analog of `ClaudeTurnUsage`. */
 export interface CodexTurnUsage {
   turnId?: string;
   model?: string;

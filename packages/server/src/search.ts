@@ -19,10 +19,10 @@ import {
   type CodexSessionFileRef,
   extractClaudeSearchFields,
   extractCodexSearchFields,
-  listSessionFiles,
+  listClaudeSessionFiles,
   listSubagentRefs,
   parseJsonlLine,
-  resolveProjectsDirs,
+  resolveClaudeProjectsDirs,
   type SearchableField,
   type SearchFieldKind,
   type SessionSource,
@@ -452,7 +452,7 @@ export async function searchSessions(params: SearchParams): Promise<SearchRespon
   // projects; Codex ids are globally unique (see listCodexRefs' dedup).
   const claudeRefs = new Map<string, ClaudeSessionFileRef>();
   if (source !== "codex") {
-    for (const ref of await listSessionFiles(await resolveProjectsDirs())) {
+    for (const ref of await listClaudeSessionFiles(await resolveClaudeProjectsDirs())) {
       claudeRefs.set(`${ref.projectDirName}\u0000${ref.sessionId}`, ref);
     }
   }

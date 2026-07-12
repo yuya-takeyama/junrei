@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { FileAccessEntry } from "../metrics.js";
+import type { FileAccessEntry } from "../shared/metrics.js";
 import {
   computeCodexFileAccess,
   computeCodexSkillInvocations,

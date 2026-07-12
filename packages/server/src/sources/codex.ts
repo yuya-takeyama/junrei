@@ -23,6 +23,7 @@ import {
   type ModelMixEntry,
   mixFromUsageTree,
   type SessionListItemBase,
+  type SourceAdapter,
   sliceDelegation,
   sliceUsageByModel,
 } from "./shared.js";
@@ -106,7 +107,7 @@ function sumForestUsage(
 /**
  * Recompute `totalUsage`/`totalUsageByModel` for a Codex session as "this
  * session's own usage + every sub-agent in its forest, recursively" — Claude
- * parity (`analyzeSession` already bakes the same rollup into
+ * parity (`analyzeClaudeSession` already bakes the same rollup into
  * `ClaudeSessionAnalysis.totalUsage` at analysis time; Codex can't do that at
  * analysis time because a sub-agent's rollout is a wholly separate file the
  * single-session `analyzeCodexSession` never sees, so the rollup happens here
@@ -244,7 +245,7 @@ function toCodexListItem(
 /**
  * List Codex rollout files. `resolveCodexHome` is called per-request (not
  * cached at module load) so tests can override `CODEX_HOME` via
- * `process.env` the same way `resolveProjectsDirs` picks up
+ * `process.env` the same way `resolveClaudeProjectsDirs` picks up
  * `CLAUDE_CONFIG_DIR` per-request. A missing `~/.codex` yields `[]`, not an
  * error — `listCodexSessionFiles` already treats missing dirs as empty.
  */
@@ -475,7 +476,9 @@ export async function getCodexSessionRecordDetail(
  * `getTimeline`/`getRecordDetail` take no `agentId` (Codex has no subagent
  * tree to scope a fetch into — a Codex sub-agent is its own full session,
  * fetched by its own `CodexSessionKey`), unlike the Claude adapter's
- * corresponding methods.
+ * corresponding methods — still `satisfies SourceAdapter` (see
+ * `sources/shared.ts`) because a function accepting fewer parameters than
+ * its declared type is always call-compatible.
  */
 export const codexAdapter = {
   source: "codex" as const,
@@ -486,4 +489,4 @@ export const codexAdapter = {
     getCodexTimeline(key.id),
   getRecordDetail: (key: CodexSessionKey, line: number): Promise<RecordDetail | undefined> =>
     getCodexSessionRecordDetail(key.id, line),
-};
+} satisfies SourceAdapter<CodexSessionKey, CodexSessionListItem, CodexSessionAnalysisWithSubagents>;

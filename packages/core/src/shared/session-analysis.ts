@@ -7,10 +7,24 @@ import type {
   TokenTotals,
   UsageSummary,
 } from "./metrics.js";
-import type { CompactionEvent } from "./session-data.js";
 
 /** Which harness produced a session transcript. */
 export type SessionSource = "claude-code" | "codex";
+
+/**
+ * One compaction event — a context-window compaction boundary, wherever a
+ * harness records one (Claude Code's `compact_boundary` system record, a
+ * Codex `compacted` envelope). Plain data, agent-agnostic, so both
+ * `claude/session-data.ts` and `codex/analyze.ts` populate the exact same
+ * shape onto `SessionAnalysisCore.compactions` below.
+ */
+export interface CompactionEvent {
+  line: number;
+  timestamp?: string;
+  trigger?: string;
+  preTokens?: number;
+  postTokens?: number;
+}
 
 /**
  * Fields genuinely shared between Claude Code and Codex CLI session

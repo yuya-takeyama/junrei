@@ -222,6 +222,31 @@ extract — so the missing signals shipped as one same-day PR series instead.
   sessionId, project?}` (was `{project, sessionId}` with a `project: "codex"`
   convention). Pure plumbing/naming refactor — no analysis/metrics/cost logic
   changed — this PR
+- ✅ `packages/core/src` restructured into three peer trees, each with an
+  explicit barrel (2026-07-13): `shared/` (agent-agnostic vocabulary —
+  token/usage totals, timeline/record-detail entry shapes + text helpers,
+  the subagent-forest node, pricing, repo identity, search-field flattening,
+  the delegation split), `claude/` (everything Claude-Code-specific), and
+  `codex/` (unchanged behavior, just relocated imports). This closes the
+  import bridge Codex used to need into Claude-only files just to reach
+  shared vocabulary (`SubagentNode`, `TokenUsage`/`ParseWarning`,
+  `TimelineEntry`/`RecordDetail`, the `FileAccess`/`UsageSummary`/
+  `SkillInvocation` merge helpers, `mergeUsageByModel`) — each now lives in
+  `shared/` and both harnesses import it the same way. Eight public renames
+  give every Claude symbol a name symmetric with its existing Codex
+  counterpart: `analyzeSession`→`analyzeClaudeSession`,
+  `listSessionFiles`→`listClaudeSessionFiles`,
+  `resolveProjectsDirs`→`resolveClaudeProjectsDirs`,
+  `buildTimeline`→`buildClaudeTimeline`,
+  `getRecordDetail`→`getClaudeRecordDetail`, `Transcript`→`ClaudeTranscript`,
+  `TurnUsage`→`ClaudeTurnUsage`, `SessionRecord`→`ClaudeSessionRecord`.
+  `packages/server/src/sources/shared.ts` gained a generic `SourceAdapter`
+  interface, applied to `claudeAdapter`/`codexAdapter` via `satisfies` so the
+  peer-adapter contract is type-enforced, not just conventional. A new
+  `core/test/architecture.test.ts` scans every import statement under `src/`
+  and fails if `shared/` imports `claude/`/`codex/`, or `claude/`/`codex/`
+  import each other. Moves + splits + renames only — zero behavior change,
+  same routes/payloads/computations — this PR
 - ⬜ Fork lineage (`forked_from_id`): parsed and retained on
   `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
   fork-tree UI exists, unlike the sub-agent forest above

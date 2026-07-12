@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import { parseJsonlLine } from "../jsonl.js";
-import type { ParseWarning } from "../types.js";
+import { parseJsonlLine } from "../shared/jsonl.js";
+import type { ParseWarning } from "../shared/types.js";
 import {
   type CodexEnvelope,
   type CodexTokenUsage,

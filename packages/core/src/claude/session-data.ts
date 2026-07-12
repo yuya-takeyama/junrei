@@ -1,8 +1,9 @@
+import type { CompactionEvent } from "../shared/session-analysis.js";
+import type { TokenUsage } from "../shared/types.js";
 import type {
   AssistantRecord,
-  SessionRecord,
-  TokenUsage,
-  Transcript,
+  ClaudeSessionRecord,
+  ClaudeTranscript,
   UserRecord,
 } from "./types.js";
 
@@ -36,14 +37,6 @@ export interface UserPrompt {
   text: string;
   timestamp?: string;
   line: number;
-}
-
-export interface CompactionEvent {
-  line: number;
-  timestamp?: string;
-  trigger?: string;
-  preTokens?: number;
-  postTokens?: number;
 }
 
 /**
@@ -83,7 +76,7 @@ export interface TaskNotificationEvent {
 
 /** Structured view of one transcript, ready for metric computation. */
 export interface SessionData {
-  records: SessionRecord[];
+  records: ClaudeSessionRecord[];
   apiMessages: ApiMessage[];
   toolCalls: ToolCall[];
   userPrompts: UserPrompt[];
@@ -155,7 +148,7 @@ export function agentLaunchToolUseIds(data: Pick<SessionData, "records">): Map<s
   return byAgentId;
 }
 
-export function buildSessionData(transcript: Transcript): SessionData {
+export function buildSessionData(transcript: ClaudeTranscript): SessionData {
   const apiMessagesById = new Map<string, ApiMessage>();
   const toolCalls: ToolCall[] = [];
   const toolCallsById = new Map<string, ToolCall>();

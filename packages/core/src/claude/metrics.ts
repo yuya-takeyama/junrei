@@ -1,31 +1,17 @@
-import { estimateCostComponents } from "./pricing/pricing.js";
+import type {
+  ContextPoint,
+  FileAccessAgg,
+  ModelUsageSummary,
+  SkillInvocation,
+  UsageSummary,
+} from "../shared/metrics.js";
+import { estimateCostComponents } from "../shared/pricing/pricing.js";
 import type { SessionData, TaskNotificationEvent, ToolCall, UserPrompt } from "./session-data.js";
-import type { SessionRecord } from "./types.js";
+import type { ClaudeSessionRecord } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Tokens & cost
 // ---------------------------------------------------------------------------
-
-export interface TokenTotals {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-}
-
-export interface ModelUsageSummary extends TokenTotals {
-  model: string;
-  messageCount: number;
-  /** undefined when the model has no known pricing. */
-  costUsd?: number;
-  /** The cache-creation ("cache write") slice of costUsd; undefined under the same conditions as costUsd. */
-  cacheWriteCostUsd?: number;
-}
-
-export interface UsageSummary {
-  byModel: ModelUsageSummary[];
-  total: TokenTotals & { costUsd: number; costIsComplete: boolean; cacheWriteCostUsd?: number };
-}
 
 export function computeUsage(data: SessionData): UsageSummary {
   const byModel = new Map<string, ModelUsageSummary & { unpriced: boolean }>();
@@ -88,7 +74,7 @@ export function computeUsage(data: SessionData): UsageSummary {
 // Per-turn token composition
 // ---------------------------------------------------------------------------
 
-export interface TurnUsage {
+export interface ClaudeTurnUsage {
   /** Source line of the user prompt that opened this turn. */
   line: number;
   timestamp?: string;
@@ -114,10 +100,10 @@ export interface TurnUsage {
  * `SessionData.compactions` (by line) between turns for display instead, so
  * this stays a pure per-turn token breakdown.
  */
-export function computeTurnUsage(data: SessionData): TurnUsage[] {
+export function computeTurnUsage(data: SessionData): ClaudeTurnUsage[] {
   if (data.userPrompts.length === 0) return [];
 
-  const turns: TurnUsage[] = data.userPrompts.map((prompt) => ({
+  const turns: ClaudeTurnUsage[] = data.userPrompts.map((prompt) => ({
     line: prompt.line,
     ...(prompt.timestamp !== undefined && { timestamp: prompt.timestamp }),
     inputTokens: 0,
@@ -133,11 +119,11 @@ export function computeTurnUsage(data: SessionData): TurnUsage[] {
     if (message.usage === undefined) continue;
     while (
       turnIndex + 1 < turns.length &&
-      (turns[turnIndex + 1] as TurnUsage).line <= message.line
+      (turns[turnIndex + 1] as ClaudeTurnUsage).line <= message.line
     ) {
       turnIndex += 1;
     }
-    const turn = turns[turnIndex] as TurnUsage;
+    const turn = turns[turnIndex] as ClaudeTurnUsage;
     turn.inputTokens += message.usage.inputTokens;
     turn.outputTokens += message.usage.outputTokens;
     turn.cacheReadTokens += message.usage.cacheReadTokens;
@@ -150,15 +136,6 @@ export function computeTurnUsage(data: SessionData): TurnUsage[] {
 // ---------------------------------------------------------------------------
 // Context timeline
 // ---------------------------------------------------------------------------
-
-export interface ContextPoint {
-  messageId: string;
-  timestamp?: string;
-  line: number;
-  /** input + cache_read + cache_creation — the effective request context. */
-  contextTokens: number;
-  outputTokens: number;
-}
 
 export function computeContextTimeline(data: SessionData): ContextPoint[] {
   const points: ContextPoint[] = [];
@@ -573,58 +550,8 @@ export function computeExploration(data: SessionData): ExplorationProfile {
 // File access (Files & skills lens, row 1)
 // ---------------------------------------------------------------------------
 
-/** One transcript's own read/edit/injection tally for a single file path. */
-export interface FileAccessAgg {
-  path: string;
-  reads: number;
-  edits: number;
-  /**
-   * Count of times this path's content was pushed into context WITHOUT a
-   * Read/Edit tool call — CLAUDE.md/MEMORY.md "Contents of ...:" system-reminder
-   * headers and Skill `SKILL.md` loads (see `computeFileAccess`). A path can be
-   * injected-only (reads/edits both 0) — it was loaded into context, just never
-   * opened by the agent itself.
-   */
-  injectedCount?: number;
-  /** Cumulative injected character count, paired with `injectedCount`. */
-  injectedChars?: number;
-  /** Earliest timestamp among this transcript's touches of the path. */
-  firstTimestamp?: string;
-  /** Earliest line among this transcript's touches of the path. */
-  firstLine?: number;
-}
-
-export type FileAccessThread = "main" | "subagent" | "both";
-
-export interface FileAccessEntry {
-  /** Path as given in the tool input (absolute). */
-  path: string;
-  /** Read + NotebookRead calls, main + every subagent, merged. */
-  reads: number;
-  /** Edit + Write + MultiEdit + NotebookEdit calls, main + every subagent, merged. */
-  edits: number;
-  /** Context injections of this path, main + every subagent, merged — see `FileAccessAgg.injectedCount`. */
-  injectedCount?: number;
-  /** Cumulative injected character count, paired with `injectedCount`. */
-  injectedChars?: number;
-  /** Earliest timestamp across every transcript that touched this path. */
-  firstTouchTimestamp?: string;
-  /** Line of the first MAIN-transcript touch, if any — omitted when only subagents touched the path. */
-  firstTouchLine?: number;
-  threads: FileAccessThread;
-}
-
-export interface FileAccessResult {
-  fileAccess: FileAccessEntry[];
-  /** True when the merged path count exceeded the cap and entries were dropped. */
-  fileAccessTruncated: boolean;
-  /** Number of distinct paths dropped by the cap — present only when truncated. */
-  fileAccessOmittedCount?: number;
-}
-
 const FILE_READ_TOOLS = new Set(["Read", "NotebookRead"]);
 const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-const FILE_ACCESS_CAP = 500;
 
 /**
  * "Contents of <abs-path> (<label>):" headers the harness injects into a user
@@ -649,7 +576,9 @@ interface ContentsOfInjection {
  * files, a header's body is the span up to the NEXT header (or end of text)
  * — the actual injected span, not a per-file guess.
  */
-function collectContentsOfInjections(records: readonly SessionRecord[]): ContentsOfInjection[] {
+function collectContentsOfInjections(
+  records: readonly ClaudeSessionRecord[],
+): ContentsOfInjection[] {
   const injections: ContentsOfInjection[] = [];
   for (const record of records) {
     if (!("promptText" in record) || record.promptText === undefined) continue;
@@ -742,140 +671,9 @@ export function computeFileAccess(data: SessionData): Map<string, FileAccessAgg>
   return map;
 }
 
-/**
- * Merge one main transcript's file-access map with the (already-summed)
- * combined map from every subagent transcript, then cap the result — see
- * `FileAccessEntry`'s field docs for the exact semantics of each derived
- * field (`firstTouchLine` only ever comes from the main transcript;
- * `firstTouchTimestamp` is the earliest across all transcripts).
- *
- * Cap: when the merged path count exceeds `FILE_ACCESS_CAP`, keep the 500
- * paths with the highest `reads + edits`, breaking ties by path (stable)
- * so the kept set is deterministic — then re-sort the kept entries back to
- * path order for display.
- */
-export function mergeFileAccess(
-  main: ReadonlyMap<string, FileAccessAgg>,
-  subagents: ReadonlyMap<string, FileAccessAgg>,
-): FileAccessResult {
-  const paths = new Set([...main.keys(), ...subagents.keys()]);
-  const entries: FileAccessEntry[] = [];
-  for (const path of paths) {
-    const m = main.get(path);
-    const s = subagents.get(path);
-    const reads = (m?.reads ?? 0) + (s?.reads ?? 0);
-    const edits = (m?.edits ?? 0) + (s?.edits ?? 0);
-    const injectedCount = (m?.injectedCount ?? 0) + (s?.injectedCount ?? 0);
-    const injectedChars = (m?.injectedChars ?? 0) + (s?.injectedChars ?? 0);
-    const threads: FileAccessThread =
-      m !== undefined && s !== undefined ? "both" : m !== undefined ? "main" : "subagent";
-    let firstTouchTimestamp: string | undefined;
-    if (m?.firstTimestamp !== undefined && s?.firstTimestamp !== undefined) {
-      firstTouchTimestamp =
-        m.firstTimestamp < s.firstTimestamp ? m.firstTimestamp : s.firstTimestamp;
-    } else {
-      firstTouchTimestamp = m?.firstTimestamp ?? s?.firstTimestamp;
-    }
-    entries.push({
-      path,
-      reads,
-      edits,
-      ...(injectedCount > 0 && { injectedCount }),
-      ...(injectedChars > 0 && { injectedChars }),
-      ...(firstTouchTimestamp !== undefined && { firstTouchTimestamp }),
-      ...(m?.firstLine !== undefined && { firstTouchLine: m.firstLine }),
-      threads,
-    });
-  }
-
-  entries.sort((a, b) => a.path.localeCompare(b.path));
-  if (entries.length <= FILE_ACCESS_CAP) {
-    return { fileAccess: entries, fileAccessTruncated: false };
-  }
-
-  const omittedCount = entries.length - FILE_ACCESS_CAP;
-  // Injections count toward the keep-score too — an injected-only file (e.g.
-  // CLAUDE.md) would otherwise always score 0 and be the first dropped.
-  const score = (e: FileAccessEntry) => e.reads + e.edits + (e.injectedCount ?? 0);
-  const kept = [...entries]
-    .sort((a, b) => {
-      const scoreDiff = score(b) - score(a);
-      return scoreDiff !== 0 ? scoreDiff : a.path.localeCompare(b.path);
-    })
-    .slice(0, FILE_ACCESS_CAP)
-    .sort((a, b) => a.path.localeCompare(b.path));
-  return { fileAccess: kept, fileAccessTruncated: true, fileAccessOmittedCount: omittedCount };
-}
-
-/** Fold `source` into `target` in place — sums reads/edits/injections, keeps the earliest timestamp/line. */
-export function foldFileAccess(
-  target: Map<string, FileAccessAgg>,
-  source: ReadonlyMap<string, FileAccessAgg>,
-): void {
-  for (const [path, entry] of source) {
-    const existing = target.get(path);
-    if (existing === undefined) {
-      target.set(path, { ...entry });
-      continue;
-    }
-    existing.reads += entry.reads;
-    existing.edits += entry.edits;
-    if (entry.injectedCount !== undefined) {
-      existing.injectedCount = (existing.injectedCount ?? 0) + entry.injectedCount;
-    }
-    if (entry.injectedChars !== undefined) {
-      existing.injectedChars = (existing.injectedChars ?? 0) + entry.injectedChars;
-    }
-    if (
-      entry.firstTimestamp !== undefined &&
-      (existing.firstTimestamp === undefined || entry.firstTimestamp < existing.firstTimestamp)
-    ) {
-      existing.firstTimestamp = entry.firstTimestamp;
-    }
-    if (
-      entry.firstLine !== undefined &&
-      (existing.firstLine === undefined || entry.firstLine < existing.firstLine)
-    ) {
-      existing.firstLine = entry.firstLine;
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Skill invocations (Files & skills lens, row 1 right column)
 // ---------------------------------------------------------------------------
-
-export interface SkillInvocation {
-  /** Skill tool call vs a `<command-name>` slash-command user record. */
-  kind: "skill" | "command";
-  /** `input.skill` for a Skill call, or the command name (incl. leading "/") for a slash command. */
-  name: string;
-  /** `input.args` / `<command-args>` content, capped at `DETAIL_LIMIT` chars. */
-  argsPreview?: string;
-  line: number;
-  timestamp?: string;
-  /** 1-based user-turn index — same greatest-prompt-line-<= attribution as `computeTurnUsage`. */
-  userTurn?: number;
-  /**
-   * Skill tool only: full (untruncated) length of the tool_result text, when
-   * known. For a `Skill` call this is just the ~44-char "Launching skill: …"
-   * acknowledgment — see `injectedChars` for the actual context payload.
-   */
-  resultChars?: number;
-  /**
-   * Skill tool only: full length of the harness-injected SKILL.md body (the
-   * `isMeta` user record matched via `findInjection` below), when found. This
-   * — not `resultChars` — is the number that matters for context/cost
-   * analysis. Undefined when no matching injection record exists: older
-   * transcript formats, or skills whose frontmatter renders a templated
-   * prompt instead of injecting the file verbatim (observed for
-   * `commit-commands:*`, whose injected text starts with "## Context", never
-   * "Base directory for this skill:") — never guessed.
-   */
-  injectedChars?: number;
-  /** Source line of the matched injection record (provenance), paired with `injectedChars`. */
-  injectionLine?: number;
-}
 
 const COMMAND_NAME_PATTERN = /<command-name>([^<]*)<\/command-name>/;
 const COMMAND_ARGS_PATTERN = /<command-args>([^<]*)<\/command-args>/;
@@ -913,7 +711,7 @@ function skillShortName(skillId: string): string {
  * order — one candidate per record, each consumable by at most one `Skill`
  * invocation (see `findInjection`).
  */
-function collectInjectionCandidates(records: readonly SessionRecord[]): InjectionCandidate[] {
+function collectInjectionCandidates(records: readonly ClaudeSessionRecord[]): InjectionCandidate[] {
   const candidates: InjectionCandidate[] = [];
   for (const record of records) {
     if (!("isMeta" in record) || record.isMeta !== true) continue;
@@ -1003,7 +801,7 @@ function collectSkillFileInjections(data: SessionData): SkillFileInjection[] {
 /**
  * 1-based index of the user turn open at `line` — mirrors `computeTurnUsage`'s
  * "greatest prompt line at or before this line" attribution, without
- * building the full `TurnUsage[]` array. `undefined` only when there are no
+ * building the full `ClaudeTurnUsage[]` array. `undefined` only when there are no
  * user prompts at all; a line before the first prompt still falls into turn 1
  * (same fallback `computeTurnUsage` documents).
  */

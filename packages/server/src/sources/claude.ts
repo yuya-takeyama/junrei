@@ -1,17 +1,17 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  analyzeSession,
+  analyzeClaudeSession,
+  buildClaudeTimeline,
   buildSessionData,
-  buildTimeline,
   type ClaudeSessionAnalysis,
   type ClaudeSessionFileRef,
-  getRecordDetail,
-  listSessionFiles,
+  getClaudeRecordDetail,
+  listClaudeSessionFiles,
   loadSubagentSessionData,
   parseClaudeTranscriptFile,
   type RecordDetail,
-  resolveProjectsDirs,
+  resolveClaudeProjectsDirs,
   type SessionData,
   subagentsDirFor,
   type TimelineEntry,
@@ -20,6 +20,7 @@ import {
   type ModelMixEntry,
   mixFromUsageTree,
   type SessionListItemBase,
+  type SourceAdapter,
   sliceDelegation,
   sliceUsageByModel,
 } from "./shared.js";
@@ -57,7 +58,7 @@ async function analyzeCached(ref: ClaudeSessionFileRef): Promise<ClaudeSessionAn
   if (hit !== undefined && hit.mtimeMs === ref.mtimeMs) {
     return hit.analysis;
   }
-  const analysis = await analyzeSession(ref.filePath);
+  const analysis = await analyzeClaudeSession(ref.filePath);
   cache.set(ref.filePath, { mtimeMs: ref.mtimeMs, analysis });
   return analysis;
 }
@@ -102,8 +103,8 @@ function toListItem(
 }
 
 async function listClaudeRefs(): Promise<ClaudeSessionFileRef[]> {
-  const dirs = await resolveProjectsDirs();
-  return listSessionFiles(dirs);
+  const dirs = await resolveClaudeProjectsDirs();
+  return listClaudeSessionFiles(dirs);
 }
 
 /**
@@ -265,7 +266,7 @@ export async function getTimeline(
   try {
     const data = await resolveThreadData(ref, agentId);
     if (data === undefined) return undefined;
-    return await buildTimeline(data, { mainFilePath: ref.filePath });
+    return await buildClaudeTimeline(data, { mainFilePath: ref.filePath });
   } catch {
     return undefined;
   }
@@ -283,7 +284,7 @@ export async function getSessionRecordDetail(
   try {
     const data = await resolveThreadData(ref, agentId);
     if (data === undefined) return undefined;
-    return await getRecordDetail(data, line, { mainFilePath: ref.filePath });
+    return await getClaudeRecordDetail(data, line, { mainFilePath: ref.filePath });
   } catch {
     return undefined;
   }
@@ -295,7 +296,10 @@ export async function getSessionRecordDetail(
  * `getDetail`/`getTimeline`/`getRecordDetail` are keyed by `ClaudeSessionKey`
  * ({project, id}); `getAgentSession` above is exported separately since
  * agent-detail lookups have no Codex counterpart and don't fit the shared
- * shape (see `sources/codex.ts`'s `codexAdapter` for its sibling).
+ * shape (see `sources/codex.ts`'s `codexAdapter` for its sibling). Checked
+ * against `SourceAdapter` (see `sources/shared.ts`) via `satisfies` so both
+ * adapters are held to the same contract without widening this object's own
+ * inferred type.
  */
 export const claudeAdapter = {
   source: "claude-code" as const,
@@ -310,4 +314,4 @@ export const claudeAdapter = {
     agentId?: string,
   ): Promise<RecordDetail | undefined> =>
     getSessionRecordDetail(key.project, key.id, line, agentId),
-};
+} satisfies SourceAdapter<ClaudeSessionKey, ClaudeSessionListItem, ClaudeSessionAnalysis>;

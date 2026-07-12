@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeSession, type ClaudeSessionAnalysis } from "@junrei/core";
+import { analyzeClaudeSession, type ClaudeSessionAnalysis } from "@junrei/core";
 import { describe, expect, it } from "vitest";
 import { computeModelMix } from "./sessions.js";
 
@@ -11,7 +11,7 @@ const SESSION_FILE = join(
 
 describe("computeModelMix", () => {
   it("aggregates output tokens per model across the main session and all subagents", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     const mix = computeModelMix(analysis);
 
     // Main transcript only uses claude-fable-5; the fixture's one subagent

@@ -8,7 +8,7 @@
  * assembles those into the same tree shape the Orchestration lens (web)
  * already renders for Claude, so the lens can be reused almost unchanged.
  */
-import type { SubagentNode } from "../analyze.js";
+import type { SubagentNode } from "../shared/subagent-node.js";
 import type { CodexSessionAnalysis } from "./analyze.js";
 
 const byStart = (a: SubagentNode, b: SubagentNode) =>

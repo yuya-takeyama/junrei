@@ -1,6 +1,8 @@
 /**
  * Full-transcript timeline (Timeline lens / L2) and single-record detail
- * (Record detail / L3) reconstruction.
+ * (Record detail / L3) reconstruction for Claude Code sessions — see
+ * `../shared/timeline.ts` for the `TimelineEntry`/`RecordDetail` vocabulary
+ * and text-formatting helpers this shares with `codex/timeline.ts`.
  *
  * Everything here is derived strictly from what the log actually contains —
  * no estimates are presented as facts. Notably:
@@ -17,8 +19,30 @@
  *    necessarily the tool's true output length.
  */
 
+import { estimateCostUsd } from "../shared/pricing/pricing.js";
+import {
+  type AssistantTextEntry,
+  type AssistantTextRecordDetail,
+  collapseWhitespace,
+  countLines,
+  durationBetween,
+  type RecordDetail,
+  type SubagentLaunchEntry,
+  type SubagentLaunchRecordDetail,
+  summarizeResultText,
+  type TaskNotificationEntry,
+  type TaskNotificationRecordDetail,
+  type ThinkingEntry,
+  type ThinkingRecordDetail,
+  type TimelineEntry,
+  type TimelineOptions,
+  type ToolCallEntry,
+  type ToolCallRecordDetail,
+  type ToolCallStatus,
+  truncate,
+  truncateOneLine,
+} from "../shared/timeline.js";
 import { computeUsage } from "./metrics.js";
-import { estimateCostUsd } from "./pricing/pricing.js";
 import type { SessionData, ToolCall } from "./session-data.js";
 import { asyncAgentLaunchToolUseIds } from "./session-data.js";
 import { listSubagentRefs, loadSubagentSessionData, type SubagentRef } from "./subagents.js";
@@ -31,255 +55,13 @@ import type {
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// Entry / detail types
-// ---------------------------------------------------------------------------
-
-export type ToolCallStatus = "ok" | "error" | "missing-result";
-
-interface EntryBase {
-  line: number;
-  timestamp?: string;
-}
-
-export interface UserEntry extends EntryBase {
-  kind: "user";
-  text: string;
-  truncated: boolean;
-}
-
-export interface AssistantTextEntry extends EntryBase {
-  kind: "assistant-text";
-  text: string;
-  truncated: boolean;
-  model?: string;
-  outputTokens?: number;
-  /** undefined when the model has no known pricing. */
-  costUsd?: number;
-  /** No such field exists in the log today — always undefined; kept for forward-compat. */
-  apiDurationMs?: number;
-}
-
-export interface ThinkingEntry extends EntryBase {
-  kind: "thinking";
-  text: string;
-  truncated: boolean;
-  /** Always the full (pre-truncation) length, mirroring `AssistantTextEntry`. */
-  charCount: number;
-  model?: string;
-}
-
-export interface ToolCallEntry extends EntryBase {
-  kind: "tool-call";
-  toolUseId: string;
-  name: string;
-  inputSummary: string;
-  status: ToolCallStatus;
-  resultSummary?: string;
-  resultLineCount?: number;
-  durationMs?: number;
-  resultLine?: number;
-}
-
-export interface SubagentLaunchEntry extends EntryBase {
-  kind: "subagent-launch";
-  toolUseId: string;
-  /** undefined until the sidecar transcript is resolved (needs `mainFilePath`). */
-  agentId?: string;
-  agentType?: string;
-  name?: string;
-  model?: string;
-  /** Never populated today — no "effort" field exists anywhere in the log. */
-  effort?: string;
-  promptPreview?: string;
-  promptTruncated: boolean;
-  /**
-   * Length of the parent-side tool_result text; undefined while unresolved
-   * (no result yet) — and always undefined for ASYNC launches, whose
-   * tool_result is only the launch-ack boilerplate, not the agent's return
-   * (that arrives later as a task-notification whose text isn't captured).
-   */
-  returnedChars?: number;
-  resultLine?: number;
-  /** Below: the agent's own usage/duration, resolved only when `mainFilePath` is given
-   *  and the sidecar transcript can be read — otherwise all left undefined. */
-  outputTokens?: number;
-  costUsd?: number;
-  costIsComplete?: boolean;
-  durationMs?: number;
-  toolCallCount?: number;
-  toolErrorCount?: number;
-}
-
-export interface TaskNotificationEntry extends EntryBase {
-  kind: "task-notification";
-  taskId: string;
-  name?: string;
-  background: boolean;
-  status?: string;
-  exitCode?: number;
-  durationMs?: number;
-  /** Line of the launching tool call, when linkable. */
-  startLine?: number;
-}
-
-export interface CompactionEntry extends EntryBase {
-  kind: "compaction";
-  trigger?: string;
-  preTokens?: number;
-  postTokens?: number;
-}
-
-export interface ApiErrorEntry extends EntryBase {
-  kind: "api-error";
-  message?: string;
-}
-
-export type TimelineEntry =
-  | UserEntry
-  | AssistantTextEntry
-  | ThinkingEntry
-  | ToolCallEntry
-  | SubagentLaunchEntry
-  | TaskNotificationEntry
-  | CompactionEntry
-  | ApiErrorEntry;
-
-interface DetailBase {
-  line: number;
-  timestamp?: string;
-}
-
-export interface UserRecordDetail extends DetailBase {
-  kind: "user";
-  text: string;
-}
-
-export interface AssistantTextRecordDetail extends DetailBase {
-  kind: "assistant-text";
-  text: string;
-  model?: string;
-  outputTokens?: number;
-  costUsd?: number;
-}
-
-export interface ThinkingRecordDetail extends DetailBase {
-  kind: "thinking";
-  /** Full thinking text — no truncation, unlike the timeline entry's preview. */
-  text: string;
-  charCount: number;
-  model?: string;
-}
-
-export interface ToolCallRecordDetail extends DetailBase {
-  kind: "tool-call";
-  toolUseId: string;
-  name: string;
-  /** Full input — caller pretty-prints. */
-  input: unknown;
-  status: ToolCallStatus;
-  /** Full result text as captured (bounded by the parser's global capture cap). */
-  resultText?: string;
-  resultLineCount?: number;
-  resultLine?: number;
-  resultTimestamp?: string;
-  durationMs?: number;
-}
-
-export interface SubagentLaunchRecordDetail extends DetailBase {
-  kind: "subagent-launch";
-  toolUseId: string;
-  agentId?: string;
-  agentType?: string;
-  name?: string;
-  model?: string;
-  effort?: string;
-  /** Full prompt as given to the subagent (from the spawning tool call's input). */
-  prompt?: string;
-  /** Full parent-side tool_result text. */
-  returnedText?: string;
-  resultLine?: number;
-  resultTimestamp?: string;
-  outputTokens?: number;
-  costUsd?: number;
-  costIsComplete?: boolean;
-  durationMs?: number;
-  toolCallCount?: number;
-  toolErrorCount?: number;
-}
-
-export interface TaskNotificationRecordDetail extends DetailBase {
-  kind: "task-notification";
-  taskId: string;
-  name?: string;
-  background: boolean;
-  status?: string;
-  exitCode?: number;
-  durationMs?: number;
-  startLine?: number;
-}
-
-export interface CompactionRecordDetail extends DetailBase {
-  kind: "compaction";
-  trigger?: string;
-  preTokens?: number;
-  postTokens?: number;
-}
-
-export interface ApiErrorRecordDetail extends DetailBase {
-  kind: "api-error";
-  message?: string;
-  status?: number;
-  retryAttempt?: number;
-}
-
-export type RecordDetail =
-  | UserRecordDetail
-  | AssistantTextRecordDetail
-  | ThinkingRecordDetail
-  | ToolCallRecordDetail
-  | SubagentLaunchRecordDetail
-  | TaskNotificationRecordDetail
-  | CompactionRecordDetail
-  | ApiErrorRecordDetail;
-
-export interface TimelineOptions {
-  /**
-   * Path to the MAIN session's JSONL file. Needed to resolve subagent-launch
-   * linkage (the sidecar `subagents/` dir lives alongside it) — this is true
-   * even when `data` itself is a subagent's own SessionData, since nested
-   * agents share the same top-level sidecar directory. When omitted,
-   * `subagent-launch` entries still appear (derived from in-band tool-call
-   * data) but `agentId`/usage/duration fields stay undefined.
-   */
-  mainFilePath?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Shared formatting helpers
+// Local formatting helpers
 // ---------------------------------------------------------------------------
 
 const USER_TEXT_LIMIT = 700;
 const ASSISTANT_TEXT_LIMIT = 700;
 const INPUT_SUMMARY_LIMIT = 120;
-const RESULT_SUMMARY_LIMIT = 160;
 const PROMPT_PREVIEW_LIMIT = 200;
-
-// Exported (beyond this file's own use) so `codex/timeline.ts` can build the
-// Codex analog of this file's entries/detail with the exact same text
-// formatting rules, instead of redefining them.
-
-export function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-export function truncate(text: string, limit: number): { text: string; truncated: boolean } {
-  if (text.length <= limit) return { text, truncated: false };
-  return { text: `${text.slice(0, limit)}…`, truncated: true };
-}
-
-export function truncateOneLine(text: string, limit: number): string {
-  return truncate(collapseWhitespace(text), limit).text;
-}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -290,19 +72,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function strField(obj: Record<string, unknown> | undefined, key: string): string | undefined {
   const value = obj?.[key];
   return typeof value === "string" ? value : undefined;
-}
-
-export function countLines(text: string): number {
-  return text.length === 0 ? 0 : text.split("\n").length;
-}
-
-export function durationBetween(
-  start: string | undefined,
-  end: string | undefined,
-): number | undefined {
-  if (start === undefined || end === undefined) return undefined;
-  const delta = Date.parse(end) - Date.parse(start);
-  return Number.isFinite(delta) && delta >= 0 ? delta : undefined;
 }
 
 function toolCallStatus(call: Pick<ToolCall, "result">): ToolCallStatus {
@@ -329,12 +98,6 @@ function summarizeToolInput(input: unknown): string {
     }
   }
   return truncateOneLine(JSON.stringify(input ?? null), INPUT_SUMMARY_LIMIT);
-}
-
-export function summarizeResultText(text: string): string {
-  const firstLine = text.split("\n")[0] ?? "";
-  const base = firstLine.length > 0 ? firstLine : collapseWhitespace(text);
-  return truncate(base, RESULT_SUMMARY_LIMIT).text;
 }
 
 const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
@@ -381,11 +144,11 @@ async function resolveSubagentUsage(
 }
 
 // ---------------------------------------------------------------------------
-// buildTimeline
+// buildClaudeTimeline
 // ---------------------------------------------------------------------------
 
 /** Ordered, log-derived reconstruction of an entire transcript for the Timeline lens. */
-export async function buildTimeline(
+export async function buildClaudeTimeline(
   data: SessionData,
   opts: TimelineOptions = {},
 ): Promise<TimelineEntry[]> {
@@ -641,11 +404,11 @@ function buildTaskNotificationEntry(
 }
 
 // ---------------------------------------------------------------------------
-// getRecordDetail
+// getClaudeRecordDetail
 // ---------------------------------------------------------------------------
 
 /** Full record at one source line — for the Record detail (L3) slide-over. */
-export async function getRecordDetail(
+export async function getClaudeRecordDetail(
   data: SessionData,
   line: number,
   opts: TimelineOptions = {},
