@@ -223,6 +223,27 @@ extract — so the missing signals shipped as one same-day PR series instead.
   `format: "legacy"` (no records) and are skipped everywhere (list, detail,
   every lens) rather than interpreted — no legacy-schema parser exists yet
 
+## Transcript search (MCP)
+
+- ✅ `search_sessions` MCP tool: plain-substring search across both harnesses'
+  transcripts to find WHICH past session mentioned something while spending
+  minimal context. Matches run against DECODED string values (user prompts,
+  assistant text, tool inputs/results, titles; thinking is opt-in), never
+  against raw JSON — log-side escaping can't split a match and queries need
+  no escaping. Compact output: matched sessions newest-first, each carrying
+  the session-ref fields the session-scoped tools take, per-record snippets
+  with source line numbers, an exact `matchCount`, and explicit truncation
+  flags (`matchesTruncated`/`resultsTruncated`). Filters:
+  source/project/repo (same key semantics as `get_repo_overview`)/sessionId/
+  fields/caseSensitive/since/until; opt-in `includeSubagents` also searches
+  Claude sidecar transcripts and Codex sub-agent threads, attributing matches
+  to the parent session with `agentId`. Scanning streams each candidate JSONL
+  with a raw-line fast path for escape-free queries; extraction reads RAW
+  records (`@junrei/core` `search.ts`), so tool results past the normalizer's
+  2000-char cap and Codex `function_call` arguments (JSON-decoded) still
+  match; Codex prompts mirrored as both `event_msg` and `response_item` count
+  once (same dedup rule as the timeline) — this PR
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

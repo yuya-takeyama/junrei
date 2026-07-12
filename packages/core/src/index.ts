@@ -72,6 +72,17 @@ export {
 } from "./pricing/pricing.js";
 export type { RepoIdentity } from "./repo.js";
 export { deriveRepoIdentity } from "./repo.js";
+export type {
+  CodexDeferredSearchField,
+  CodexSearchExtraction,
+  SearchableField,
+  SearchFieldKind,
+} from "./search.js";
+export {
+  extractClaudeSearchFields,
+  extractCodexSearchFields,
+  flattenToSearchText,
+} from "./search.js";
 export type { SessionAnalysisCore, SessionSource } from "./session-analysis.js";
 export type {
   ApiErrorLogEntry,
