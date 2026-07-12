@@ -237,6 +237,6 @@ export function computeRepoOverview(
  * for the accepted `repoKey` forms.
  */
 export async function getRepoOverview(repoKey: string): Promise<RepoOverview> {
-  const items = await listSessions(MAX_LIST_LIMIT, "all");
-  return computeRepoOverview(items, repoKey);
+  const { sessions } = await listSessions(MAX_LIST_LIMIT, "all");
+  return computeRepoOverview(sessions, repoKey);
 }

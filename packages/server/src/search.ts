@@ -442,7 +442,10 @@ export async function searchSessions(params: SearchParams): Promise<SearchRespon
   const sinceMs = params.since !== undefined ? Date.parse(params.since) : undefined;
   const untilMs = params.until !== undefined ? Date.parse(params.until) : undefined;
 
-  const items = await listSessions(MAX_LIST_LIMIT, source);
+  // Only the page matters here — `total` is pagination bookkeeping, and the
+  // start-time-desc order still gives the "scan newest sessions first"
+  // behavior the scanLimit truncation below relies on.
+  const { sessions: items } = await listSessions(MAX_LIST_LIMIT, source);
 
   // File refs for the transcripts behind each list item. Claude items are
   // keyed by (projectDirName, sessionId) — the same id can exist in two

@@ -18,7 +18,7 @@ export const MAX_LIST_LIMIT = 500;
 
 /**
  * The minimal shape `listSessions` needs from a source adapter — just enough
- * to merge every source's list items into one recency-sorted feed. Each
+ * to merge every source's list items into one start-time-sorted feed. Each
  * concrete adapter (`claudeAdapter`/`codexAdapter`, in `sources/claude.ts` /
  * `sources/codex.ts`) is a richer object with its own `getDetail`/
  * `getTimeline`/`getRecordDetail` methods keyed by that source's own key
@@ -27,34 +27,57 @@ export const MAX_LIST_LIMIT = 500;
  * `{project, id}`, Codex by `{id}` alone) and app.ts already knows statically
  * which source's route it's handling, so it calls each adapter's own typed
  * methods directly rather than through this generic surface.
+ *
+ * `listItems(max)` returns AT MOST `max` entries, ordered by `sortMs` desc —
+ * the session's start time in epoch ms, falling back to a file-timestamp
+ * proxy when the transcript carries no `startedAt`. `max` is a cost bound,
+ * not just a truncation: the Claude adapter uses it to skip ANALYZING
+ * transcripts that can't make the requested page (the whole point of
+ * paginating — the first page no longer parses every session on the
+ * machine). `total` is the source's full listable-session count regardless
+ * of `max`, so pagination can be sized without analyzing everything.
  */
 interface ListingAdapter {
   source: SessionSource;
-  listItems(): Promise<{ item: AnySessionListItem; mtimeMs: number }[]>;
+  listItems(
+    max?: number,
+  ): Promise<{ entries: { item: AnySessionListItem; sortMs: number }[]; total: number }>;
 }
 
 const registry: readonly ListingAdapter[] = [claudeAdapter, codexAdapter];
 
+/** One page of the merged session list, plus the full count for pagination. */
+export interface SessionListPage {
+  sessions: AnySessionListItem[];
+  /** Listable sessions across the selected source(s) — NOT the page length. */
+  total: number;
+}
+
 /**
- * List sessions for one or both harnesses, newest first (by file mtime —
- * both discovery functions already sort that way, and merging preserves it).
- * `"all"` merges both, applying `limit` once *after* the merge so the cutoff
- * reflects true recency across sources rather than truncating each source
- * independently. Omitted `source` also means `"all"` — every client (web,
- * MCP) is expected to pass `source` explicitly when it wants one harness
- * only; there is no back-compat Claude-only default left (see app.ts).
+ * List one page of sessions for one or both harnesses, newest first by START
+ * time (`startedAt`, falling back to a file-timestamp proxy — see
+ * `ListingAdapter`). `"all"` merges both sources BEFORE applying
+ * `offset`/`limit`, so the page window reflects true start-time order across
+ * sources rather than truncating each source independently; each adapter is
+ * asked for `offset + limit` entries, the most any single source could
+ * contribute to the window. Omitted `source` also means `"all"` — every
+ * client (web, MCP) is expected to pass `source` explicitly when it wants
+ * one harness only; there is no back-compat Claude-only default left (see
+ * app.ts).
  */
 export async function listSessions(
   limit: number,
   source: SessionSourceFilter = "all",
-): Promise<AnySessionListItem[]> {
+  offset = 0,
+): Promise<SessionListPage> {
   const adapters = source === "all" ? registry : registry.filter((a) => a.source === source);
-  const lists = await Promise.all(adapters.map((a) => a.listItems()));
-  return lists
-    .flat()
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, limit)
+  const results = await Promise.all(adapters.map((a) => a.listItems(offset + limit)));
+  const sessions = results
+    .flatMap((r) => r.entries)
+    .sort((a, b) => b.sortMs - a.sortMs)
+    .slice(offset, offset + limit)
     .map((r) => r.item);
+  return { sessions, total: results.reduce((sum, r) => sum + r.total, 0) };
 }
 
 export {

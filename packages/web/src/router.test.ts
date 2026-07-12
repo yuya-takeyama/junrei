@@ -10,6 +10,7 @@ import {
   CODEX_LENSES,
   CODEX_SESSION_ROUTE_PATH,
   normalizeLens,
+  parseListPage,
   parseRecordParam,
   parseRepoParam,
   parseSourceTab,
@@ -216,6 +217,22 @@ describe("parseSourceTab", () => {
     // The "All" tab omits the param entirely (see SessionList's tab click handler).
     params.delete("source");
     expect(parseSourceTab(params.get("source"))).toBe("all");
+  });
+});
+
+describe("parseListPage", () => {
+  it("passes through a positive page number", () => {
+    expect(parseListPage("1")).toBe(1);
+    expect(parseListPage("7")).toBe(7);
+  });
+
+  it("falls back to page 1 for missing, non-numeric, or out-of-range values", () => {
+    expect(parseListPage(null)).toBe(1);
+    expect(parseListPage("")).toBe(1);
+    expect(parseListPage("bogus")).toBe(1);
+    expect(parseListPage("0")).toBe(1);
+    expect(parseListPage("-2")).toBe(1);
+    expect(parseListPage("1.5")).toBe(1);
   });
 });
 

@@ -300,7 +300,10 @@ describe("Codex routes", () => {
     const app = createApp();
 
     const codexOnly = await app.request("/api/sessions?source=codex");
-    const codexBody = (await codexOnly.json()) as { sessions: Array<{ source: string }> };
+    const codexBody = (await codexOnly.json()) as {
+      sessions: Array<{ source: string }>;
+      total: number;
+    };
     expect(codexBody.sessions.length).toBeGreaterThan(0);
     expect(codexBody.sessions.every((s) => s.source === "codex")).toBe(true);
 
@@ -325,10 +328,15 @@ describe("Codex routes", () => {
     expect(worktreeSession?.worktreeName).toBe("wt-1");
 
     const merged = await app.request("/api/sessions?source=all");
-    const mergedBody = (await merged.json()) as { sessions: Array<{ source: string }> };
+    const mergedBody = (await merged.json()) as {
+      sessions: Array<{ source: string }>;
+      total: number;
+    };
     expect(mergedBody.sessions.some((s) => s.source === "codex")).toBe(true);
     expect(mergedBody.sessions.some((s) => s.source === "claude-code")).toBe(true);
     expect(mergedBody.sessions.length).toBe(codexBody.sessions.length + claudeBody.sessions.length);
+    // Every fixture fits in the default page, so `total` equals the page length.
+    expect(mergedBody.total).toBe(mergedBody.sessions.length);
 
     // Omitted source now means "all" (no more back-compat Claude-only default —
     // see sessions.ts's listSessions), so it must match the explicit ?source=all result.
@@ -337,6 +345,45 @@ describe("Codex routes", () => {
     expect(omittedBody.sessions.length).toBe(mergedBody.sessions.length);
     expect(omittedBody.sessions.some((s) => s.source === "codex")).toBe(true);
     expect(omittedBody.sessions.some((s) => s.source === "claude-code")).toBe(true);
+  });
+
+  it("GET /api/sessions?limit=&offset= pages the merged list and keeps `total` constant", async () => {
+    const app = createApp();
+
+    const full = await app.request("/api/sessions?source=all");
+    const fullBody = (await full.json()) as {
+      sessions: Array<{ source: string; sessionId: string }>;
+      total: number;
+    };
+
+    // limit is sized so offset+limit covers every fixture: unlike
+    // sessions-codex.test.ts this file doesn't stamp fixture mtimes, so a
+    // narrower window would let the Claude adapter's mtime-proxy preselection
+    // (see `claudeListItems`) pick a checkout-order-dependent subset and the
+    // slice comparison below would flake.
+    const paged = await app.request("/api/sessions?source=all&limit=8&offset=1");
+    const pagedBody = (await paged.json()) as {
+      sessions: Array<{ source: string; sessionId: string }>;
+      total: number;
+    };
+    expect(pagedBody.sessions.length).toBe(fullBody.sessions.length - 1);
+    expect(pagedBody.total).toBe(fullBody.total);
+    // The window must be a slice of the same merged order the unpaged
+    // request returns, not a per-source cut.
+    expect(pagedBody.sessions.map((s) => `${s.source}:${s.sessionId}`)).toEqual(
+      fullBody.sessions.slice(1, 9).map((s) => `${s.source}:${s.sessionId}`),
+    );
+
+    // Past the end: empty page, same total (a stale deep-page URL still
+    // renders a working pager). A junk offset falls back to 0.
+    const past = await app.request("/api/sessions?source=all&limit=2&offset=999");
+    const pastBody = (await past.json()) as { sessions: unknown[]; total: number };
+    expect(pastBody.sessions).toEqual([]);
+    expect(pastBody.total).toBe(fullBody.total);
+
+    const junk = await app.request("/api/sessions?source=all&offset=banana");
+    const junkBody = (await junk.json()) as { sessions: unknown[] };
+    expect(junkBody.sessions.length).toBe(fullBody.sessions.length);
   });
 });
 

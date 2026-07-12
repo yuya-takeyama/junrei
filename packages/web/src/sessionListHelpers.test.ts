@@ -52,13 +52,22 @@ const codexItem: CodexSessionListItem = {
 };
 
 describe("sessionsListQuery", () => {
-  it("passes the active tab through as the `source` query param", () => {
-    expect(sessionsListQuery("all", "200")).toEqual({ limit: "200", source: "all" });
-    expect(sessionsListQuery("claude-code", "200")).toEqual({
-      limit: "200",
+  it("passes the active tab through as the `source` query param, plus the page window", () => {
+    expect(sessionsListQuery("all", "50", "0")).toEqual({
+      limit: "50",
+      offset: "0",
+      source: "all",
+    });
+    expect(sessionsListQuery("claude-code", "50", "100")).toEqual({
+      limit: "50",
+      offset: "100",
       source: "claude-code",
     });
-    expect(sessionsListQuery("codex", "200")).toEqual({ limit: "200", source: "codex" });
+    expect(sessionsListQuery("codex", "50", "50")).toEqual({
+      limit: "50",
+      offset: "50",
+      source: "codex",
+    });
   });
 });
 

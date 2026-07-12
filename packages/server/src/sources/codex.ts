@@ -306,21 +306,35 @@ async function listCodexAnalyzed(): Promise<CodexAnalyzedRef[]> {
  * rollout can be deleted — hiding those would silently drop the session
  * (and its cost) from every view, so they are listed like ordinary
  * sessions instead.
+ *
+ * Unlike `claudeListItems`, `max` only truncates the RESULT — every rollout
+ * still gets analyzed, because sub-agent exclusion and each parent's
+ * forest-inclusive totals both need the full analysis pool (see
+ * `listCodexAnalyzed`). Entries carry `sortMs` = the session's start time
+ * (falling back to file mtime — see `ListingAdapter` in sessions.ts), and
+ * `total` counts every listable session, not just the returned page.
  */
-export async function codexListItems(): Promise<{ item: CodexSessionListItem; mtimeMs: number }[]> {
+export async function codexListItems(
+  max?: number,
+): Promise<{ entries: { item: CodexSessionListItem; sortMs: number }[]; total: number }> {
   const pool = await listCodexAnalyzed();
   const analyses = pool.map((p) => p.analysis);
   const poolIds = new Set(analyses.map((a) => a.sessionId));
-  const out: { item: CodexSessionListItem; mtimeMs: number }[] = [];
+  const entries: { item: CodexSessionListItem; sortMs: number }[] = [];
   for (const { ref, analysis } of pool) {
     const parentId = analysis.codex.parentThreadId;
     const attachesToParent =
       analysis.codex.isSubagent && parentId !== undefined && poolIds.has(parentId);
     if (attachesToParent) continue;
     const forest = buildCodexSubagentForest(analyses, analysis.sessionId);
-    out.push({ item: toCodexListItem(analysis, ref, forest), mtimeMs: ref.mtimeMs });
+    const startedMs = analysis.startedAt === undefined ? NaN : Date.parse(analysis.startedAt);
+    entries.push({
+      item: toCodexListItem(analysis, ref, forest),
+      sortMs: Number.isNaN(startedMs) ? ref.mtimeMs : startedMs,
+    });
   }
-  return out;
+  entries.sort((a, b) => b.sortMs - a.sortMs);
+  return { entries: max === undefined ? entries : entries.slice(0, max), total: entries.length };
 }
 
 async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | undefined> {

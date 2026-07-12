@@ -9,6 +9,13 @@ export interface ClaudeSessionFileRef {
   /** Munged project directory name under `projects/` (not reversible to a path). */
   projectDirName: string;
   mtimeMs: number;
+  /**
+   * File creation time — a cheap session-start proxy usable before the
+   * transcript is ever parsed (session files are created at session start and
+   * only appended to afterwards). 0 on filesystems that don't track birth
+   * time; callers must fall back to `mtimeMs` then.
+   */
+  birthtimeMs: number;
   sizeBytes: number;
 }
 
@@ -68,6 +75,7 @@ export async function listSessionFiles(projectsDirs: string[]): Promise<ClaudeSe
             filePath,
             projectDirName,
             mtimeMs: info.mtimeMs,
+            birthtimeMs: info.birthtimeMs,
             sizeBytes: info.size,
           });
         } catch {

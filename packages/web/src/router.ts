@@ -194,6 +194,16 @@ export function parseSourceTab(value: string | null): SourceTab {
   return isSourceTab(value) ? value : "all";
 }
 
+/**
+ * Normalizes the `?page=` query param on the session list to a 1-based page
+ * number, falling back to 1 for anything missing, non-numeric, or < 1 — same
+ * "never break on a stale URL" shape as `parseSourceTab` above.
+ */
+export function parseListPage(value: string | null): number {
+  const page = value !== null && /^\d+$/.test(value) ? Number.parseInt(value, 10) : 0;
+  return page >= 1 ? page : 1;
+}
+
 /** Sentinel `?repo=` value (and absence thereof) meaning "no repo filter" — see `parseRepoParam`. */
 export const ALL_REPOS = "all";
 

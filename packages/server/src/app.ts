@@ -35,9 +35,13 @@ export function createApp() {
         const limit = Number.isInteger(rawLimit)
           ? Math.min(Math.max(rawLimit, 1), MAX_LIST_LIMIT)
           : DEFAULT_LIST_LIMIT;
+        // Page start within the merged start-time-desc order; anything
+        // non-numeric or negative falls back to the first page.
+        const rawOffset = Number.parseInt(c.req.query("offset") ?? "", 10);
+        const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
         // Omitted `source` means "all" — see `listSessions`'s doc comment.
         const source = parseSourceFilter(c.req.query("source"));
-        return c.json({ sessions: await listSessions(limit, source) });
+        return c.json(await listSessions(limit, source, offset));
       })
       // Repo-level rollup for the session-list's repo filter (see
       // `overview.ts`'s doc comment for the exact `repo` key forms this
