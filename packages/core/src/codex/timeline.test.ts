@@ -1,3 +1,5 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -69,12 +71,13 @@ describe("buildCodexTimeline", () => {
     expect(users.every((u) => u.truncated === false)).toBe(true);
   });
 
-  it("captures a reasoning response_item as a thinking entry (char count + model, no raw text)", async () => {
+  it("captures a reasoning response_item as a thinking entry with its human-readable summary text", async () => {
     const transcript = await loadRich();
     const entries = buildCodexTimeline(transcript);
     const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
-    // JSON.stringify([{"text":"thinking..."}]).length
-    expect(thinking?.charCount).toBe(24);
+    expect(thinking?.text).toBe("thinking...");
+    expect(thinking?.truncated).toBe(false);
+    expect(thinking?.charCount).toBe("thinking...".length);
     expect(thinking?.line).toBe(5);
     // No turn_context has been seen yet at line 5 (the first one, at line 2,
     // sets claude-sonnet-4-5 — this reasoning block comes after it).
@@ -241,12 +244,13 @@ describe("getCodexRecordDetail", () => {
     });
   });
 
-  it("returns a thinking detail (char count, model) for a reasoning line", async () => {
+  it("returns a thinking detail with the full summary text for a reasoning line", async () => {
     const transcript = await loadRich();
     const detail = getCodexRecordDetail(transcript, 5);
     expect(detail).toEqual({
       kind: "thinking",
-      charCount: 24,
+      text: "thinking...",
+      charCount: "thinking...".length,
       model: "claude-sonnet-4-5",
       line: 5,
       timestamp: "2026-07-01T10:00:03.000Z",
@@ -276,5 +280,68 @@ describe("getCodexRecordDetail", () => {
   it("returns undefined for a synthetic response_item user-text line", async () => {
     const transcript = await loadSynthetic();
     expect(getCodexRecordDetail(transcript, 2)).toBeUndefined();
+  });
+});
+
+describe("reasoning summary text edge cases", () => {
+  const SESSION_META =
+    '{"timestamp":"2026-07-04T00:00:00.000Z","type":"session_meta","payload":{"id":"cccccccc-cccc-cccc-cccc-cccccccccccc","cwd":"/tmp/proj","originator":"codex_cli_rs","cli_version":"0.55.0"}}';
+
+  async function withRolloutFile(
+    lines: string[],
+    run: (filePath: string) => Promise<void>,
+  ): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), "junrei-codex-reasoning-"));
+    const filePath = join(dir, "rollout.jsonl");
+    try {
+      await writeFile(filePath, `${lines.join("\n")}\n`);
+      await run(filePath);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("truncates a long reasoning summary in the timeline entry but keeps the full text in the detail", async () => {
+    const longText = "x".repeat(800);
+    const reasoningLine = JSON.stringify({
+      timestamp: "2026-07-04T00:00:01.000Z",
+      type: "response_item",
+      payload: { type: "reasoning", id: "r1", summary: [{ text: longText }] },
+    });
+    await withRolloutFile([SESSION_META, reasoningLine], async (filePath) => {
+      const transcript = await parseCodexTranscriptFile(filePath);
+      expect(transcript.format).toBe("current");
+
+      const entries = buildCodexTimeline(transcript);
+      const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
+      expect(thinking?.truncated).toBe(true);
+      expect(thinking?.text.length).toBe(701); // 700 + "…"
+      expect(thinking?.charCount).toBe(800); // full length, unlike the truncated preview
+
+      const detail = getCodexRecordDetail(transcript, 2);
+      expect(detail?.kind).toBe("thinking");
+      expect(detail && "text" in detail ? detail.text : undefined).toBe(longText);
+    });
+  });
+
+  it("yields empty text for a reasoning item with only encrypted content (no readable summary)", async () => {
+    const reasoningLine = JSON.stringify({
+      timestamp: "2026-07-04T00:00:01.000Z",
+      type: "response_item",
+      payload: { type: "reasoning", id: "r1", encrypted_content: "abcd" },
+    });
+    await withRolloutFile([SESSION_META, reasoningLine], async (filePath) => {
+      const transcript = await parseCodexTranscriptFile(filePath);
+      const record = transcript.records.find((r) => r.line === 2);
+      expect(record).toMatchObject({
+        type: "responseItem",
+        item: { kind: "reasoning", summaryText: "", hasEncryptedContent: true },
+      });
+
+      const entries = buildCodexTimeline(transcript);
+      const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
+      expect(thinking?.text).toBe("");
+      expect(thinking?.charCount).toBe(0);
+    });
   });
 });

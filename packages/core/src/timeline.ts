@@ -61,7 +61,9 @@ export interface AssistantTextEntry extends EntryBase {
 
 export interface ThinkingEntry extends EntryBase {
   kind: "thinking";
-  /** Thinking content itself is never retained — length only. */
+  text: string;
+  truncated: boolean;
+  /** Always the full (pre-truncation) length, mirroring `AssistantTextEntry`. */
   charCount: number;
   model?: string;
 }
@@ -162,6 +164,8 @@ export interface AssistantTextRecordDetail extends DetailBase {
 
 export interface ThinkingRecordDetail extends DetailBase {
   kind: "thinking";
+  /** Full thinking text — no truncation, unlike the timeline entry's preview. */
+  text: string;
   charCount: number;
   model?: string;
 }
@@ -514,8 +518,11 @@ function buildAssistantTextEntry(
 }
 
 function buildThinkingEntry(record: AssistantRecord, block: ContentBlockThinking): ThinkingEntry {
+  const { text, truncated } = truncate(block.text, ASSISTANT_TEXT_LIMIT);
   return {
     kind: "thinking",
+    text,
+    truncated,
     charCount: block.length,
     line: record.line,
     ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
@@ -757,6 +764,7 @@ function buildThinkingDetail(
 ): ThinkingRecordDetail {
   return {
     kind: "thinking",
+    text: block.text,
     charCount: block.length,
     line: record.line,
     ...(record.timestamp !== undefined && { timestamp: record.timestamp }),

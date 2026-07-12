@@ -222,6 +222,12 @@ extract — so the missing signals shipped as one same-day PR series instead.
 - ⬜ Legacy-format rollout support: pre-2026-02-25 Codex transcripts parse as
   `format: "legacy"` (no records) and are skipped everywhere (list, detail,
   every lens) rather than interpreted — no legacy-schema parser exists yet
+- ✅ Thinking content retained and rendered in Timeline/RecordDetail (was
+  char-count-only): Claude's `thinking` blocks keep their raw text
+  (`ContentBlockThinking.text`); Codex's `reasoning` items keep the
+  human-readable `summary[].text` (`summaryText`, joined) — `encrypted_content`
+  is never read either way. Timeline shows a truncated preview (700 chars,
+  same as assistant text), RecordDetail shows the full text
 
 ## Later (post-v1)
 

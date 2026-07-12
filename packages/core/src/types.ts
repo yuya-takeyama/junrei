@@ -23,7 +23,9 @@ export interface ContentBlockText {
 
 export interface ContentBlockThinking {
   kind: "thinking";
-  /** Character length only — thinking content itself is not retained. */
+  /** Full thinking text, as retained by the parser. */
+  text: string;
+  /** Always equal to `text.length`. */
   length: number;
 }
 
