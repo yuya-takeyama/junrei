@@ -1,6 +1,6 @@
 ---
 name: junrei-browser-test
-description: Launch Junrei's isolated development environment and verify its web UI (Claude Code or Codex). Use when changing React UI, CSS/layout, navigation, interactive controls, or API-backed screen behavior in this repository, and whenever a dev server or port must be chosen for browser testing.
+description: Launch Junrei's isolated development environment and verify its web UI in a browser. Use when changing React UI, CSS/layout, navigation, interactive controls, or API-backed screen behavior in this repository, and whenever a dev server or port must be chosen for browser testing — with whatever browser tooling the current agent environment provides.
 ---
 
 # Junrei Browser Test
@@ -15,41 +15,36 @@ Web ports independently, starting from 7868 and 5874, and configures Vite's
 proxy to the assigned API port.
 
 Use `pnpm start` only for the normal fixed-port mode: API 7867 and Web 5873 by
-default, overridable with `JUNREI_PORT` and `JUNREI_WEB_PORT`.
+default, overridable with `JUNREI_PORT` and `JUNREI_WEB_PORT`. Do not hardcode
+ports anywhere else (including `.claude/launch.json`, whose entries fit only
+this fixed-port mode) — `pnpm dev` allocates isolated ports dynamically.
 
-## Test in Codex
-
-Use the existing `browser:control-in-app-browser` skill rather than duplicating
-its browser API instructions here. Bootstrap and control it only with
-`mcp__node_repl__js`, then navigate to the printed Web URL. Inspect the DOM for
-interaction state and take a screenshot when layout or visual hierarchy is
-under test.
+## When to test
 
 Run browser verification when a change affects visible UI, routes, selection,
 layout, responsiveness, or client/server integration. Skip it for isolated
 non-UI logic when unit tests cover the behavior.
 
-Keep the development process running while testing and stop it once the task is
-finished unless the user asks to keep it available.
+## Run the test
 
-## Test in Claude Code
+The workflow is the same whatever agent harness is running. Never skip
+verification because a familiar tool surface is missing — use whatever browser
+control the environment provides:
 
-Delegate browser verification to the existing `preview-verifier` agent at
-`.claude/agents/preview-verifier.md`. It owns the Browser pane tools
-(`mcp__Claude_Browser__*`) and returns a compact verdict. Pass it the Web URL
-or tab id when the environment is already running; otherwise it starts one
-itself.
+- If a dedicated verifier agent is available (`preview-verifier` at
+  `.claude/agents/preview-verifier.md`), delegate to it: it owns browser-tool
+  usage, follows the port contract above, and returns a compact verdict. Pass
+  it the Web URL or tab id when the environment is already running.
+- Otherwise drive the browser tools directly: reuse a running Junrei tab or
+  server whatever its port, else start one per the contract above, and
+  navigate to the printed Web URL. In-app browser surfaces bootstrapped
+  through a REPL (e.g. `browser:control-in-app-browser` via
+  `mcp__node_repl__js`) document their own API — follow that skill rather
+  than duplicating it here.
 
-The port contract is the same `pnpm dev` flow above; never select ports
-manually:
+Inspect the DOM for content and interaction state; take a screenshot only when
+layout or visual hierarchy is under test.
 
-1. Reuse first: `tabs_context` / `preview_list` to find an already-running
-   Junrei web tab or server, whatever its port.
-2. Otherwise run `pnpm dev` from the repository root as a background Bash
-   task and read the printed `Web:` URL from its output.
-3. Open that URL in the Browser pane with `preview_start {url}`.
-
-`preview_start {name}` with `.claude/launch.json` entries fits only the
-fixed-port `pnpm start` mode (`junrei-web` 5873 / `junrei-server` 7867). Do
-not add per-worktree port entries to launch.json — that hardcodes what
-`pnpm dev` already allocates dynamically.
+Keep the development process running while testing and stop it once the task
+is finished unless the user asks to keep it available. Never stop servers you
+did not start.
