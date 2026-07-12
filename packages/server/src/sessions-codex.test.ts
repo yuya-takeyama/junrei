@@ -1,5 +1,6 @@
-import { utimes } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { cp, mkdtemp, rm, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getCodexSession, listSessions } from "./sessions.js";
@@ -22,6 +23,15 @@ const CODEX_HOME = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtur
 // `listCodexRefs` breaks live/archived duplicates by mtime. Keep the Claude
 // stamps in the same relative order as the fixtures' `startedAt` values so
 // the proxy window never excludes a session the real order would include.
+//
+// The stamps are applied to a TEMP COPY of both fixture trees, never to the
+// checked-in files: `startProxyMs` is min(birthtime, mtime), and APFS
+// permanently drags a file's birthtime down to any past mtime it is ever
+// stamped with — a checkout that once ran an older FIXTURE_MTIMES table
+// keeps the old, lower birthtime forever and silently reorders the proxy
+// window. Fresh copies are born "now", so the proxy always equals the
+// stamped mtime; copying also stops this suite from mutating fixtures
+// shared with app.test.ts.
 const FIXTURE_MTIMES: Array<[string, number]> = [
   [
     join(
@@ -126,20 +136,45 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
   ],
 ];
 
-async function stampFixtureMtimes() {
-  await Promise.all(FIXTURE_MTIMES.map(([path, epoch]) => utimes(path, epoch, epoch)));
+async function stampFixtureMtimes(claudeRoot: string, codexRoot: string) {
+  await Promise.all(
+    FIXTURE_MTIMES.map(([source, epoch]) => {
+      const copy = source.startsWith(CODEX_HOME)
+        ? join(codexRoot, relative(CODEX_HOME, source))
+        : join(claudeRoot, relative(CLAUDE_FIXTURES_DIR, source));
+      return utimes(copy, epoch, epoch);
+    }),
+  );
 }
+
+let scratchDir: string;
+let scratchClaudeDir: string;
+let scratchCodexHome: string;
+
+beforeAll(async () => {
+  scratchDir = await mkdtemp(join(tmpdir(), "junrei-session-fixtures-"));
+  scratchClaudeDir = join(scratchDir, "claude");
+  scratchCodexHome = join(scratchDir, "codex-home");
+  await Promise.all([
+    cp(CLAUDE_FIXTURES_DIR, scratchClaudeDir, { recursive: true }),
+    cp(CODEX_HOME, scratchCodexHome, { recursive: true }),
+  ]);
+  await stampFixtureMtimes(scratchClaudeDir, scratchCodexHome);
+});
+
+afterAll(async () => {
+  await rm(scratchDir, { recursive: true, force: true });
+});
 
 describe("listSessions (source filter + Codex merge)", () => {
   let previousConfigDir: string | undefined;
   let previousCodexHome: string | undefined;
 
-  beforeAll(async () => {
+  beforeAll(() => {
     previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
     previousCodexHome = process.env.CODEX_HOME;
-    process.env.CLAUDE_CONFIG_DIR = CLAUDE_FIXTURES_DIR;
-    process.env.CODEX_HOME = CODEX_HOME;
-    await stampFixtureMtimes();
+    process.env.CLAUDE_CONFIG_DIR = scratchClaudeDir;
+    process.env.CODEX_HOME = scratchCodexHome;
   });
 
   afterAll(() => {
@@ -290,7 +325,7 @@ describe("listSessions (source filter + Codex merge)", () => {
 
   it("missing CODEX_HOME yields zero Codex items, no error", async () => {
     const previous = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = join(CODEX_HOME, "does-not-exist");
+    process.env.CODEX_HOME = join(scratchCodexHome, "does-not-exist");
     try {
       const page = await listSessions(50, "codex");
       expect(page.sessions).toEqual([]);
@@ -306,7 +341,7 @@ describe("getCodexSession", () => {
 
   beforeAll(() => {
     previousCodexHome = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = CODEX_HOME;
+    process.env.CODEX_HOME = scratchCodexHome;
   });
 
   afterAll(() => {
@@ -363,7 +398,7 @@ describe("getCodexSession — sub-agent orchestration (77777777 -> 88888888 -> 9
 
   beforeAll(() => {
     previousCodexHome = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = CODEX_HOME;
+    process.env.CODEX_HOME = scratchCodexHome;
   });
 
   afterAll(() => {
