@@ -2,18 +2,25 @@
 
 ## Model cost policy
 
-The main session often runs on an expensive orchestrator model (Claude Fable 5).
-**Before spawning any subagent or workflow, load the `cost-efficient-delegation`
-skill** and pass an explicit `model` (+ `effort`) per delegated call — exploration
-→ `haiku`, research/implementation → `sonnet`, hard debugging/verification →
-`opus`. Omitting `model` inherits the expensive session model; only do that when
-the subtask genuinely needs orchestrator-tier reasoning. Keep planning and
-judging in the main loop, but delegate routine preview/UI verification to the
+The main session often runs on an expensive orchestrator model (Claude Fable 5
+or Codex GPT-5.6 Sol). **Before spawning any subagent or workflow, load the
+`cost-efficient-delegation` skill** and follow its harness-specific routing.
+For Claude Code, pass an explicit `model` (+ `effort`) per delegated call. For
+Codex, inspect the current `spawn_agent` schema: pass GPT-5.6 Sol/Terra/Luna and
+effort only when those selectors are exposed; otherwise do not invent
+unsupported arguments or claim a cheaper child model. Use a self-contained
+prompt and the smallest useful `fork_turns`, then verify the recorded model in
+Junrei. Keep planning and judgment in the main loop.
+
+On Claude Code, delegate routine preview/UI verification to the
 `preview-verifier` agent (`.claude/agents/preview-verifier.md`) — screenshots
 and DOM dumps must not accumulate in the orchestrator context; judge its text
 verdict instead. Likewise, delegate commit → rebase → push → PR → CI-watch
 chores to the `pr-shepherd` agent (`.claude/agents/pr-shepherd.md`): prepare
-the tree and the messages in the main loop, then hand off execution.
+the tree and the messages in the main loop, then hand off execution. On Codex,
+use bounded subagents for these chores only when doing so provides parallelism
+or context isolation; the current selector-less surface cannot guarantee a
+cheaper model tier.
 
 After significant multi-agent work, check the real spend with Junrei itself
 (session detail → Cost by model / Subagent tree, or the `get_subagent_tree` MCP
