@@ -105,7 +105,7 @@ export interface CodexTurnContextRecord extends CodexRecordBase {
 
 export type CodexResponseItemInner =
   | { kind: "message"; id?: string; role?: string; text: string; phase?: string }
-  | { kind: "reasoning"; id?: string; summaryLength: number; hasEncryptedContent: boolean }
+  | { kind: "reasoning"; id?: string; summaryText: string; hasEncryptedContent: boolean }
   | {
       kind: "functionCall";
       id?: string;
@@ -361,6 +361,25 @@ function normalizeTurnContext(
   return record;
 }
 
+/**
+ * Extracts human-readable text from a reasoning item's `summary` array —
+ * each element that carries a string `text` field, joined with blank lines.
+ * Never touches `encrypted_content` (opaque) or the `content` array (not
+ * meant for display) — only this documented summary shape is surfaced.
+ */
+function extractReasoningSummaryText(summary: unknown): string {
+  if (!Array.isArray(summary)) return "";
+  return summary
+    .filter(
+      (item): item is { text: string } =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).text === "string",
+    )
+    .map((item) => item.text)
+    .join("\n\n");
+}
+
 function parseResponseItemInner(payload: unknown, rawType: string): CodexResponseItemInner {
   switch (rawType) {
     case "message": {
@@ -383,7 +402,7 @@ function parseResponseItemInner(payload: unknown, rawType: string): CodexRespons
       if (!parsed.success) return { kind: "other", rawType };
       return {
         kind: "reasoning",
-        summaryLength: JSON.stringify(parsed.data.summary ?? []).length,
+        summaryText: extractReasoningSummaryText(parsed.data.summary),
         hasEncryptedContent: parsed.data.encrypted_content !== undefined,
         ...(parsed.data.id !== undefined && { id: parsed.data.id }),
       };

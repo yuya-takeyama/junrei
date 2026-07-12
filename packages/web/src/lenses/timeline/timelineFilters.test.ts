@@ -10,7 +10,13 @@ import {
 
 const USER: TimelineEntry = { kind: "user", line: 1, text: "hi", truncated: false };
 const ASSISTANT: TimelineEntry = { kind: "assistant-text", line: 2, text: "hi", truncated: false };
-const THINKING: TimelineEntry = { kind: "thinking", line: 3, charCount: 10 };
+const THINKING: TimelineEntry = {
+  kind: "thinking",
+  line: 3,
+  text: "hmm",
+  truncated: false,
+  charCount: 10,
+};
 const TOOL_OK: TimelineEntry = {
   kind: "tool-call",
   line: 4,

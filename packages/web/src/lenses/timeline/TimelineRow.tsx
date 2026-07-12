@@ -109,9 +109,14 @@ function ThinkingBlock({
       <div className="bhd">
         <span className="mut">▸</span>
         <span className="lbl">Thinking</span>
-        <span className="mono fs10 mut">{formatTokens(entry.charCount)} chars · collapsed</span>
+        <span className="mono fs10 mut">{formatTokens(entry.charCount)} chars</span>
         <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
+      {entry.text !== "" ? (
+        <div className="btxt">{entry.text}</div>
+      ) : (
+        <div className="btxt mut">no readable summary</div>
+      )}
     </div>
   );
 }

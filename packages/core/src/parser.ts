@@ -251,7 +251,8 @@ function normalizeAssistant(raw: Record<string, unknown>, line: number): Assista
         }
         case "thinking": {
           const thinking = str(block.thinking);
-          blocks.push({ kind: "thinking", length: thinking?.length ?? 0 });
+          const text = thinking ?? "";
+          blocks.push({ kind: "thinking", text, length: text.length });
           break;
         }
         case "tool_use": {

@@ -9,9 +9,9 @@
  * Kind mapping (see `buildCodexTimeline` below for the exact rules):
  *  - `event_msg user_message`            -> `user`
  *  - `event_msg agent_message`           -> `assistant-text`
- *  - `response_item reasoning`           -> `thinking` (char count only —
- *    same "content itself is never retained" rule as Claude's thinking
- *    blocks; Codex's raw summary text isn't kept past parse time either)
+ *  - `response_item reasoning`           -> `thinking` (the human-readable
+ *    `summary` text is retained and rendered, same as Claude's thinking
+ *    blocks; `encrypted_content` is opaque and is never read or surfaced)
  *  - `response_item function_call` /
  *    `custom_tool_call` / `local_shell_call` /
  *    `web_search_call`                   -> `tool-call`
@@ -324,9 +324,12 @@ export function buildCodexTimeline(transcript: CodexTranscript): TimelineEntry[]
             ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
           });
         } else if (item.kind === "reasoning") {
+          const { text, truncated } = truncate(item.summaryText, ASSISTANT_TEXT_LIMIT);
           const entry: ThinkingEntry = {
             kind: "thinking",
-            charCount: item.summaryLength,
+            text,
+            truncated,
+            charCount: item.summaryText.length,
             line: record.line,
             ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
             ...(currentModel !== undefined && { model: currentModel }),
@@ -468,7 +471,8 @@ export function getCodexRecordDetail(
     if (item.kind === "reasoning") {
       return {
         kind: "thinking",
-        charCount: item.summaryLength,
+        text: item.summaryText,
+        charCount: item.summaryText.length,
         line,
         ...(target.timestamp !== undefined && { timestamp: target.timestamp }),
         ...(currentModel !== undefined && { model: currentModel }),

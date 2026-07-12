@@ -70,10 +70,12 @@ describe("buildTimeline", () => {
     );
   });
 
-  it("captures thinking blocks by char count only", async () => {
+  it("captures thinking blocks with the full retained text", async () => {
     const data = await loadMainData();
     const entries = await buildTimeline(data);
     const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
+    expect(thinking?.text).toBe("let me look");
+    expect(thinking?.truncated).toBe(false);
     expect(thinking?.charCount).toBe("let me look".length);
     expect(thinking?.model).toBe("claude-fable-5");
     expect(thinking?.line).toBe(2);
@@ -244,7 +246,7 @@ describe("buildTimeline", () => {
     expect(launch?.resultLine).toBe(7);
   });
 
-  it("truncates long user/assistant text and marks it truncated", async () => {
+  it("truncates long user/assistant/thinking text and marks it truncated", async () => {
     const longText = "x".repeat(800);
     const records: SessionData["records"] = [
       {
@@ -265,6 +267,12 @@ describe("buildTimeline", () => {
         },
         blocks: [{ kind: "text", text: longText }],
       },
+      {
+        line: 3,
+        type: "assistant",
+        model: "claude-fable-5",
+        blocks: [{ kind: "thinking", text: longText, length: longText.length }],
+      },
     ];
     const data: SessionData = {
       records,
@@ -281,10 +289,19 @@ describe("buildTimeline", () => {
     const entries = await buildTimeline(data);
     const user = entries.find((e): e is UserEntry => e.kind === "user");
     const assistant = entries.find((e): e is AssistantTextEntry => e.kind === "assistant-text");
+    const thinking = entries.find((e): e is ThinkingEntry => e.kind === "thinking");
     expect(user?.truncated).toBe(true);
     expect(user?.text.length).toBe(701); // 700 + "…"
     expect(assistant?.truncated).toBe(true);
     expect(assistant?.text.length).toBe(701);
+    expect(thinking?.truncated).toBe(true);
+    expect(thinking?.text.length).toBe(701);
+    expect(thinking?.charCount).toBe(800); // full length, unlike the truncated preview text
+
+    // Record detail keeps the FULL thinking text, unlike the timeline entry's preview.
+    const detail = await getRecordDetail(data, 3);
+    expect(detail?.kind).toBe("thinking");
+    expect(detail && "text" in detail ? detail.text : undefined).toBe(longText);
   });
 
   it("builds a timeline for a subagent's own transcript", async () => {

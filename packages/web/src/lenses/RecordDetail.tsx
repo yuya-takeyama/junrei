@@ -285,14 +285,15 @@ function RecordBody({ detail, agent }: { detail: RecordDetailData; agent: string
         },
         ...baseRows(detail.timestamp),
       ];
-      return (
-        <>
-          <KvGrid rows={rows} />
-          <div className="mono fs11 mut mt16">
-            Thinking content isn&apos;t retained by the parser — length only.
-          </div>
-        </>
-      );
+      if (detail.text === "") {
+        return (
+          <>
+            <KvGrid rows={rows} />
+            <div className="mono fs11 mut mt16">no readable summary</div>
+          </>
+        );
+      }
+      return <TextBody label="Thinking" text={detail.text} rows={rows} />;
     }
     case "task-notification": {
       const rows: KvRow[] = [
