@@ -40,7 +40,8 @@ skipped. When Actions is healthy, the normal CI-watch flow applies.
 ## Development
 
 - Tooling via aqua (`aqua i -l`), packages managed with pnpm workspaces.
-- `pnpm dev` starts the API server (7867) and web UI (5873). See README.md.
+- `pnpm dev` starts the API server and web UI on free ports printed at startup
+  (from 7868/5874); `pnpm start` uses the fixed ports 7867/5873. See README.md.
 - Quality gates: `pnpm typecheck && pnpm lint && pnpm test` — CI runs the same.
 - Docs live in `docs/` (design.md, roadmap.md) — keep roadmap.md updated as
   features land.
