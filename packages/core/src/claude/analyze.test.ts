@@ -1,18 +1,21 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { analyzeSession } from "./analyze.js";
-import { listSessionFiles } from "./discovery.js";
+import { analyzeClaudeSession } from "./analyze.js";
+import { listClaudeSessionFiles } from "./discovery.js";
 
-const FIXTURE_PROJECTS = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/projects");
+const FIXTURE_PROJECTS = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/projects",
+);
 const SESSION_FILE = join(
   FIXTURE_PROJECTS,
   "-Users-test-proj/11111111-1111-1111-1111-111111111111.jsonl",
 );
 
-describe("analyzeSession", () => {
+describe("analyzeClaudeSession", () => {
   it("computes the full quantitative summary from a fixture session", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
 
     // Identity & envelope
     expect(analysis.sessionId).toBe("11111111-1111-1111-1111-111111111111");
@@ -42,7 +45,7 @@ describe("analyzeSession", () => {
   });
 
   it("deduplicates usage by message id and prices it", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
     expect(fable).toBeDefined();
     // input: 100+120+130+140+150+160+170+175+180+190+200+50+40 = 1805 (msg_1 counted once)
@@ -55,7 +58,7 @@ describe("analyzeSession", () => {
   });
 
   it("builds the context timeline and captures compaction", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.contextTimeline).toHaveLength(13);
     const first = analysis.contextTimeline[0];
     expect(first?.contextTokens).toBe(100 + 0 + 200);
@@ -66,7 +69,7 @@ describe("analyzeSession", () => {
   });
 
   it("computes tool stats with error classification", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     const byName = new Map(analysis.toolStats.map((s) => [s.name, s]));
     expect(byName.get("Read")?.callCount).toBe(4);
     expect(byName.get("Read")?.errorCount).toBe(0);
@@ -78,7 +81,7 @@ describe("analyzeSession", () => {
   });
 
   it("detects repetitions: identical runs, file re-reads, repeated failures", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     const kinds = analysis.repetitions.map((r) => r.kind);
     expect(kinds).toContain("identical-call-run");
     expect(kinds).toContain("file-reread");
@@ -94,7 +97,7 @@ describe("analyzeSession", () => {
   });
 
   it("computes the exploration profile", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.exploration.readToolCalls).toBe(4);
     expect(analysis.exploration.editToolCalls).toBe(1);
     expect(analysis.exploration.readEditRatio).toBe(4);
@@ -105,7 +108,7 @@ describe("analyzeSession", () => {
   });
 
   it("analyzes the subagent sidecar and merges totals", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.subagentCount).toBe(1);
     const agent = analysis.subagents[0];
     expect(agent?.agentId).toBe("aaaa111122223333f");
@@ -138,7 +141,7 @@ describe("analyzeSession", () => {
   });
 
   it("merges per-model usage across the main session and subagents", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     const fableMain = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
     const fableMerged = analysis.totalUsageByModel.find((m) => m.model === "claude-fable-5");
     const haikuMerged = analysis.totalUsageByModel.find(
@@ -160,7 +163,7 @@ describe("analyzeSession", () => {
   });
 
   it("computes the delegation summary (main vs. subagents split)", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
 
     // Main slice mirrors `usage.total` exactly.
     expect(analysis.delegation.main.costUsd).toBe(analysis.usage.total.costUsd);
@@ -198,12 +201,12 @@ describe("analyzeSession", () => {
   });
 
   it("records the first user prompt's source line", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.firstUserPromptLine).toBe(1);
   });
 
   it("builds per-turn token composition attributed by prompt line", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     // 3 user prompts (line 1, line 20, line 28 — the slash-command record) →
     // 3 turns; every api message (apiMessageCount 13) is attributed to
     // exactly one of them.
@@ -253,13 +256,13 @@ describe("analyzeSession", () => {
     );
     // Sanity check on the general shape only — the dedicated empty case is
     // exercised directly against computeTurnUsage in metrics coverage below,
-    // this just confirms analyzeSession wires it through for any transcript.
-    const analysis = await analyzeSession(AGENT_FILE);
+    // this just confirms analyzeClaudeSession wires it through for any transcript.
+    const analysis = await analyzeClaudeSession(AGENT_FILE);
     expect(Array.isArray(analysis.turnUsage)).toBe(true);
   });
 
   it("collects the API error list alongside apiErrorCount", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.apiErrorCount).toBe(1);
     expect(analysis.apiErrors).toHaveLength(1);
     const error = analysis.apiErrors[0];
@@ -271,7 +274,7 @@ describe("analyzeSession", () => {
   });
 
   it("gives cacheWriteCostUsd a positive value when cache-creation tokens are priced", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     // The fixture's fable messages carry cacheCreationTokens (715 total), all priced.
     expect(analysis.usage.total.cacheWriteCostUsd).toBeGreaterThan(0);
     const fable = analysis.usage.byModel.find((m) => m.model === "claude-fable-5");
@@ -280,7 +283,7 @@ describe("analyzeSession", () => {
   });
 
   it("reconstructs task executions (foreground and background)", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     // 2 foreground Bash + 1 background Bash + 1 async Agent.
     expect(analysis.taskExecutions).toHaveLength(4);
 
@@ -309,7 +312,7 @@ describe("analyzeSession", () => {
   });
 
   it("merges file access across the main transcript and its subagent", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.fileAccessTruncated).toBe(false);
     expect(analysis.fileAccessOmittedCount).toBeUndefined();
 
@@ -336,7 +339,7 @@ describe("analyzeSession", () => {
   });
 
   it("extracts skill and slash-command invocations from the main transcript", async () => {
-    const analysis = await analyzeSession(SESSION_FILE);
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.skillInvocations).toHaveLength(2);
     const [command, skill] = analysis.skillInvocations;
 
@@ -359,7 +362,7 @@ describe("analyzeSession", () => {
   });
 });
 
-describe("analyzeSession applied to a subagent sidecar transcript", () => {
+describe("analyzeClaudeSession applied to a subagent sidecar transcript", () => {
   const AGENT_FILE = join(
     FIXTURE_PROJECTS,
     "-Users-test-proj/11111111-1111-1111-1111-111111111111/subagents/agent-aaaa111122223333f.jsonl",
@@ -368,10 +371,10 @@ describe("analyzeSession applied to a subagent sidecar transcript", () => {
   it("analyzes the sidecar directly and returns no nested subagents", async () => {
     // A sidecar's own "subagents" dir (sibling to a file named after the
     // sidecar itself) never exists, so listSubagentRefs's readdir throws and
-    // is swallowed — analyzeSession must degrade to an empty subagent forest
+    // is swallowed — analyzeClaudeSession must degrade to an empty subagent forest
     // rather than throwing, since the server's per-agent endpoint reuses this
     // same function on sidecar paths.
-    const analysis = await analyzeSession(AGENT_FILE);
+    const analysis = await analyzeClaudeSession(AGENT_FILE);
     expect(analysis.sessionId).toBe("agent-aaaa111122223333f");
     expect(analysis.subagents).toEqual([]);
     expect(analysis.subagentCount).toBe(0);
@@ -379,21 +382,21 @@ describe("analyzeSession applied to a subagent sidecar transcript", () => {
   });
 });
 
-describe("analyzeSession with out-of-order tool results", () => {
+describe("analyzeClaudeSession with out-of-order tool results", () => {
   const OUT_OF_ORDER_FILE = join(
     FIXTURE_PROJECTS,
     "-Users-test-proj/22222222-2222-2222-2222-222222222222.jsonl",
   );
 
   it("derives repoRoot/worktreeName from a worktree-shaped cwd", async () => {
-    const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
+    const analysis = await analyzeClaudeSession(OUT_OF_ORDER_FILE);
     expect(analysis.cwd).toBe("/Users/test/proj2/.claude/worktrees/wt-1");
     expect(analysis.repoRoot).toBe("/Users/test/proj2");
     expect(analysis.worktreeName).toBe("wt-1");
   });
 
   it("links tool_result records that appear before their tool_use", async () => {
-    const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
+    const analysis = await analyzeClaudeSession(OUT_OF_ORDER_FILE);
     const edit = analysis.toolStats.find((s) => s.name === "Edit");
     // Both parallel edits errored — including the one whose result precedes
     // its tool_use record in file order.
@@ -403,7 +406,7 @@ describe("analyzeSession with out-of-order tool results", () => {
   });
 
   it("captures returnedChars for a SYNCHRONOUS subagent launch", async () => {
-    const analysis = await analyzeSession(OUT_OF_ORDER_FILE);
+    const analysis = await analyzeClaudeSession(OUT_OF_ORDER_FILE);
     expect(analysis.subagentCount).toBe(1);
     const agent = analysis.subagents[0];
     expect(agent?.agentId).toBe("bbbb444455556666a");
@@ -420,7 +423,7 @@ describe("analyzeSession with out-of-order tool results", () => {
   });
 });
 
-describe("analyzeSession with meta.json files lacking toolUseId", () => {
+describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
   // Some Claude Code versions (observed on 2.1.138) write sidecar meta.json
   // with only agentType/description — no toolUseId. Linkage must be recovered
   // from the parent-side `toolUseResult.agentId` instead.
@@ -430,7 +433,7 @@ describe("analyzeSession with meta.json files lacking toolUseId", () => {
   );
 
   it("recovers sync-launch linkage (returnedChars/returnedPreview) via toolUseResult.agentId", async () => {
-    const analysis = await analyzeSession(NO_META_TOOLUSE_FILE);
+    const analysis = await analyzeClaudeSession(NO_META_TOOLUSE_FILE);
     expect(analysis.subagentCount).toBe(2);
     const agent = analysis.subagents.find((n) => n.agentId === "cccc777788889999b");
     expect(agent?.toolUseId).toBe("toolu_sync_nometa");
@@ -444,7 +447,7 @@ describe("analyzeSession with meta.json files lacking toolUseId", () => {
   });
 
   it("recovers async-launch linkage and does NOT measure the ack as a return", async () => {
-    const analysis = await analyzeSession(NO_META_TOOLUSE_FILE);
+    const analysis = await analyzeClaudeSession(NO_META_TOOLUSE_FILE);
     const agent = analysis.subagents.find((n) => n.agentId === "dddd000011112222c");
     expect(agent?.toolUseId).toBe("toolu_async_nometa");
     // Recovered linkage restores async detection too: without it the node
@@ -457,9 +460,9 @@ describe("analyzeSession with meta.json files lacking toolUseId", () => {
   });
 });
 
-describe("listSessionFiles", () => {
+describe("listClaudeSessionFiles", () => {
   it("finds session files under a projects dir", async () => {
-    const refs = await listSessionFiles([FIXTURE_PROJECTS]);
+    const refs = await listClaudeSessionFiles([FIXTURE_PROJECTS]);
     // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture, #27).
     expect(refs).toHaveLength(4);
     expect(refs.map((r) => r.sessionId)).toContain("11111111-1111-1111-1111-111111111111");

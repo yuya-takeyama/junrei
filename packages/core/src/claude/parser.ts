@@ -1,21 +1,20 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import { parseJsonlLine } from "./jsonl.js";
+import { parseJsonlLine } from "../shared/jsonl.js";
+import type { ParseWarning, TokenUsage } from "../shared/types.js";
 import type {
   ApiErrorRecord,
   AssistantContentBlock,
   AssistantRecord,
+  ClaudeSessionRecord,
+  ClaudeTranscript,
   CompactBoundaryRecord,
   OtherSystemRecord,
-  ParseWarning,
   RecordBase,
-  SessionRecord,
   SystemRecord,
   TaskNotificationInfo,
-  TokenUsage,
   ToolResultInfo,
   ToolUseDetail,
-  Transcript,
   UserRecord,
 } from "./types.js";
 
@@ -38,8 +37,8 @@ function bool(value: unknown): boolean | undefined {
 }
 
 /** Parse one session JSONL file into lenient typed records. */
-export async function parseClaudeTranscriptFile(filePath: string): Promise<Transcript> {
-  const records: SessionRecord[] = [];
+export async function parseClaudeTranscriptFile(filePath: string): Promise<ClaudeTranscript> {
+  const records: ClaudeSessionRecord[] = [];
   const warnings: ParseWarning[] = [];
   const rl = createInterface({
     input: createReadStream(filePath, { encoding: "utf8" }),
@@ -64,7 +63,7 @@ export async function parseClaudeTranscriptFile(filePath: string): Promise<Trans
   return { filePath, records, warnings };
 }
 
-function normalizeRecord(raw: Record<string, unknown>, line: number): SessionRecord {
+function normalizeRecord(raw: Record<string, unknown>, line: number): ClaudeSessionRecord {
   const type = raw.type as string;
   switch (type) {
     case "user":

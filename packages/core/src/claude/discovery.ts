@@ -24,7 +24,7 @@ export interface ClaudeSessionFileRef {
  * `CLAUDE_CONFIG_DIR` (comma-separated) wins; otherwise both `~/.claude` and
  * `~/.config/claude` are considered (same behavior as ccusage).
  */
-export async function resolveProjectsDirs(
+export async function resolveClaudeProjectsDirs(
   env: Record<string, string | undefined> = process.env,
 ): Promise<string[]> {
   const home = homedir();
@@ -47,7 +47,9 @@ export async function resolveProjectsDirs(
 }
 
 /** List all session JSONL files across projects, newest first. */
-export async function listSessionFiles(projectsDirs: string[]): Promise<ClaudeSessionFileRef[]> {
+export async function listClaudeSessionFiles(
+  projectsDirs: string[],
+): Promise<ClaudeSessionFileRef[]> {
   const refs: ClaudeSessionFileRef[] = [];
   for (const projectsDir of projectsDirs) {
     let projectDirs: string[];

@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 
-// resolveProjectsDirs() joins `${CLAUDE_CONFIG_DIR}/projects`, so pointing it
+// resolveClaudeProjectsDirs() joins `${CLAUDE_CONFIG_DIR}/projects`, so pointing it
 // at the core package's fixtures dir makes the real discovery path
-// (resolveProjectsDirs -> listSessionFiles) resolve the same fixture files
+// (resolveClaudeProjectsDirs -> listClaudeSessionFiles) resolve the same fixture files
 // packages/core's own tests parse directly.
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../core/test/fixtures");
 

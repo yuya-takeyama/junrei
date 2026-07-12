@@ -1,15 +1,16 @@
 import { basename, dirname } from "node:path";
-import { computeDelegationSummary } from "./delegation.js";
+import { computeDelegationSummary } from "../shared/delegation.js";
+import type { FileAccessAgg, TokenTotals } from "../shared/metrics.js";
+import { foldFileAccess, mergeFileAccess, mergeUsageByModel } from "../shared/metrics.js";
+import { deriveRepoIdentity } from "../shared/repo.js";
+import type { SessionAnalysisCore } from "../shared/session-analysis.js";
+import type { SubagentNode } from "../shared/subagent-node.js";
 import type {
+  ClaudeTurnUsage,
   ExplorationProfile,
-  FileAccessAgg,
-  ModelUsageSummary,
   RepetitionFinding,
   TaskExecutionInfo,
-  TokenTotals,
   ToolStat,
-  TurnUsage,
-  UsageSummary,
 } from "./metrics.js";
 import {
   computeContextTimeline,
@@ -21,12 +22,8 @@ import {
   computeToolStats,
   computeTurnUsage,
   computeUsage,
-  foldFileAccess,
-  mergeFileAccess,
 } from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
-import { deriveRepoIdentity } from "./repo.js";
-import type { SessionAnalysisCore } from "./session-analysis.js";
 import type { ApiErrorLogEntry, SessionData, ToolCall } from "./session-data.js";
 import {
   agentLaunchToolUseIds,
@@ -43,65 +40,11 @@ const PROMPT_PREVIEW_LIMIT = 500;
 /** Cap for `SubagentNode.returnedPreview` — matches the parser's own tool-result capture cap. */
 const RETURNED_PREVIEW_LIMIT = 2000;
 
-export interface SubagentNode {
-  agentId: string;
-  agentType?: string;
-  description?: string;
-  /**
-   * tool_use id of the Agent/Task call that spawned this agent — from the
-   * sidecar's meta.json, or recovered from the parent-side
-   * `toolUseResult.agentId` when meta.json lacks it (some Claude Code
-   * versions write only agentType/description there).
-   */
-  toolUseId?: string;
-  spawnDepth?: number;
-  model?: string;
-  promptPreview?: string;
-  usage: UsageSummary;
-  toolCallCount: number;
-  toolErrorCount: number;
-  startedAt?: string;
-  endedAt?: string;
-  /**
-   * Length of the parent-side `tool_result` text for the launching
-   * Agent/Task tool call — undefined while unresolved (no result yet, the
-   * launching call couldn't be matched, or the launch was ASYNC — see
-   * `asyncLaunch`). Mirrors `SubagentLaunchEntry.returnedChars` in
-   * timeline.ts (same underlying `ToolCall.result`), computed here too so
-   * the Orchestration lens doesn't need a second round-trip through the
-   * timeline builder just to show "↩ return" tokens in the tree.
-   */
-  returnedChars?: number;
-  /**
-   * The parent-side `tool_result` text itself (truncated to 2000 chars),
-   * for the "return to parent" panel — same resolution rules as
-   * `returnedChars` (undefined while unresolved or for async launches; the
-   * async launch-ack boilerplate must never surface here as if it were the
-   * agent's real return).
-   */
-  returnedPreview?: string;
-  /**
-   * True when the launch was asynchronous (`status: "async_launched"`). The
-   * parent-side tool_result for an async launch is only the launch-ack
-   * boilerplate — the agent's real return arrives later as a
-   * task-notification whose text isn't in the log — so `returnedChars` stays
-   * undefined rather than measuring the ack.
-   */
-  asyncLaunch?: boolean;
-  /** Source line of the launching tool_use, in whichever transcript issued it (main or a parent subagent). */
-  launchLine?: number;
-  /** Timestamp of the launching tool_use — only set when distinct from `startedAt` (the agent's own first record). */
-  launchedAt?: string;
-  /** "main" when launched directly from the main transcript, otherwise the parent subagent's `agentId`. */
-  spawnedBy?: string;
-  children: SubagentNode[];
-}
-
 /**
  * Claude Code session analysis — `SessionAnalysisCore` plus everything that
  * only makes sense for a Claude Code transcript (subagent trees, per-tool
- * breakdowns, task executions, ...). See `session-analysis.ts` for the
- * shared-core rationale (incl. why `fileAccess`/`skillInvocations` live
+ * breakdowns, task executions, ...). See `../shared/session-analysis.ts` for
+ * the shared-core rationale (incl. why `fileAccess`/`skillInvocations` live
  * there rather than here) and `CodexSessionAnalysis` for the other variant.
  */
 export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
@@ -112,8 +55,8 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   apiErrorCount: number;
   /** Capped list backing apiErrorCount — see `ApiErrorLogEntry`. Main transcript only. */
   apiErrors: ApiErrorLogEntry[];
-  /** Per-turn token composition, main transcript only — see `TurnUsage`. */
-  turnUsage: TurnUsage[];
+  /** Per-turn token composition, main transcript only — see `ClaudeTurnUsage`. */
+  turnUsage: ClaudeTurnUsage[];
   toolStats: ToolStat[];
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
@@ -122,54 +65,8 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   subagentCount: number;
 }
 
-/**
- * Merge per-model usage summaries from a main transcript's own usage and
- * every node of a subagent forest (recursively), keyed by model id — mirrors
- * how `totalUsage` merges the flat token/cost totals, but preserves the
- * per-model breakdown so the Overview lens's "cost by model" chart reflects
- * delegated spend too. Exported (not just used internally by
- * `analyzeSession`) because Codex's server-side parent aggregation
- * (`packages/server/src/sessions.ts`) needs the exact same merge over its own
- * `SubagentNode` forest — see `codex/orchestration.ts`.
- */
-export function mergeUsageByModel(
-  main: readonly ModelUsageSummary[],
-  subagents: readonly SubagentNode[],
-): ModelUsageSummary[] {
-  const totals = new Map<string, ModelUsageSummary>();
-  const add = (entries: readonly ModelUsageSummary[]) => {
-    for (const entry of entries) {
-      const existing = totals.get(entry.model);
-      if (existing === undefined) {
-        totals.set(entry.model, { ...entry });
-        continue;
-      }
-      existing.messageCount += entry.messageCount;
-      existing.inputTokens += entry.inputTokens;
-      existing.outputTokens += entry.outputTokens;
-      existing.cacheReadTokens += entry.cacheReadTokens;
-      existing.cacheCreationTokens += entry.cacheCreationTokens;
-      if (entry.costUsd !== undefined) {
-        existing.costUsd = (existing.costUsd ?? 0) + entry.costUsd;
-      }
-      if (entry.cacheWriteCostUsd !== undefined) {
-        existing.cacheWriteCostUsd = (existing.cacheWriteCostUsd ?? 0) + entry.cacheWriteCostUsd;
-      }
-    }
-  };
-  add(main);
-  const visit = (nodes: readonly SubagentNode[]) => {
-    for (const node of nodes) {
-      add(node.usage.byModel);
-      visit(node.children);
-    }
-  };
-  visit(subagents);
-  return [...totals.values()];
-}
-
 /** Analyze one session file, including its subagent sidecar transcripts. */
-export async function analyzeSession(filePath: string): Promise<ClaudeSessionAnalysis> {
+export async function analyzeClaudeSession(filePath: string): Promise<ClaudeSessionAnalysis> {
   const transcript = await parseClaudeTranscriptFile(filePath);
   const data = buildSessionData(transcript);
   const sessionId = basename(filePath, ".jsonl");
@@ -280,7 +177,7 @@ async function analyzeSubagents(
   const toolUseOwner = new Map<string, string>();
   /** owner id -> that transcript's own tool calls, keyed by toolUseId — lets us find the
    *  launching Agent/Task call's `result` (returnedChars/launchLine/launchedAt) the same
-   *  way `buildTimeline` does, just across the whole subagent forest instead of one transcript. */
+   *  way `buildClaudeTimeline` does, just across the whole subagent forest instead of one transcript. */
   const toolCallsByOwner = new Map<string, Map<string, ToolCall>>();
   /** tool_use ids whose result is only an async-launch ack, across every transcript. */
   const asyncLaunchIds = new Set<string>();

@@ -33,14 +33,14 @@ import type {
   ToolCallEntry,
   ToolCallRecordDetail,
   ToolCallStatus,
-} from "../timeline.js";
+} from "../shared/timeline.js";
 import {
   countLines,
   durationBetween,
   summarizeResultText,
   truncate,
   truncateOneLine,
-} from "../timeline.js";
+} from "../shared/timeline.js";
 import { isCodexToolOutputError, isSyntheticUserText } from "./analyze.js";
 import type { CodexRecord, CodexTranscript } from "./parser.js";
 

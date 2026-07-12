@@ -1,4 +1,11 @@
-import type { DelegationSummary, ModelUsageSummary, SubagentNode } from "@junrei/core";
+import type {
+  DelegationSummary,
+  ModelUsageSummary,
+  RecordDetail,
+  SessionSource,
+  SubagentNode,
+  TimelineEntry,
+} from "@junrei/core";
 
 /** Per-model output-token totals (main session + all subagents, recursively). */
 export interface ModelMixEntry {
@@ -107,6 +114,31 @@ export interface SessionListItemBase {
   usageByModel: UsageByModelEntry[];
   /** Slim main-vs-subagents cost/token split — see `DelegationLite`. */
   delegation: DelegationLite;
+}
+
+/**
+ * Contract every session source implements — `claudeAdapter` (sources/claude.ts)
+ * and `codexAdapter` (sources/codex.ts) are the two peer implementations
+ * app.ts/sessions.ts dispatch to instead of scattering
+ * `if (source === "claude-code")` checks. `Key` is that source's own lookup
+ * key shape (`ClaudeSessionKey` scopes by `{project, id}`, `CodexSessionKey`
+ * by `{id}` alone); `Item` its session-list item shape (must extend
+ * `SessionListItemBase`); `Detail` its full per-session analysis shape.
+ * `getTimeline`/`getRecordDetail` take an optional `agentId` because only
+ * Claude has sidecar subagent transcripts to scope into — Codex's
+ * implementations simply ignore the extra parameter (a function accepting
+ * fewer parameters than its declared type is always call-compatible).
+ * Applied with `satisfies` (not a type annotation) on both adapter object
+ * literals so each adapter's exported type stays exactly as precise as it
+ * was before this contract existed.
+ */
+export interface SourceAdapter<Key, Item extends SessionListItemBase, Detail> {
+  source: SessionSource;
+  /** Pagination contract (`max`, `sortMs`, `total`) — see `sessions.ts`'s `ListingAdapter`. */
+  listItems(max?: number): Promise<{ entries: { item: Item; sortMs: number }[]; total: number }>;
+  getDetail(key: Key): Promise<Detail | undefined>;
+  getTimeline(key: Key, agentId?: string): Promise<TimelineEntry[] | undefined>;
+  getRecordDetail(key: Key, line: number, agentId?: string): Promise<RecordDetail | undefined>;
 }
 
 /**
