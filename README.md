@@ -51,9 +51,15 @@ Claude Code with:
 claude mcp add --transport http junrei http://localhost:7867/mcp
 ```
 
-Tools: `list_sessions`, `get_session_summary`, `get_context_timeline`,
-`find_repetitions`, `get_subagent_tree`, `get_task_executions`, `get_first_prompt`,
-`get_repo_overview`.
+Tools: `list_sessions`, `search_sessions`, `get_session_summary`,
+`get_context_timeline`, `find_repetitions`, `get_subagent_tree`,
+`get_task_executions`, `get_first_prompt`, `get_repo_overview`.
+
+`search_sessions` finds which past session mentioned a plain substring —
+matched against decoded prompt/assistant/tool text (never raw JSON), returning
+compact per-session snippets with source line numbers plus filters
+(source/project/repo/fields/since/until) so an agent can reach the right
+session while spending minimal context.
 
 ## License
 

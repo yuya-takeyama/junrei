@@ -3,10 +3,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getRepoOverview } from "./overview.js";
 import {
+  DEFAULT_MAX_MATCHES_PER_SESSION,
+  DEFAULT_MAX_SESSIONS,
+  MAX_MATCHES_PER_SESSION,
+  MAX_MAX_SESSIONS,
+  searchSessions,
+} from "./search.js";
+import {
   type CodexSessionAnalysisWithSubagents,
   getCodexSession,
   getSession,
   listSessions,
+  MAX_LIST_LIMIT,
 } from "./sessions.js";
 
 const sessionRef = {
@@ -223,6 +231,124 @@ export function createMcpServer(): McpServer {
     // Omitted source = merged view, same default as the HTTP API — items
     // self-describe via `source`.
     async ({ limit, source }) => jsonResult(await listSessions(limit ?? 20, source ?? "all")),
+  );
+
+  server.registerTool(
+    "search_sessions",
+    {
+      description:
+        "Substring search across session transcripts (both harnesses, newest session first). " +
+        "The query is plain text (not regex), matched case-insensitively by default against " +
+        "DECODED string values — user prompts, assistant text, tool inputs, tool results, " +
+        "titles — never against raw JSON, so quotes/newlines in the query need no escaping " +
+        "and JSON escaping in the log can never split a match. Use it to find WHICH past " +
+        "session mentioned something while spending minimal context: each result carries the " +
+        "session ref fields (`source`/`sessionId`/`project`) the session-scoped tools take, " +
+        "a short snippet per matched record with its source line number, an exact per-session " +
+        "`matchCount`, and explicit truncation flags (`matchesTruncated`/`resultsTruncated` — " +
+        "a capped list is never silently complete). Drill into a hit with get_session_summary " +
+        "/ get_first_prompt / get_context_timeline.",
+      inputSchema: {
+        query: z.string().min(2).describe("Substring to find (plain text, not regex)"),
+        source: z
+          .enum(["claude-code", "codex", "all"])
+          .optional()
+          .describe("Restrict to one harness; omit for both"),
+        project: z
+          .string()
+          .optional()
+          .describe("Claude only: restrict to one munged project dir (from list_sessions)"),
+        repo: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict to one repo: a repoRoot path or fallback bucket key " +
+              "(claude-project:<dir> / codex-cwd:<cwd>) — same semantics as get_repo_overview",
+          ),
+        sessionId: z
+          .string()
+          .optional()
+          .describe("Restrict to one session (locate where inside it something was said)"),
+        fields: z
+          .array(z.enum(["user", "assistant", "thinking", "tool_input", "tool_result", "title"]))
+          .optional()
+          .describe(
+            'Record fields to search. Default: every field except "thinking" ' +
+              "(opt in explicitly — thinking text is noisy).",
+          ),
+        caseSensitive: z.boolean().optional().describe("Default false"),
+        since: z
+          .string()
+          .optional()
+          .describe("ISO 8601 — only sessions last active at/after this time"),
+        until: z
+          .string()
+          .optional()
+          .describe("ISO 8601 — only sessions last active at/before this time"),
+        scanLimit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_LIST_LIMIT)
+          .optional()
+          .describe(
+            `How many most-recent sessions to scan after filtering (default ${MAX_LIST_LIMIT} ` +
+              "= everything listable)",
+          ),
+        maxSessions: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_MAX_SESSIONS)
+          .optional()
+          .describe(`Max matched sessions returned (default ${DEFAULT_MAX_SESSIONS})`),
+        maxMatchesPerSession: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_MATCHES_PER_SESSION)
+          .optional()
+          .describe(
+            `Max snippets per session (default ${DEFAULT_MAX_MATCHES_PER_SESSION}; ` +
+              "matchCount stays exact past the cap)",
+          ),
+        includeSubagents: z
+          .boolean()
+          .optional()
+          .describe(
+            "Also search subagent transcripts (Claude sidecars / Codex sub-agent threads), " +
+              "attributed to the parent session with agentId on each match. Default false",
+          ),
+      },
+    },
+    async (args) => {
+      if (args.query.trim().length < 2) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "query must contain at least 2 non-whitespace-only characters.",
+            },
+          ],
+          isError: true,
+        };
+      }
+      for (const key of ["since", "until"] as const) {
+        const value = args[key];
+        if (value !== undefined && Number.isNaN(Date.parse(value))) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `${key} is not a parseable ISO 8601 timestamp: ${value}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+      return jsonResult(await searchSessions(args));
+    },
   );
 
   server.registerTool(

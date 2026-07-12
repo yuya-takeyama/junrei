@@ -241,6 +241,66 @@ describe("MCP tools", () => {
     expect(tools.map((t) => t.name)).toContain("get_repo_overview");
   });
 
+  it("tools/list includes search_sessions", async () => {
+    client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain("search_sessions");
+  });
+
+  it("search_sessions finds sessions from both harnesses with drill-in refs", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "search_sessions",
+      arguments: { query: "flaky test" },
+    });
+    expect(result.isError).not.toBe(true);
+    const body = JSON.parse(textOf(result)) as {
+      results: Array<{
+        source: string;
+        sessionId: string;
+        matches: Array<{ line: number; field: string; snippet: string }>;
+      }>;
+      resultsTruncated: boolean;
+    };
+    const codexHit = body.results.find(
+      (r) => r.source === "codex" && r.sessionId === CODEX_SESSION_ID,
+    );
+    expect(codexHit).toBeDefined();
+    expect(codexHit?.matches[0]?.field).toBe("user");
+    expect(codexHit?.matches[0]?.snippet).toContain("flaky test");
+    expect(codexHit?.matches[0]?.line).toBeGreaterThan(0);
+  });
+
+  it("search_sessions scoped to one Claude session returns its project ref", async () => {
+    client = await connect();
+    const result = await client.callTool({
+      name: "search_sessions",
+      arguments: { query: "Fix the bug", sessionId: CLAUDE_SESSION_ID, source: "claude-code" },
+    });
+    expect(result.isError).not.toBe(true);
+    const body = JSON.parse(textOf(result)) as {
+      results: Array<{ source: string; sessionId: string; project?: string }>;
+    };
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0]?.project).toBe(CLAUDE_PROJECT);
+  });
+
+  it("search_sessions rejects unparseable since/until and blank queries", async () => {
+    client = await connect();
+    const badDate = await client.callTool({
+      name: "search_sessions",
+      arguments: { query: "anything", since: "not-a-date" },
+    });
+    expect(badDate.isError).toBe(true);
+    expect(textOf(badDate)).toContain("since");
+
+    const blank = await client.callTool({
+      name: "search_sessions",
+      arguments: { query: "  " },
+    });
+    expect(blank.isError).toBe(true);
+  });
+
   it("get_repo_overview aggregates every Claude session sharing a repoRoot", async () => {
     client = await connect();
     const result = await client.callTool({

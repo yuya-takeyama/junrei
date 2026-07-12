@@ -248,7 +248,7 @@ function toCodexListItem(
  * `CLAUDE_CONFIG_DIR` per-request. A missing `~/.codex` yields `[]`, not an
  * error — `listCodexSessionFiles` already treats missing dirs as empty.
  */
-async function listCodexRefs(): Promise<CodexSessionFileRef[]> {
+export async function listCodexRefs(): Promise<CodexSessionFileRef[]> {
   const refs = await listCodexSessionFiles(resolveCodexHome(process.env));
   // A real ~/.codex can hold both a live and an archived rollout for the same
   // conversation; keep one ref per session (live wins, then newest mtime) so

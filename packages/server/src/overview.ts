@@ -24,8 +24,10 @@ const UNKNOWN_CWD = "(unknown cwd)";
  *    `codex-cwd:<cwd>` (`codex-cwd:(unknown cwd)` when even `cwd` is
  *    missing) for a Codex row.
  * This mirrors the web's `repoFilterKey` exactly — same key, either source.
+ * Exported for `search.ts`'s `repo` filter, so search and overview resolve
+ * the same `repo` argument identically.
  */
-function repoKeyOf(item: AnySessionListItem): string {
+export function repoKeyOf(item: AnySessionListItem): string {
   if (item.repoRoot !== undefined) return item.repoRoot;
   return item.source === "codex"
     ? `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`
