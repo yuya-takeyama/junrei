@@ -85,26 +85,31 @@ describe("isEntryVisible", () => {
     expect(visible).not.toContain(API_ERROR);
   });
 
-  it("thinking and task-notification are ungated by chips (dial-only)", () => {
-    const chips: ChipState = {
-      user: false,
-      assistant: false,
-      tool: false,
-      subagent: false,
-      error: false,
-      compaction: false,
-    };
-    const visible = ALL.filter((e) => isEntryVisible(e, "full", chips));
-    expect(visible).toEqual([THINKING, TASK]);
+  it("thinking follows the assistant chip", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "assistant");
+    const visible = ALL.filter((e) => isEntryVisible(e, "full", focused));
+    expect(visible).toEqual([ASSISTANT, THINKING]);
+  });
+
+  it("task-notification follows the tool chip", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "tool");
+    const visible = ALL.filter((e) => isEntryVisible(e, "full", focused));
+    expect(visible).toEqual([TOOL_OK, TASK]);
+  });
+
+  it("focusing the user chip shows only user entries", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "user");
+    const visible = ALL.filter((e) => isEntryVisible(e, "full", focused));
+    expect(visible).toEqual([USER]);
   });
 });
 
 describe("computeChipCounts", () => {
-  it("tallies each kind into its chip bucket, splitting tool-call by status", () => {
+  it("tallies each kind into its chip bucket, mirroring chipAllows", () => {
     expect(computeChipCounts(ALL)).toEqual({
       user: 1,
-      assistant: 1,
-      tool: 1,
+      assistant: 2, // assistant-text + thinking
+      tool: 2, // ok tool-call + task-notification
       subagent: 1,
       error: 2,
       compaction: 1,
