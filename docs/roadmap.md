@@ -365,6 +365,20 @@ extract — so the missing signals shipped as one same-day PR series instead.
   the `*` incomplete-cost marker (unpriced model in the mix) stays, and
   `RepoOverviewBand`'s incomplete-cost subline now says "incomplete" instead
   of the misleading "est." — this PR
+- ✅ Codex central-worktree repo identity: Codex Desktop runs each task in
+  `$CODEX_HOME/worktrees/<hash>/<repoName>` — a cwd with no trace of the
+  parent repo's path — so every worktree became its own "repo" (~370
+  hash-prefixed dropdown entries on real data). `deriveRepoIdentity` now
+  recognizes the layout (worktreeName = `<hash>`, no repoRoot claimed);
+  `codex/analyze.ts` records a normalized `gitRepositoryUrl` from
+  `session_meta.git.repository_url`; the server resolves worktree sessions
+  to a real `repoRoot` via a URL→path map anchored by sessions run at the
+  repo's actual checkout (most-used root wins — a one-off `/private/tmp`
+  review clone must not hijack the mapping), applied identically to list
+  items and session detail. Unanchored URLs group per-repo as a new
+  `codex-repo:<url>` fallback bucket (label = URL basename) in
+  `repoKeyOf`/`repoFilterKey`; URL buckets join basename disambiguation so
+  a same-named path repo stays distinguishable — this PR
 
 ## Transcript search (MCP)
 

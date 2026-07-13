@@ -132,6 +132,25 @@ describe("repoFilterKey", () => {
     );
   });
 
+  it("buckets a Codex row with a repoUrl but no repoRoot by the URL, not the per-worktree cwd", () => {
+    const worktreeA = {
+      ...codexItem,
+      sessionId: "wt-a",
+      cwd: "/Users/me/.codex/worktrees/ab12/junrei",
+      worktreeName: "ab12",
+      repoUrl: "https://github.com/x/junrei",
+    };
+    const worktreeB = {
+      ...codexItem,
+      sessionId: "wt-b",
+      cwd: "/Users/me/.codex/worktrees/cd34/junrei",
+      worktreeName: "cd34",
+      repoUrl: "https://github.com/x/junrei",
+    };
+    expect(repoFilterKey(worktreeA)).toBe("codex-repo:https://github.com/x/junrei");
+    expect(repoFilterKey(worktreeA)).toBe(repoFilterKey(worktreeB));
+  });
+
   it("groups Codex rows with neither repoRoot nor cwd into one fixed 'unknown' bucket", () => {
     expect(repoFilterKey(codexItem)).toBe(repoFilterKey({ ...codexItem, sessionId: "s3" }));
   });
@@ -216,5 +235,45 @@ describe("repoOptionsFor", () => {
     const b = { ...claudeItem, sessionId: "s2", repoRoot: "/x/alpha" };
     const options = repoOptionsFor([a, b]);
     expect(options.map((o) => o.label)).toEqual(["alpha", "zeta"]);
+  });
+
+  it("collapses Codex worktree sessions sharing a repoUrl into one URL-labeled option", () => {
+    const a = {
+      ...codexItem,
+      sessionId: "wt-a",
+      cwd: "/Users/me/.codex/worktrees/ab12/junrei",
+      repoUrl: "https://github.com/x/junrei",
+    };
+    const b = {
+      ...codexItem,
+      sessionId: "wt-b",
+      cwd: "/Users/me/.codex/worktrees/cd34/junrei",
+      repoUrl: "https://github.com/x/junrei",
+    };
+    const options = repoOptionsFor([a, b]);
+    expect(options).toEqual([
+      {
+        key: "codex-repo:https://github.com/x/junrei",
+        label: "junrei",
+        title: "https://github.com/x/junrei",
+      },
+    ]);
+  });
+
+  it("disambiguates a URL-keyed bucket against a same-named path repo instead of showing two identical labels", () => {
+    const pathRepo = { ...claudeItem, sessionId: "s1", repoRoot: "/Users/me/src/junrei" };
+    const urlRepo = {
+      ...codexItem,
+      sessionId: "wt-a",
+      cwd: "/Users/me/.codex/worktrees/ab12/junrei",
+      repoUrl: "https://github.com/x/junrei",
+    };
+    const labels = repoOptionsFor([pathRepo, urlRepo]).map((o) => o.label);
+    expect(new Set(labels).size).toBe(2);
+    // The URL bucket's extended label sheds its scheme (github.com/…, never
+    // the https:/… junk raw segment-splitting would produce).
+    for (const label of labels) {
+      expect(label).not.toMatch(/^https?:/);
+    }
   });
 });

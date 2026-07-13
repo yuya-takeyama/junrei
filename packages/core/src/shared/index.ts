@@ -30,7 +30,7 @@ export {
   pricingSnapshotInfo,
 } from "./pricing/pricing.js";
 export type { RepoIdentity } from "./repo.js";
-export { deriveRepoIdentity } from "./repo.js";
+export { deriveRepoIdentity, normalizeRepoUrl } from "./repo.js";
 export type { SearchableField, SearchFieldKind } from "./search.js";
 export { flattenToSearchText } from "./search.js";
 export type { CompactionEvent, SessionAnalysisCore, SessionSource } from "./session-analysis.js";

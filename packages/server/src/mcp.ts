@@ -51,7 +51,8 @@ function missingRepo() {
         type: "text" as const,
         text:
           "repo is required — pass a repoRoot path or fallback bucket key " +
-          "(claude-project:<projectDirName> / codex-cwd:<cwd>) from list_sessions items.",
+          "(claude-project:<projectDirName> / codex-repo:<repoUrl> / codex-cwd:<cwd>) " +
+          "from list_sessions items.",
       },
     ],
     isError: true,
@@ -247,7 +248,8 @@ export function createMcpServer(): McpServer {
           .optional()
           .describe(
             "Restrict to one repo: a repoRoot path or fallback bucket key " +
-              "(claude-project:<dir> / codex-cwd:<cwd>) — same semantics as get_repo_overview",
+              "(claude-project:<dir> / codex-repo:<repoUrl> / codex-cwd:<cwd>) — same " +
+              "semantics as get_repo_overview",
           ),
         sessionId: z
           .string()
@@ -474,10 +476,12 @@ export function createMcpServer(): McpServer {
         "Repo-level retrospective across every session (both harnesses) in one repo: total " +
         "cost/tokens, a per-day cost timeline, a merged per-model breakdown, the main-vs-" +
         "subagents delegation split, and the top 5 sessions by cost. `repo` accepts either a " +
-        "`repoRoot` absolute path (a list_sessions item's `repoRoot` field — a `.claude/" +
-        "worktrees/<name>` session collapses into its parent repo's key, see `worktreeName`) " +
+        "`repoRoot` absolute path (a list_sessions item's `repoRoot` field — a worktree " +
+        "session, `.claude/worktrees/<name>` or Codex's `$CODEX_HOME/worktrees/<hash>`, " +
+        "collapses into its parent repo's key, see `worktreeName`) " +
         "or, for a session with no `repoRoot`, the fallback bucket key list_sessions items " +
-        "imply: `claude-project:<projectDirName>` (Claude) or `codex-cwd:<cwd>` (Codex, " +
+        "imply: `claude-project:<projectDirName>` (Claude), `codex-repo:<repoUrl>` (Codex " +
+        "with a repository URL no local checkout anchors), or `codex-cwd:<cwd>` (Codex, " +
         "`codex-cwd:(unknown cwd)` when even `cwd` is missing). Examples: `/Users/me/junrei`, " +
         "`claude-project:-Users-me-proj`. A `byModel` entry's `cacheWriteCostUsd` (where " +
         "present, as in get_session_summary/get_subagent_tree) is already included in `costUsd` " +
@@ -490,8 +494,8 @@ export function createMcpServer(): McpServer {
           .string()
           .describe(
             "A repoRoot absolute path, or a fallback bucket key (claude-project:<projectDirName> " +
-              "/ codex-cwd:<cwd>) for a session with no repoRoot — both come from list_sessions " +
-              "items. Example: /Users/me/junrei",
+              "/ codex-repo:<repoUrl> / codex-cwd:<cwd>) for a session with no repoRoot — both " +
+              "come from list_sessions items. Example: /Users/me/junrei",
           ),
       },
     },

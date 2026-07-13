@@ -52,9 +52,22 @@ export interface SessionAnalysisCore {
    * (`repo.ts`). Undefined when `cwd` itself is undefined.
    */
   repoRoot?: string;
-  /** Set alongside `repoRoot` only when `cwd` was under a `.claude/worktrees/<name>` path. */
+  /**
+   * Worktree segment of `cwd` when it was under a per-task worktree layout:
+   * set alongside `repoRoot` for `<repo>/.claude/worktrees/<name>`, and
+   * WITHOUT `repoRoot` for Codex's central `/.codex/worktrees/<hash>/<repo>`
+   * (whose parent repo isn't derivable from `cwd` — see `deriveRepoIdentity`).
+   */
   worktreeName?: string;
   gitBranch?: string;
+  /**
+   * Normalized git remote URL (see `normalizeRepoUrl`) — recorded by Codex in
+   * `session_meta.git.repository_url`; Claude transcripts carry no remote, so
+   * it's always undefined there. The server uses it to resolve a `repoRoot`
+   * for Codex worktree sessions (`sources/codex.ts`) and as their grouping
+   * fallback when no local checkout is known.
+   */
+  gitRepositoryUrl?: string;
   title?: string;
   startedAt?: string;
   endedAt?: string;

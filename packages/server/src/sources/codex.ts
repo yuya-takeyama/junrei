@@ -54,6 +54,14 @@ export interface CodexSessionListItem extends SessionListItemBase {
   subagentCount: number;
   /** True when the rollout file lives under `archived_sessions/` rather than `sessions/YYYY/MM/DD/`. */
   archived: boolean;
+  /**
+   * Normalized git remote URL from the rollout's `session_meta.git` (see
+   * `@junrei/core`'s `normalizeRepoUrl`). For a Codex-worktree session whose
+   * URL no local checkout anchors to a `repoRoot` (see `resolveCodexRepoRoot`),
+   * this is the repo-grouping fallback — `repoKeyOf` (overview.ts) and the
+   * web's `repoFilterKey` bucket it as `codex-repo:<repoUrl>`.
+   */
+  repoUrl?: string;
 }
 
 /** Same aggregation as Claude's `computeModelMix`, but over a Codex sub-agent forest — see `mixFromUsageTree`. */
@@ -165,6 +173,65 @@ function collectForestFileAccess(
   return out;
 }
 
+/**
+ * Codex Desktop runs each task in a worktree under
+ * `$CODEX_HOME/worktrees/<hash>/<repoName>` — a path that carries no trace of
+ * where the parent repo actually lives, so `deriveRepoIdentity` (core) can't
+ * give those sessions a `repoRoot` and, ungrouped, one repo splinters into a
+ * repo-dropdown entry per worktree hash. What every Codex session DOES carry
+ * is `session_meta.git.repository_url`; this map recovers a `repoRoot` for
+ * the worktree sessions from it, anchored by the sessions that ran at the
+ * repo's real path (which have both a `repoRoot` and the same URL). When one
+ * URL anchors to several roots — a session run in a subdirectory of the repo
+ * claims that subdir as its `repoRoot`, and a throwaway clone (observed on
+ * real data: a `/private/tmp/<repo>-review-<sha>` checkout) claims its own
+ * path — the root with the MOST anchoring sessions wins: the repo's usual
+ * checkout dwarfs one-off clones and occasional subdir runs. Ties break to
+ * the shortest path (a repo root is shorter than its own subdirs), then
+ * lexicographic, for determinism.
+ */
+function buildRepoRootByUrl(analyses: readonly CodexSessionAnalysis[]): Map<string, string> {
+  const countsByUrl = new Map<string, Map<string, number>>();
+  for (const a of analyses) {
+    if (a.repoRoot === undefined || a.gitRepositoryUrl === undefined) continue;
+    let perRoot = countsByUrl.get(a.gitRepositoryUrl);
+    if (perRoot === undefined) {
+      perRoot = new Map();
+      countsByUrl.set(a.gitRepositoryUrl, perRoot);
+    }
+    perRoot.set(a.repoRoot, (perRoot.get(a.repoRoot) ?? 0) + 1);
+  }
+  const map = new Map<string, string>();
+  for (const [url, perRoot] of countsByUrl) {
+    let best: string | undefined;
+    let bestCount = 0;
+    for (const [root, count] of perRoot) {
+      const wins =
+        best === undefined ||
+        count > bestCount ||
+        (count === bestCount &&
+          (root.length < best.length || (root.length === best.length && root < best)));
+      if (wins) {
+        best = root;
+        bestCount = count;
+      }
+    }
+    if (best !== undefined) map.set(url, best);
+  }
+  return map;
+}
+
+/** This analysis's own `repoRoot`, or the one its repository URL anchors to (see `buildRepoRootByUrl`). */
+function resolveCodexRepoRoot(
+  analysis: CodexSessionAnalysis,
+  repoRootByUrl: ReadonlyMap<string, string>,
+): string | undefined {
+  if (analysis.repoRoot !== undefined) return analysis.repoRoot;
+  return analysis.gitRepositoryUrl === undefined
+    ? undefined
+    : repoRootByUrl.get(analysis.gitRepositoryUrl);
+}
+
 interface CodexCacheEntry {
   mtimeMs: number;
   /** `undefined` when the transcript isn't `format: "current"` — callers must skip it. */
@@ -206,8 +273,10 @@ function toCodexListItem(
   analysis: CodexSessionAnalysis,
   ref: CodexSessionFileRef,
   forest: readonly SubagentNode[],
+  repoRootByUrl: ReadonlyMap<string, string>,
 ): CodexSessionListItem {
   const { totalUsage, totalUsageByModel } = computeCodexForestTotals(analysis, forest);
+  const repoRoot = resolveCodexRepoRoot(analysis, repoRootByUrl);
   return {
     source: "codex",
     sessionId: analysis.sessionId,
@@ -233,7 +302,8 @@ function toCodexListItem(
       computeDelegationSummary(analysis.usage, totalUsage, totalUsageByModel),
     ),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
-    ...(analysis.repoRoot !== undefined && { repoRoot: analysis.repoRoot }),
+    ...(repoRoot !== undefined && { repoRoot }),
+    ...(analysis.gitRepositoryUrl !== undefined && { repoUrl: analysis.gitRepositoryUrl }),
     ...(analysis.worktreeName !== undefined && { worktreeName: analysis.worktreeName }),
     ...(analysis.title !== undefined && { title: analysis.title }),
     ...(analysis.firstUserPrompt !== undefined && { firstUserPrompt: analysis.firstUserPrompt }),
@@ -338,6 +408,7 @@ export async function codexListItems(
   const pool = await listCodexAnalyzed();
   const analyses = pool.map((p) => p.analysis);
   const poolIds = new Set(analyses.map((a) => a.sessionId));
+  const repoRootByUrl = buildRepoRootByUrl(analyses);
   const entries: { item: CodexSessionListItem; sortMs: number }[] = [];
   for (const { ref, analysis } of pool) {
     const parentId = analysis.codex.parentThreadId;
@@ -347,7 +418,7 @@ export async function codexListItems(
     const forest = buildCodexSubagentForest(analyses, analysis.sessionId);
     const startedMs = analysis.startedAt === undefined ? NaN : Date.parse(analysis.startedAt);
     entries.push({
-      item: toCodexListItem(analysis, ref, forest),
+      item: toCodexListItem(analysis, ref, forest, repoRootByUrl),
       sortMs: Number.isNaN(startedMs) ? ref.mtimeMs : startedMs,
     });
   }
@@ -451,8 +522,15 @@ export async function getCodexSession(
       found.analysis.fileAccess,
       collectForestFileAccess(forest, bySessionId),
     );
+    // Same URL-anchored repoRoot the session's list row shows (see
+    // `buildRepoRootByUrl`) — detail and list must agree on repo identity.
+    const repoRoot = resolveCodexRepoRoot(
+      found.analysis,
+      buildRepoRootByUrl(pool.map((p) => p.analysis)),
+    );
     return {
       ...found.analysis,
+      ...(repoRoot !== undefined && { repoRoot }),
       totalUsage,
       totalUsageByModel,
       delegation,

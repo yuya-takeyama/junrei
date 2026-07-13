@@ -40,7 +40,10 @@ describe("analyzeCodexSession", () => {
     expect(analysis.source).toBe("codex");
     expect(analysis.sessionId).toBe("11111111-1111-1111-1111-111111111111");
     expect(analysis.cwd).toBe("/Users/test/codex-proj");
+    expect(analysis.repoRoot).toBe("/Users/test/codex-proj");
     expect(analysis.gitBranch).toBe("main");
+    // Normalized from the fixture's "https://github.com/test/codex-proj.git".
+    expect(analysis.gitRepositoryUrl).toBe("https://github.com/test/codex-proj");
     expect(analysis.title).toBe("Fix flaky test");
     expect(analysis.startedAt).toBe("2026-07-01T10:00:00.000Z");
     expect(analysis.endedAt).toBe("2026-07-01T10:00:14.500Z");
@@ -51,6 +54,19 @@ describe("analyzeCodexSession", () => {
     expect(analysis.codex.cliVersion).toBe("0.55.0");
     expect(analysis.codex.agentRole).toBe("reviewer");
     expect(analysis.codex.archived).toBe(false);
+  });
+
+  it("derives only worktreeName (no repoRoot) for a Codex central-worktree cwd", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/worktree/rollout-2026-07-05T10-00-00-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee.jsonl",
+      "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+    );
+    expect(analysis.cwd).toBe("/Users/test/.codex/worktrees/ab12/codex-proj");
+    // The central worktree path carries no parent-repo location — the server
+    // resolves a repoRoot from gitRepositoryUrl instead (sources/codex.ts).
+    expect(analysis.repoRoot).toBeUndefined();
+    expect(analysis.worktreeName).toBe("ab12");
+    expect(analysis.gitRepositoryUrl).toBe("https://github.com/test/codex-proj");
   });
 
   it("counts user turns from user_message events and captures the first prompt", async () => {
