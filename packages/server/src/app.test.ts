@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -507,5 +509,69 @@ describe("GET /api/overview", () => {
     const app = createApp();
     const res = await app.request("/api/overview?repo=");
     expect(res.status).toBe(400);
+  });
+});
+
+// `createApp`'s `webDistDir` override (see app.ts) lets these exercise the
+// production static-serving + SPA-fallback path against a fixture directory
+// standing in for a real `vite build` output, without actually running one.
+describe("SPA fallback — built web assets present", () => {
+  let webDistDir: string;
+
+  beforeAll(async () => {
+    webDistDir = await mkdtemp(join(tmpdir(), "junrei-web-dist-"));
+    await writeFile(join(webDistDir, "index.html"), "<!doctype html><title>junrei</title>");
+    await mkdir(join(webDistDir, "assets"));
+    await writeFile(join(webDistDir, "assets", "app.js"), "console.log('junrei');");
+  });
+
+  afterAll(async () => {
+    await rm(webDistDir, { recursive: true, force: true });
+  });
+
+  it("serves a real static asset with its content type", async () => {
+    const app = createApp({ webDistDir });
+    const res = await app.request("/assets/app.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/javascript/);
+    expect(await res.text()).toBe("console.log('junrei');");
+  });
+
+  it("GET /session/claude-code/:id/timeline (a client-side route, no matching file) falls back to index.html", async () => {
+    const app = createApp({ webDistDir });
+    const res = await app.request(`/session/claude-code/${SESSION_ID}/timeline`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await res.text()).toContain("<title>junrei</title>");
+  });
+
+  it("known API routes still work — the static-asset middleware falls through", async () => {
+    const app = createApp({ webDistDir });
+    const res = await app.request("/api/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok", name: "junrei" });
+  });
+
+  it("GET /api/nonexistent still 404s as JSON, not the SPA shell", async () => {
+    const app = createApp({ webDistDir });
+    const res = await app.request("/api/nonexistent");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toMatch(/json/);
+    expect(await res.json()).toEqual({ error: "not found" });
+  });
+});
+
+describe("SPA fallback — no build present (dev/test default)", () => {
+  it("GET /session/... 404s plainly, same as with no catch-all registered at all", async () => {
+    const app = createApp({ webDistDir: join(tmpdir(), "junrei-web-dist-does-not-exist") });
+    const res = await app.request("/session/claude-code/some-id/timeline");
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /api/nonexistent still returns the JSON-shaped 404 even without a build", async () => {
+    const app = createApp({ webDistDir: join(tmpdir(), "junrei-web-dist-does-not-exist") });
+    const res = await app.request("/api/nonexistent");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not found" });
   });
 });

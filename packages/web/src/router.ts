@@ -81,7 +81,7 @@ export function sessionRefOf(item: {
 
 /**
  * react-router path pattern for the Claude Code session shell route,
- * registered with `createHashRouter` — bare session id, no `:project`
+ * registered with `createBrowserRouter` — bare session id, no `:project`
  * segment (dropped once bare-id server lookup made it unnecessary — see
  * `SessionRef`'s doc comment). Symmetric with `CODEX_SESSION_ROUTE_PATH`.
  */
@@ -99,12 +99,12 @@ export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?";
 export const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Build the path for a session route (no leading `#` — `createHashRouter`
- * prepends it, and `<Link to>` targets are always plain pathnames). Omits the
- * lens segment for "overview" to match the historical hash shape
- * (`#/session/.../id` rather than `#/session/.../id/overview`). Both sources
- * share the same shape now (`/session/<source>/<id>[/<lens>]`) — see
- * `SessionRef`'s doc comment.
+ * Build the path for a session route (`<Link to>` targets are always plain
+ * pathnames — `createBrowserRouter` needs no `#` prefix). Omits the lens
+ * segment for "overview" to match the app's historical URL shape (formerly
+ * `#/session/.../id` under the hash router, now `/session/.../id` — rather
+ * than `/session/.../id/overview`). Both sources share the same shape now
+ * (`/session/<source>/<id>[/<lens>]`) — see `SessionRef`'s doc comment.
  */
 export function sessionPath(ref: SessionRef, lens: Lens = "overview"): string {
   const base = `/session/${ref.source}/${encodeURIComponent(ref.id)}`;
@@ -113,8 +113,10 @@ export function sessionPath(ref: SessionRef, lens: Lens = "overview"): string {
 
 /**
  * True when a Claude Code session route's `:id`/`:lens?` params are actually
- * the legacy 2-segment URL shape (`#/session/claude-code/<projectDirName>/<uuid>`,
- * no explicit lens) — under `CLAUDE_SESSION_ROUTE_PATH`'s pattern, this SHORT
+ * the legacy 2-segment URL shape (`/session/claude-code/<projectDirName>/<uuid>`,
+ * no explicit lens — a `#/...` bookmark from before the history-router
+ * migration is normalized to this plain-path form by main.tsx before the
+ * router ever sees it) — under `CLAUDE_SESSION_ROUTE_PATH`'s pattern, this SHORT
  * legacy shape still matches (`:id` capturing the stale project dir, `:lens`
  * capturing the real id), so `SessionShell` consults this to redirect it
  * on the spot. A `projectDirName` is never UUID-shaped (see `SESSION_UUID_RE`'s
@@ -139,9 +141,12 @@ export function isLegacyClaudeProjectScopedUrl(
 /**
  * Legacy URL guard (web-only) for bookmarked Claude Code session links that
  * still carry the old `:project` segment in a shape LONGER than
- * `CLAUDE_SESSION_ROUTE_PATH` can match — `#/session/claude-code/<projectDirName>/<uuid>/<lens>[?record=N]`
+ * `CLAUDE_SESSION_ROUTE_PATH` can match — `/session/claude-code/<projectDirName>/<uuid>/<lens>[?record=N]`
  * or the legacy agent-drilldown shape
- * `#/session/claude-code/<projectDirName>/<uuid>/agent/<agentId>[/<lens>]`.
+ * `/session/claude-code/<projectDirName>/<uuid>/agent/<agentId>[/<lens>]`
+ * (a pre-history-router `#/...` bookmark is normalized to this plain-path
+ * form by main.tsx before the router runs — see `isLegacyClaudeProjectScopedUrl`'s
+ * doc comment above).
  * These fall through every registered route to react-router's catch-all,
  * where this helper is consulted (see main.tsx). The plain 2-segment legacy
  * shape (`.../<project>/<uuid>` with no lens) is SHORT enough to still match
@@ -170,7 +175,7 @@ export function legacyClaudeSessionRedirectTarget(
  * (L3, screen 8) for a given source line — see `RecordDetail.tsx`.
  *
  * The record slide-over is addressed with a `?record=<line>` query segment
- * appended to the session path (e.g. `#/session/claude-code/id/timeline?record=42`)
+ * appended to the session path (e.g. `/session/claude-code/id/timeline?record=42`)
  * rather than component-local state. Reasons: (1) it makes a specific record
  * shareable/bookmarkable, matching how every other drill-down in this app is
  * a real URL; (2) opening the panel pushes a history entry, so the browser
@@ -193,7 +198,7 @@ export function parseRecordParam(searchParams: URLSearchParams): number | undefi
 
 /**
  * react-router path pattern for the agent (subagent detail, L3) shell route,
- * registered with `createHashRouter` alongside `CLAUDE_SESSION_ROUTE_PATH`.
+ * registered with `createBrowserRouter` alongside `CLAUDE_SESSION_ROUTE_PATH`.
  * Claude-only — Codex sub-agent threads are full sessions in their own right
  * (see `sources/codex.ts` on the server), not sidecar transcripts scoped
  * under a parent session, so there's no Codex equivalent of this route. The

@@ -1,4 +1,8 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StreamableHTTPTransport } from "@hono/mcp";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
 import { getRepoOverview } from "./overview.js";
@@ -17,13 +21,51 @@ export type { AnySessionListItem } from "./sessions.js";
 
 const DEFAULT_LIST_LIMIT = 50;
 
+// The built web SPA (`@junrei/web`'s `vite build` output) — a sibling
+// package's `dist/`, resolved from this file's own location so it's correct
+// regardless of the process's cwd. Absent in dev (the Vite dev server serves
+// the SPA directly, see vite.config.ts) and in most test runs (nothing here
+// builds `@junrei/web` first) — see the `webDistDir` guard below.
+const DEFAULT_WEB_DIST_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+
+export type CreateAppOptions = {
+  /**
+   * Root directory of the built web SPA — override for tests (point at a
+   * fixture dir with an `index.html`) rather than requiring a real
+   * `vite build`. Defaults to `DEFAULT_WEB_DIST_DIR`.
+   */
+  webDistDir?: string;
+};
+
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
 }
 
-export function createApp() {
+export function createApp(options: CreateAppOptions = {}) {
+  const webDistDir = options.webDistDir ?? DEFAULT_WEB_DIST_DIR;
+  // Only wire up static serving when a build actually exists — avoids
+  // `serveStatic`'s "root path not found" console noise on every `createApp()`
+  // call in dev/tests, where no build has run. The SPA-fallback catch-all
+  // below is still registered unconditionally so the `/api/*` 404-shape
+  // guarantee (see its comment) holds either way.
+  const hasWebBuild = existsSync(webDistDir);
+
+  const app = new Hono();
+  // Constructed only when a build exists — `serveStatic` itself does an
+  // `existsSync(root)` check at construction time and logs a warning when it
+  // fails, which would otherwise fire on every build-less `createApp()` call
+  // (i.e. most dev/test runs).
+  const indexHtml = hasWebBuild ? serveStatic({ root: webDistDir, path: "index.html" }) : undefined;
+  if (hasWebBuild) {
+    // Real static assets (JS/CSS/etc, hashed filenames under /assets) —
+    // served as-is with correct content types; falls through (calls `next()`)
+    // for any path with no matching file, e.g. every API route and every
+    // client-side SPA route below.
+    app.use("*", serveStatic({ root: webDistDir }));
+  }
+
   return (
-    new Hono()
+    app
       .all("/mcp", async (c) => {
         // Stateless: a fresh server + transport per request keeps the endpoint
         // usable by any number of clients with no session bookkeeping.
@@ -144,6 +186,29 @@ export function createApp() {
           return c.json({ error: "record not found" } as const, 404);
         }
         return c.json(detail);
+      })
+      // SPA fallback — the browser (history) router serves client-side paths
+      // like `/session/claude-code/<id>/timeline` that don't correspond to
+      // any file on disk, so a hard reload / deep link needs the server to
+      // hand back `index.html` and let `createBrowserRouter` (see
+      // web/src/main.tsx) resolve the route itself. Registered LAST, after
+      // every real API route above, so those always win their exact match
+      // first — this only runs for a path none of them claimed.
+      //
+      // An unmatched `/api/*` path (typo'd or removed endpoint) must NOT
+      // fall through to the SPA shell — it gets the same JSON-shaped 404 the
+      // rest of the API uses instead.
+      .get("*", async (c) => {
+        if (c.req.path.startsWith("/api")) {
+          return c.json({ error: "not found" } as const, 404);
+        }
+        if (indexHtml === undefined) {
+          // No build available (dev/most test runs — the Vite dev server
+          // handles this case directly, see vite.config.ts) — same bare 404
+          // Hono would return with no catch-all registered at all.
+          return c.notFound();
+        }
+        return indexHtml(c, async () => undefined);
       })
   );
 }
