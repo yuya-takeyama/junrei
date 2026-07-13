@@ -4,7 +4,7 @@ import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
 import { formatDateTime, formatDuration, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
-import { classifyModel } from "./modelClass.js";
+import { classifyModel, MODEL_CLASS_ORDER } from "./modelClass.js";
 import { RepoOverviewBand } from "./RepoOverviewBand.js";
 import {
   ALL_REPOS,
@@ -63,7 +63,7 @@ function ModelMixBar({ mix }: { mix: ModelMixEntry[] }) {
 
   return (
     <span className="mix">
-      {(["f", "s", "h", "mut"] as const).map((cls) => {
+      {MODEL_CLASS_ORDER.map((cls) => {
         const tokens = byClass.get(cls);
         if (tokens === undefined || tokens <= 0) return null;
         const pct = (tokens / total) * 100;

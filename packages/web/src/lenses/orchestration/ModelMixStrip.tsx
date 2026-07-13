@@ -23,7 +23,7 @@ export function ModelMixStrip({ session }: Props) {
   return (
     <div className="fx ac gap12 mono fs11 mut" style={{ flexWrap: "wrap" }}>
       {rows.map((m) => (
-        <span className="fx ac gap6" key={m.model}>
+        <span className="fx ac gap6" key={m.model} title={m.model}>
           <span className={`mdot c-${classifyModel(m.model)}`} />
           {modelShortLabel(m.model)} {formatTokens(totalTokensOf(m))} · {formatUsd(m.costUsd ?? 0)}
         </span>

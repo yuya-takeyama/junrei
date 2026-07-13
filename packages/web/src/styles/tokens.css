@@ -23,6 +23,12 @@
   --f: #b58ce0;
   --s: #7aa8e0;
   --h: #66c2a6;
+  /* model-family accents (see web/src/modelClass.ts master data) */
+  --sol: #d4b95a;
+  --terra: #a4b06a;
+  --luna: #b7b1cc;
+  --rev: #5cb8ce;
+  --gpt: #d98cb4;
 
   --ui: "Fira Sans", system-ui, -apple-system, sans-serif;
   --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -40,6 +46,11 @@
   --f: #b58ce0;
   --s: #7aa8e0;
   --h: #66c2a6;
+  --sol: #d4b95a;
+  --terra: #a4b06a;
+  --luna: #b7b1cc;
+  --rev: #5cb8ce;
+  --gpt: #d98cb4;
 }
 
 :root[data-theme="light"] {
@@ -53,6 +64,11 @@
   --f: #7a56b8;
   --s: #3470bd;
   --h: #178a70;
+  --sol: #8f7a1e;
+  --terra: #66752a;
+  --luna: #6d6688;
+  --rev: #1f7f9c;
+  --gpt: #a8437c;
 }
 
 @media (prefers-color-scheme: light) {
@@ -67,5 +83,10 @@
     --f: #7a56b8;
     --s: #3470bd;
     --h: #178a70;
+    --sol: #8f7a1e;
+    --terra: #66752a;
+    --luna: #6d6688;
+    --rev: #1f7f9c;
+    --gpt: #a8437c;
   }
 }

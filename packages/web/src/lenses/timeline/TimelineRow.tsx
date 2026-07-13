@@ -21,7 +21,7 @@ export interface TimelineRowProps {
 function ModelBadge({ model }: { model: string | undefined }) {
   if (model === undefined) return null;
   return (
-    <span className="mbdg">
+    <span className="mbdg" title={model}>
       <span className={`mdot c-${classifyModel(model)}`} />
       {modelShortLabel(model)}
     </span>
