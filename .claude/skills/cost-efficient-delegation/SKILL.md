@@ -14,11 +14,14 @@ job well, but only through controls the current harness actually exposes.
 - **Claude Code** uses `Agent(...)` / `Workflow agent(...)`. Pass an explicit
   `model` and `effort` on every delegated call unless the task genuinely needs
   the orchestrator tier.
-- **Codex** uses `collaboration.spawn_agent`. Read the tool schema available in
-  the current session before launching. If it exposes `model` and `effort`, set
-  them from the table below. If it does not, do not pass unsupported arguments
-  or claim that a cheaper model was selected: routing is not caller-controlled
-  on that surface.
+- **Codex** uses `spawn_agent` (multi-agent v2). The routing fields exist
+  upstream but are schema-gated by feature flags: `agent_type`/`service_tier`
+  appear only with `features.multi_agent_v2.hide_spawn_agent_metadata = false`
+  (this repo sets it in `.codex/config.toml`), and `model`/`reasoning_effort`
+  appear only on builds with `expose_spawn_agent_model_overrides` (default-on
+  since rust-v0.145.0-alpha.7, 2026-07-13). Read the schema exposed in the
+  current session and use only what is actually there — never pass
+  unsupported arguments or claim a cheaper child model without evidence.
 - A model selector on the parent session (`codex --model ...`, a Codex app
   model picker, or project config) does not prove that a particular child used
   that model. Verify the recorded model in Junrei after delegation.
@@ -58,8 +61,11 @@ when their individual tasks are easy.
 
 ## Decision table
 
-Use the Codex column when model selection is exposed by the current surface.
-Otherwise follow the Codex fallback section below.
+On Codex, reach the model in the Codex column through a predefined role when
+possible: `agent_type: "explorer"` pins gpt-5.6-luna/low (read-only) and
+`agent_type: "worker"` pins gpt-5.6-terra/medium — defined in
+`.codex/agents/*.toml`. Rows without a matching role need the direct
+`model`/`reasoning_effort` params (see Codex controls below).
 
 | Delegated task | Claude | Codex | effort |
 |---|---|---|---|
@@ -120,28 +126,43 @@ inherit session model.
 
 ## Codex controls and fallback
 
-When `collaboration.spawn_agent` exposes `model` / `effort`, pass the GPT-5.6
-choice from the decision table explicitly. When it does not:
+Model routing on Codex, in order of preference:
 
-1. **Do not spawn merely to obtain a cheaper tier.** The call cannot guarantee
-   that outcome. Spawn only for real parallelism or context isolation.
-2. **Minimize inherited context with `fork_turns`.** Use `"none"` for a fully
-   self-contained prompt, a small numeric value for recent context, and
-   `"all"` only when the complete conversation is required.
-3. **Keep the task bounded.** One objective, relevant paths, constraints,
-   verification, and a text-only result contract. Ask for summaries instead
-   of raw tool output.
-4. **Prefer a cheaper parent for routine standalone work.** When the user or
-   current workflow explicitly authorizes a separate task/session, select
-   `gpt-5.6-luna` or `gpt-5.6-terra` at task creation. Do not create a
-   user-owned Codex task solely as an implementation detail without that
-   authorization.
-5. **Escalate by restarting the bounded task on Sol**, not by moving the whole
-   workflow to Sol, when Luna/Terra fails for a reasoning-related cause.
+1. **Predefined roles** (works on current builds in this repo): spawn with
+   `agent_type: "explorer"` (gpt-5.6-luna, low, read-only) or
+   `agent_type: "worker"` (gpt-5.6-terra, medium). The roles live in
+   `.codex/agents/*.toml` and pin `model`/`model_reasoning_effort`; the
+   selector is visible because `.codex/config.toml` sets
+   `hide_spawn_agent_metadata = false`. Define a new role file there when a
+   recurring task shape has no matching role.
+2. **Direct overrides** (0.145.0-alpha.7+): when the live schema shows
+   `model`/`reasoning_effort`, pass the GPT-5.6 choice from the decision
+   table.
+3. **Neither exposed** (older stable, or outside this repo): the child
+   inherits the parent's live-turn model. Do not spawn merely to obtain a
+   cheaper tier — spawn only for real parallelism or context isolation, and
+   do not claim model-tier savings.
 
-This fallback still saves context and orchestration overhead, but it is not a
-claim of model-tier savings. Report the actual recorded child model when cost
-is material.
+Constraints that apply to 1 and 2 — a violation makes Codex reject the spawn
+or silently keep the parent model:
+
+- **A full-history fork rejects overrides.** `fork_turns: "all"` (the
+  default) forces the parent's model; always pass `fork_turns: "none"` for a
+  self-contained prompt or a small numeric value for recent context when
+  using `agent_type`/`model`/`reasoning_effort`.
+- **Keep the task bounded.** One objective, relevant paths, constraints,
+  verification, and a text-only result contract. Ask for summaries instead
+  of raw tool output.
+- **Escalate by restarting the bounded task on Sol**, not by moving the whole
+  workflow to Sol, when Luna/Terra fails for a reasoning-related cause.
+- **Prefer a cheaper parent for routine standalone work.** When the user
+  explicitly authorizes a separate task/session, select `gpt-5.6-luna` or
+  `gpt-5.6-terra` at task creation instead of spawning from an expensive
+  parent.
+
+Whatever the route, verify the recorded child model in Junrei afterwards and
+report it when cost is material — the rollout, not the prompt wording, is the
+source of truth.
 
 ## Session-level setup for humans
 
@@ -158,10 +179,15 @@ is material.
 - Start a routine worker session with `codex --model gpt-5.6-terra` or
   `codex --model gpt-5.6-luna`; reserve `gpt-5.6-sol` for orchestration and the
   hardest tasks.
-- Set reasoning effort only where the current Codex surface exposes it. Do not
-  invent an `effort` field on `spawn_agent` when the schema lacks one.
-- Re-check the collaboration tool schema after Codex upgrades; per-agent model
-  routing may become available independently of the parent model picker.
+- Per-subagent routing is configured in this repo: `.codex/config.toml` sets
+  `[features.multi_agent_v2] hide_spawn_agent_metadata = false`, and
+  `.codex/agents/*.toml` define the pinned roles. Mirror both into
+  `~/.codex/` to get the same behavior in other repos.
+- Re-check the spawn_agent schema after Codex upgrades: `model` /
+  `reasoning_effort` become directly available with
+  `expose_spawn_agent_model_overrides` (default-on from
+  rust-v0.145.0-alpha.7). Role files whose model slug the models list
+  rejects need updating to a current slug.
 
 ## Measure it
 
@@ -170,7 +196,7 @@ This repo is the measuring tool. After significant delegation, check:
 - Junrei UI -> session detail -> **Cost by model** and **Subagent tree**.
 - Junrei MCP -> `get_subagent_tree` / `get_session_summary`.
 - For Codex, compare the intended tier with the model recorded on each child;
-  lack of a selector means the observed model, not the prompt wording, is the
+  the observed model — not the prompt wording or the role file — is the
   source of truth.
 
 Use the measured model mix, cost, return size, and duplicated exploration to

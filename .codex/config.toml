@@ -2,3 +2,11 @@
 # This repo has no AGENTS.md; let Codex fall back to CLAUDE.md as the
 # per-directory project instructions file so both tools share one source.
 project_doc_fallback_filenames = ["CLAUDE.md"]
+
+# Expose the `agent_type` selector on the spawn_agent tool schema (hidden by
+# default upstream) so the model can pick the purpose-specific roles defined
+# under .codex/agents/ per call. Note: a full-history fork
+# (fork_turns: "all", the default) rejects role/model overrides — spawn roles
+# with fork_turns "none" or a numeric turn count.
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
