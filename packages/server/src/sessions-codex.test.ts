@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,10 @@ const CODEX_HOME = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtur
 // permanently drags a file's birthtime down to any past mtime it is ever
 // stamped with — a checkout that once ran an older FIXTURE_MTIMES table
 // keeps the old, lower birthtime forever and silently reorders the proxy
-// window. Fresh copies are born "now", so the proxy always equals the
+// window. The copies are made by rewriting each file's contents rather than
+// fs.cp, because on APFS fs.cp preserves the SOURCE's (possibly
+// dragged-down) birthtime and utimes can never raise it back. A rewritten
+// copy is a genuinely new inode born "now", so the proxy always equals the
 // stamped mtime; copying also stops this suite from mutating fixtures
 // shared with app.test.ts.
 const FIXTURE_MTIMES: Array<[string, number]> = [
@@ -136,6 +139,22 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
   ],
 ];
 
+async function copyTreeRewrite(src: string, dest: string): Promise<void> {
+  await mkdir(dest, { recursive: true });
+  const entries = await readdir(src, { withFileTypes: true });
+  await Promise.all(
+    entries.map(async (entry) => {
+      const from = join(src, entry.name);
+      const to = join(dest, entry.name);
+      if (entry.isDirectory()) {
+        await copyTreeRewrite(from, to);
+      } else {
+        await writeFile(to, await readFile(from));
+      }
+    }),
+  );
+}
+
 async function stampFixtureMtimes(claudeRoot: string, codexRoot: string) {
   await Promise.all(
     FIXTURE_MTIMES.map(([source, epoch]) => {
@@ -156,8 +175,8 @@ beforeAll(async () => {
   scratchClaudeDir = join(scratchDir, "claude");
   scratchCodexHome = join(scratchDir, "codex-home");
   await Promise.all([
-    cp(CLAUDE_FIXTURES_DIR, scratchClaudeDir, { recursive: true }),
-    cp(CODEX_HOME, scratchCodexHome, { recursive: true }),
+    copyTreeRewrite(CLAUDE_FIXTURES_DIR, scratchClaudeDir),
+    copyTreeRewrite(CODEX_HOME, scratchCodexHome),
   ]);
   await stampFixtureMtimes(scratchClaudeDir, scratchCodexHome);
 });
