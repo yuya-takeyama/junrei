@@ -9,6 +9,7 @@ import { type AnySessionListItem, listSessions, MAX_LIST_LIMIT } from "./session
 // would silently break `?repo=` links the web builds from `repoFilterKey`
 // but this route can no longer resolve.
 const CLAUDE_FALLBACK_PREFIX = "claude-project:";
+const CODEX_REPO_URL_PREFIX = "codex-repo:";
 const CODEX_FALLBACK_PREFIX = "codex-cwd:";
 const UNKNOWN_CWD = "(unknown cwd)";
 
@@ -17,21 +18,24 @@ const UNKNOWN_CWD = "(unknown cwd)";
  * route) accepts is EITHER:
  *  - a real `repoRoot` absolute path (e.g. `/Users/x/junrei`), shared by a
  *    repo-root session and every one of its `.claude/worktrees/<name>`
- *    sessions (see `@junrei/core`'s `deriveRepoIdentity`); or
+ *    sessions (see `@junrei/core`'s `deriveRepoIdentity`) — and, for Codex,
+ *    by its `$CODEX_HOME/worktrees` sessions whose repository URL anchors to
+ *    that path (see `sources/codex.ts`'s `buildRepoRootByUrl`); or
  *  - one of the fallback-bucket keys assigned to a session with no
- *    `repoRoot` at all (pre-#36 data, or a `cwd` the worktree heuristic
- *    never matched): `claude-project:<projectDirName>` for a Claude row, or
- *    `codex-cwd:<cwd>` (`codex-cwd:(unknown cwd)` when even `cwd` is
- *    missing) for a Codex row.
+ *    `repoRoot`: `claude-project:<projectDirName>` for a Claude row
+ *    (pre-#36 data, or a `cwd` the worktree heuristic never matched);
+ *    `codex-repo:<repoUrl>` for a Codex row whose repository URL no local
+ *    checkout anchors; or `codex-cwd:<cwd>` (`codex-cwd:(unknown cwd)` when
+ *    even `cwd` is missing) for a Codex row without even a URL.
  * This mirrors the web's `repoFilterKey` exactly — same key, either source.
  * Exported for `search.ts`'s `repo` filter, so search and overview resolve
  * the same `repo` argument identically.
  */
 export function repoKeyOf(item: AnySessionListItem): string {
   if (item.repoRoot !== undefined) return item.repoRoot;
-  return item.source === "codex"
-    ? `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`
-    : `${CLAUDE_FALLBACK_PREFIX}${item.projectDirName}`;
+  if (item.source !== "codex") return `${CLAUDE_FALLBACK_PREFIX}${item.projectDirName}`;
+  if (item.repoUrl !== undefined) return `${CODEX_REPO_URL_PREFIX}${item.repoUrl}`;
+  return `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`;
 }
 
 /** One UTC calendar day's cost/session-count bucket — see `RepoOverview.perDay`. */

@@ -7,7 +7,7 @@ import type {
 } from "../shared/metrics.js";
 import { mergeFileAccess } from "../shared/metrics.js";
 import { estimateCostComponents } from "../shared/pricing/pricing.js";
-import { deriveRepoIdentity } from "../shared/repo.js";
+import { deriveRepoIdentity, normalizeRepoUrl } from "../shared/repo.js";
 import type { CompactionEvent, SessionAnalysisCore } from "../shared/session-analysis.js";
 import type { TokenUsage } from "../shared/types.js";
 import type { CodexSessionFileRef } from "./discovery.js";
@@ -517,6 +517,9 @@ export function analyzeCodexSession(
     ...(repoRoot !== undefined && { repoRoot }),
     ...(worktreeName !== undefined && { worktreeName }),
     ...(sessionMeta?.git?.branch !== undefined && { gitBranch: sessionMeta.git.branch }),
+    ...(sessionMeta?.git?.repositoryUrl !== undefined && {
+      gitRepositoryUrl: normalizeRepoUrl(sessionMeta.git.repositoryUrl),
+    }),
     ...(title !== undefined && { title }),
     ...(startedAt !== undefined && { startedAt }),
     ...(lastTimestamp !== undefined && { endedAt: lastTimestamp }),

@@ -89,9 +89,18 @@ export function sliceDelegation(delegation: DelegationSummary): DelegationLite {
 export interface SessionListItemBase {
   sessionId: string;
   cwd?: string;
-  /** Repo-level grouping key derived from `cwd` — see `@junrei/core`'s `deriveRepoIdentity`. */
+  /**
+   * Repo-level grouping key derived from `cwd` — see `@junrei/core`'s
+   * `deriveRepoIdentity`. For a Codex worktree session (whose `cwd` carries
+   * no parent-repo path) this may instead be resolved from the session's
+   * repository URL — see `sources/codex.ts`'s `buildRepoRootByUrl`.
+   */
   repoRoot?: string;
-  /** Set alongside `repoRoot` only when `cwd` was under a `.claude/worktrees/<name>` path. */
+  /**
+   * Worktree segment of `cwd` when it was under a per-task worktree layout —
+   * `<repo>/.claude/worktrees/<name>` (Claude) or the central
+   * `/.codex/worktrees/<hash>/<repo>` (Codex) — see `deriveRepoIdentity`.
+   */
   worktreeName?: string;
   title?: string;
   firstUserPrompt?: string;

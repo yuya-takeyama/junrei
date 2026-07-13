@@ -86,10 +86,12 @@ export function projectFilterKey(item: SessionListItem): string {
 }
 
 // Fallback-bucket key prefixes for sessions with no `repoRoot` (pre-#36 data,
-// or a `cwd` the `.claude/worktrees/<name>` heuristic never matched). Real
-// `repoRoot` values are always absolute paths (start with "/"), so a
-// non-path prefix here can never collide with one.
+// or a `cwd` the worktree heuristics never matched). Real `repoRoot` values
+// are always absolute paths (start with "/"), so a non-path prefix here can
+// never collide with one. Kept in lockstep with the server's `repoKeyOf`
+// (overview.ts) — see the comment there.
 const CLAUDE_FALLBACK_PREFIX = "claude-project:";
+const CODEX_REPO_URL_PREFIX = "codex-repo:";
 const CODEX_FALLBACK_PREFIX = "codex-cwd:";
 const UNKNOWN_CWD = "(unknown cwd)";
 
@@ -100,16 +102,19 @@ const UNKNOWN_CWD = "(unknown cwd)";
  * `repoRoot` points at its *parent* repo, so it collapses into the same key
  * as sessions run at the repo root itself — that collapsing is the entire
  * point of the repo filter (dogfooding showed one repo splintering into a
- * dropdown entry per worktree). Sessions with no `repoRoot` at all fall back
- * to a distinct bucket per `projectDirName` (Claude) or `cwd` (Codex, with a
+ * dropdown entry per worktree; a Codex `$CODEX_HOME/worktrees` session gets
+ * its parent `repoRoot` resolved server-side from its repository URL). A
+ * Codex session whose URL no local checkout anchors still groups per repo
+ * via its `repoUrl` bucket. Sessions with none of that fall back to a
+ * distinct bucket per `projectDirName` (Claude) or `cwd` (Codex, with a
  * fixed sentinel when even `cwd` is missing) so they still surface as a
  * filterable option instead of silently disappearing from the dropdown.
  */
 export function repoFilterKey(item: SessionListItem): string {
   if (item.repoRoot !== undefined) return item.repoRoot;
-  return item.source === "codex"
-    ? `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`
-    : `${CLAUDE_FALLBACK_PREFIX}${item.projectDirName}`;
+  if (item.source !== "codex") return `${CLAUDE_FALLBACK_PREFIX}${item.projectDirName}`;
+  if (item.repoUrl !== undefined) return `${CODEX_REPO_URL_PREFIX}${item.repoUrl}`;
+  return `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`;
 }
 
 /** One entry in the session-list repo dropdown — see `repoOptionsFor`. */
@@ -156,12 +161,34 @@ export function disambiguateBasenames(paths: readonly string[]): Map<string, str
 }
 
 /**
+ * A repo bucket's short-labelable identifier: its `repoRoot` path, or — for a
+ * Codex bucket grouped by repository URL instead (see `repoFilterKey`) — that
+ * URL. Both split into `/`-segments ending in the repo's name, so one
+ * `disambiguateBasenames` pass over all of them keeps even a path-keyed and a
+ * URL-keyed bucket of same-named repos visually distinct.
+ */
+function repoIdentifierOf(item: SessionListItem): string | undefined {
+  if (item.repoRoot !== undefined) return item.repoRoot;
+  return item.source === "codex" ? item.repoUrl : undefined;
+}
+
+/**
+ * Label-friendly form of a repo identifier: a URL sheds its scheme so a
+ * disambiguated label extends to `github.com/org/repo`, never the
+ * `https:/github.com/…` junk that segment-splitting a full URL produces.
+ * Paths pass through unchanged.
+ */
+function displayIdentifier(identifier: string): string {
+  return identifier.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+}
+
+/**
  * Derives the session-list repo dropdown's options from the currently loaded
  * sessions — one entry per distinct `repoFilterKey`, sorted by label. Real
- * repos get a disambiguated basename label (see `disambiguateBasenames`);
- * fallback buckets (no `repoRoot`) get the best identifier they have, via the
- * same "shorten a path/dir-name" logic `formatProject` already uses for the
- * row display.
+ * repos (a `repoRoot` path or a Codex repository-URL bucket) get a
+ * disambiguated basename label (see `disambiguateBasenames`); the remaining
+ * fallback buckets get the best identifier they have, via the same "shorten
+ * a path/dir-name" logic `formatProject` already uses for the row display.
  */
 export function repoOptionsFor(sessions: readonly SessionListItem[]): RepoOption[] {
   const representative = new Map<string, SessionListItem>();
@@ -170,17 +197,20 @@ export function repoOptionsFor(sessions: readonly SessionListItem[]): RepoOption
     if (!representative.has(key)) representative.set(key, s);
   }
 
-  const repoRoots = [...representative.values()]
-    .map((s) => s.repoRoot)
-    .filter((r): r is string => r !== undefined);
-  const disambiguated = disambiguateBasenames(repoRoots);
+  const identifiers = [...representative.values()]
+    .map(repoIdentifierOf)
+    .filter((r): r is string => r !== undefined)
+    .map(displayIdentifier);
+  const disambiguated = disambiguateBasenames(identifiers);
 
   const options = [...representative.entries()].map(([key, item]): RepoOption => {
-    if (item.repoRoot !== undefined) {
+    const identifier = repoIdentifierOf(item);
+    if (identifier !== undefined) {
+      const display = displayIdentifier(identifier);
       return {
         key,
-        label: disambiguated.get(item.repoRoot) ?? lastPathSegment(item.repoRoot),
-        title: item.repoRoot,
+        label: disambiguated.get(display) ?? lastPathSegment(display),
+        title: identifier,
       };
     }
     if (item.source === "codex") {
