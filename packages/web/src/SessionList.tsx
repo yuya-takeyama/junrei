@@ -26,6 +26,7 @@ import {
   projectFilterKey,
   repoFilterKey,
   repoOptionsFor,
+  sessionsFetchWindow,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -36,7 +37,10 @@ import { Band } from "./shell/Band.js";
  * Rows per page. Kept small on purpose: the server only ANALYZES enough
  * transcripts to fill the requested page (see `claudeListItems` in
  * `@junrei/server`), so this number is what the first paint waits on —
- * deeper pages stay reachable via the pager below the list.
+ * deeper pages stay reachable via the pager below the list. Only plain
+ * browsing pages on the server, though — an active repo/date/search filter
+ * switches the fetch to the whole listable window so counting and paging can
+ * happen after filtering (see `sessionsFetchWindow`).
  */
 const LIST_LIMIT = 50;
 
@@ -99,6 +103,18 @@ export function SessionList() {
   const repoFilter = parseRepoParam(searchParams.get("repo"));
   const page = parseListPage(searchParams.get("page"));
 
+  // Any client-side filter flips the list from server paging to
+  // fetch-the-window-then-page (see `sessionsFetchWindow`) — a bound-less
+  // "custom" date range counts too, which just means one slightly bigger
+  // fetch before the user picks a bound.
+  const filterActive =
+    repoFilter !== ALL_REPOS || dateFilter.kind !== "all" || search.trim() !== "";
+  const { limit: fetchLimit, offset: fetchOffset } = sessionsFetchWindow(
+    filterActive,
+    page,
+    LIST_LIMIT,
+  );
+
   useEffect(() => {
     setSessions(null);
     setError(null);
@@ -111,7 +127,7 @@ export function SessionList() {
     // even on the "All" tab.
     client.api.sessions
       .$get({
-        query: sessionsListQuery(sourceTab, String(LIST_LIMIT), String((page - 1) * LIST_LIMIT)),
+        query: sessionsListQuery(sourceTab, String(fetchLimit), String(fetchOffset)),
       })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
@@ -127,7 +143,10 @@ export function SessionList() {
     return () => {
       stale = true;
     };
-  }, [sourceTab, page]);
+    // Keyed on the resolved fetch window, not `page`/`filterActive` directly:
+    // while a filter is active the window is constant ({500, 0}), so paging
+    // through filtered rows never refetches.
+  }, [sourceTab, fetchLimit, fetchOffset]);
 
   const repoOptions = useMemo(() => {
     if (sessions === null) return [];
@@ -153,7 +172,17 @@ export function SessionList() {
     });
   }, [sessions, repoFilter, search, dateFilter]);
 
-  const pageCount = Math.max(1, Math.ceil(total / LIST_LIMIT));
+  // With a filter active the fetched window is the whole list, so the pager
+  // is sized by (and slices) the FILTERED rows; plain browsing keeps
+  // server-side paging sized by the server's unfiltered total.
+  const pageCount = Math.max(1, Math.ceil((filterActive ? filtered.length : total) / LIST_LIMIT));
+  // A stale `?page=` past the filtered range (shared link, or a filter that
+  // shrank the list before its handler could reset the param) clamps to the
+  // last page instead of rendering an empty page under a lying pager.
+  const activePage = filterActive ? Math.min(page, pageCount) : page;
+  const pageRows = filterActive
+    ? filtered.slice((activePage - 1) * LIST_LIMIT, activePage * LIST_LIMIT)
+    : filtered;
   const goToPage = (next: number) => {
     const params = new URLSearchParams(searchParams);
     // Page 1 is the canonical no-param URL, same as the "all" source tab.
@@ -161,6 +190,16 @@ export function SessionList() {
     else params.set("page", String(next));
     setSearchParams(params);
     window.scrollTo(0, 0);
+  };
+  // Filter changes that don't live in the URL (date preset, custom bounds,
+  // title search) still need the same page reset a source/repo change does —
+  // the paged series they define changes shape, so a held-over page number
+  // would point at arbitrary rows.
+  const resetPageParam = () => {
+    if (!searchParams.has("page")) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("page");
+    setSearchParams(params);
   };
 
   return (
@@ -202,6 +241,9 @@ export function SessionList() {
               const next = new URLSearchParams(searchParams);
               if (e.target.value === ALL_REPOS) next.delete("repo");
               else next.set("repo", e.target.value);
+              // Same reset as the source-tab switch above — the repo filter
+              // defines its own paged series.
+              next.delete("page");
               setSearchParams(next);
             }}
             aria-label="Filter by repo"
@@ -219,6 +261,7 @@ export function SessionList() {
             value={dateFilterSelectValue(dateFilter)}
             onChange={(e) => {
               setDateFilter(dateFilterFromSelectValue(e.target.value));
+              resetPageParam();
             }}
             aria-label="Filter by date"
           >
@@ -242,6 +285,7 @@ export function SessionList() {
                     ...dateFilter,
                     from: e.target.value === "" ? undefined : e.target.value,
                   });
+                  resetPageParam();
                 }}
                 aria-label="From date"
               />
@@ -256,6 +300,7 @@ export function SessionList() {
                     ...dateFilter,
                     to: e.target.value === "" ? undefined : e.target.value,
                   });
+                  resetPageParam();
                 }}
                 aria-label="To date"
               />
@@ -267,11 +312,23 @@ export function SessionList() {
             type="text"
             placeholder="⌕ search title…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              resetPageParam();
+            }}
             aria-label="Search by title"
           />
           <span className="mono fs11 mut num nowrap">
-            {sessions === null ? "…" : `${String(filtered.length)} of ${String(total)}`} sessions
+            {sessions === null ? "…" : `${String(filtered.length)} of ${String(total)}`}
+            {/* Same "incomplete" marker convention as the cost column's `*`:
+                the filter only scanned the fetched window, so matches older
+                than it can't be counted. */}
+            {sessions !== null && filterActive && sessions.length < total && (
+              <span title={`filtered over the newest ${String(sessions.length)} sessions only`}>
+                *
+              </span>
+            )}{" "}
+            sessions
           </span>
         </div>
       </div>
@@ -297,7 +354,7 @@ export function SessionList() {
             </span>
             <span className="lbl cellr">Cmp</span>
           </div>
-          {filtered.map((s) => (
+          {pageRows.map((s) => (
             <Link
               key={`${s.source}/${projectFilterKey(s)}/${s.sessionId}`}
               className="l0g"
@@ -359,22 +416,22 @@ export function SessionList() {
           <button
             type="button"
             className="chip"
-            disabled={page <= 1}
+            disabled={activePage <= 1}
             onClick={() => {
-              goToPage(page - 1);
+              goToPage(activePage - 1);
             }}
           >
             ‹ prev
           </button>
           <span className="mono fs11 mut num nowrap">
-            page {page} / {pageCount}
+            page {activePage} / {pageCount}
           </span>
           <button
             type="button"
             className="chip"
-            disabled={page >= pageCount}
+            disabled={activePage >= pageCount}
             onClick={() => {
-              goToPage(page + 1);
+              goToPage(activePage + 1);
             }}
           >
             next ›

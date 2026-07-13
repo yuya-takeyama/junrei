@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeSessionListItem, CodexSessionListItem } from "./api.js";
 import {
   disambiguateBasenames,
+  FILTER_SCAN_LIMIT,
   projectFilterKey,
   repoFilterKey,
   repoOptionsFor,
+  sessionsFetchWindow,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -67,6 +69,21 @@ describe("sessionsListQuery", () => {
       offset: "50",
       source: "codex",
     });
+  });
+});
+
+describe("sessionsFetchWindow", () => {
+  it("fetches exactly one server page when no client-side filter is active", () => {
+    expect(sessionsFetchWindow(false, 1, 50)).toEqual({ limit: 50, offset: 0 });
+    expect(sessionsFetchWindow(false, 3, 50)).toEqual({ limit: 50, offset: 100 });
+  });
+
+  it("fetches the whole listable window when a filter is active — pagination happens after filtering", () => {
+    expect(sessionsFetchWindow(true, 1, 50)).toEqual({ limit: FILTER_SCAN_LIMIT, offset: 0 });
+  });
+
+  it("keeps the window identical across pages while a filter is active, so paging never refetches", () => {
+    expect(sessionsFetchWindow(true, 3, 50)).toEqual(sessionsFetchWindow(true, 1, 50));
   });
 });
 

@@ -21,6 +21,37 @@ export function sessionsListQuery(
 }
 
 /**
+ * How many rows to fetch when a client-side filter is active — the whole
+ * listable window, not one page. Mirrors the server's `MAX_LIST_LIMIT` clamp
+ * (`@junrei/server`'s sessions.ts); kept as a web-local constant rather than
+ * imported because the only runtime import from `@junrei/server` the web
+ * bundle can afford is `type AppType` (see api.ts) — pulling a value would
+ * drag Node-only server code into the browser build.
+ */
+export const FILTER_SCAN_LIMIT = 500;
+
+/**
+ * Fetch window for `GET /api/sessions` given the paging mode. Plain browsing
+ * pages on the server: exactly `pageSize` rows at the requested page's
+ * offset, so the first paint only waits on one page's worth of transcript
+ * analysis. With any client-side filter (repo / date / title search) active,
+ * pagination has to happen AFTER filtering — a per-page fetch would scatter
+ * matches across server pages and leave the pager sized by the unfiltered
+ * total — so the fetch switches to the whole listable window
+ * (`FILTER_SCAN_LIMIT`, always from offset 0: the page number must not leak
+ * into the fetch) and the filtered rows are paged client-side.
+ */
+export function sessionsFetchWindow(
+  filterActive: boolean,
+  page: number,
+  pageSize: number,
+): { limit: number; offset: number } {
+  return filterActive
+    ? { limit: FILTER_SCAN_LIMIT, offset: 0 }
+    : { limit: pageSize, offset: (page - 1) * pageSize };
+}
+
+/**
  * Subagent-count cell text — shows the real count for both harnesses now
  * that Codex sub-agent threads have a real count too (see
  * `codex/orchestration.ts` in `@junrei/core`); a literal "0" still reads
