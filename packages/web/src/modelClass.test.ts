@@ -35,12 +35,22 @@ describe("classifyModel", () => {
 });
 
 describe("modelShortLabel", () => {
-  it("uses family codenames like the Claude words", () => {
-    expect(modelShortLabel("claude-fable-5")).toBe("fable");
-    expect(modelShortLabel("gpt-5.6-sol")).toBe("sol");
-    expect(modelShortLabel("gpt-5.6-terra")).toBe("terra");
-    expect(modelShortLabel("gpt-5.6-luna")).toBe("luna");
+  it("combines the family codename with the version", () => {
+    expect(modelShortLabel("claude-fable-5")).toBe("fable 5");
+    expect(modelShortLabel("claude-opus-4-8")).toBe("opus 4.8");
+    expect(modelShortLabel("claude-sonnet-4-5-20250929")).toBe("sonnet 4.5");
+    expect(modelShortLabel("claude-haiku-4-5")).toBe("haiku 4.5");
+    expect(modelShortLabel("gpt-5.6-sol")).toBe("5.6 sol");
+    expect(modelShortLabel("gpt-5.6-terra")).toBe("5.6 terra");
+    expect(modelShortLabel("gpt-5.6-luna")).toBe("5.6 luna");
     expect(modelShortLabel("codex-auto-review")).toBe("auto-review");
+  });
+
+  it("reads legacy version-first Claude ids and ignores snapshot dates", () => {
+    expect(modelShortLabel("claude-3-7-sonnet-20250219")).toBe("sonnet 3.7");
+    expect(modelShortLabel("claude-3-opus-20240229")).toBe("opus 3");
+    expect(modelShortLabel("claude-opus-4-20250514")).toBe("opus 4");
+    expect(modelShortLabel("claude-4.5-haiku")).toBe("haiku 4.5");
   });
 
   it("derives versioned GPT labels from the id, stripping vendor suffixes", () => {

@@ -345,11 +345,12 @@ extract — so the missing signals shipped as one same-day PR series instead.
   is never read either way. Timeline shows a truncated preview (700 chars,
   same as assistant text), RecordDetail shows the full text
 - ✅ Model families as master data (`web/src/modelClass.ts`): one ordered table
-  maps raw model ids → codename label + color accent, replacing the
-  Claude-only substring checks. GPT-5.6 codenames get their own labels/colors
-  (sol gold, terra olive, luna silver), `codex-auto-review` is a distinct
-  cyan "auto-review", other GPT/Codex ids render rose with date/`-latest`
-  suffixes stripped (fixes the truncated "gpt-5.…" labels); tokens live in
+  maps raw model ids → versioned codename label + color accent, replacing the
+  Claude-only substring checks. Labels keep the version ("fable 5",
+  "sonnet 4.5", "5.6 sol"); GPT-5.6 codenames get their own colors (sol gold,
+  terra olive, luna silver), `codex-auto-review` is a distinct cyan
+  "auto-review", other GPT/Codex ids render rose with date/`-latest` suffixes
+  stripped (fixes the truncated "gpt-5.…" labels); tokens live in
   `styles/tokens.css` (dark + light), every short label carries the raw id as
   a tooltip, and mix bars/badges/tables across all lenses derive from the
   same table — this PR
