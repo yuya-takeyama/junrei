@@ -157,11 +157,20 @@ async function copyTreeRewrite(src: string, dest: string): Promise<void> {
 
 async function stampFixtureMtimes(claudeRoot: string, codexRoot: string) {
   await Promise.all(
-    FIXTURE_MTIMES.map(([source, epoch]) => {
+    FIXTURE_MTIMES.map(async ([source, epoch]) => {
       const copy = source.startsWith(CODEX_HOME)
         ? join(codexRoot, relative(CODEX_HOME, source))
         : join(claudeRoot, relative(CLAUDE_FIXTURES_DIR, source));
-      return utimes(copy, epoch, epoch);
+      // "Fresh copies are born now" does NOT hold on APFS: fs.cp clones, so
+      // the copy inherits the SOURCE file's birthtime — which, on a checkout
+      // that ever ran the old in-place stamping, is permanently dragged below
+      // these stamps and would rank the file last in the startProxyMs order.
+      // Recreate the file as a genuinely new inode (born now) so the utimes
+      // stamp below drags its birthtime down to exactly `epoch`.
+      const content = await readFile(copy);
+      await rm(copy);
+      await writeFile(copy, content);
+      await utimes(copy, epoch, epoch);
     }),
   );
 }

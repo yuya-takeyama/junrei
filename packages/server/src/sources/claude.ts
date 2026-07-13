@@ -8,9 +8,11 @@ import {
   type ClaudeSessionFileRef,
   getClaudeRecordDetail,
   listClaudeSessionFiles,
+  loadClaudeDesktopTitles,
   loadSubagentSessionData,
   parseClaudeTranscriptFile,
   type RecordDetail,
+  resolveClaudeDesktopSessionsDirs,
   resolveClaudeProjectsDirs,
   type SessionData,
   subagentsDirFor,
@@ -63,12 +65,24 @@ async function analyzeCached(ref: ClaudeSessionFileRef): Promise<ClaudeSessionAn
   return analysis;
 }
 
+/**
+ * Titles for sessions whose transcript carries no `ai-title`/`custom-title`
+ * records — Desktop-app sessions keep theirs only in the Desktop metadata
+ * store (see `loadClaudeDesktopTitles`). A transcript's own title wins when
+ * both exist.
+ */
+function desktopTitles(): Promise<Map<string, string>> {
+  return resolveClaudeDesktopSessionsDirs().then(loadClaudeDesktopTitles);
+}
+
 function toListItem(
   analysis: ClaudeSessionAnalysis,
   ref: ClaudeSessionFileRef,
+  desktopTitle?: string,
 ): ClaudeSessionListItem {
   const toolCallCount = analysis.toolStats.reduce((sum, s) => sum + s.callCount, 0);
   const toolErrorCount = analysis.toolStats.reduce((sum, s) => sum + s.errorCount, 0);
+  const title = analysis.title ?? desktopTitle;
   return {
     source: "claude-code",
     sessionId: analysis.sessionId,
@@ -94,7 +108,7 @@ function toListItem(
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(analysis.repoRoot !== undefined && { repoRoot: analysis.repoRoot }),
     ...(analysis.worktreeName !== undefined && { worktreeName: analysis.worktreeName }),
-    ...(analysis.title !== undefined && { title: analysis.title }),
+    ...(title !== undefined && { title }),
     ...(analysis.firstUserPrompt !== undefined && { firstUserPrompt: analysis.firstUserPrompt }),
     ...(analysis.startedAt !== undefined && { startedAt: analysis.startedAt }),
     ...(analysis.endedAt !== undefined && { endedAt: analysis.endedAt }),
@@ -134,6 +148,7 @@ export async function claudeListItems(
   max?: number,
 ): Promise<{ entries: { item: ClaudeSessionListItem; sortMs: number }[]; total: number }> {
   const refs = [...(await listClaudeRefs())].sort((a, b) => startProxyMs(b) - startProxyMs(a));
+  const titles = await desktopTitles();
   const entries: { item: ClaudeSessionListItem; sortMs: number }[] = [];
   for (const ref of refs) {
     if (max !== undefined && entries.length >= max) break;
@@ -141,7 +156,7 @@ export async function claudeListItems(
       const analysis = await analyzeCached(ref);
       const startedMs = analysis.startedAt === undefined ? NaN : Date.parse(analysis.startedAt);
       entries.push({
-        item: toListItem(analysis, ref),
+        item: toListItem(analysis, ref, titles.get(analysis.sessionId)),
         sortMs: Number.isNaN(startedMs) ? startProxyMs(ref) : startedMs,
       });
     } catch {
@@ -166,7 +181,12 @@ export async function getSession(
   const ref = await findRef(projectDirName, sessionId);
   if (ref === undefined) return undefined;
   try {
-    return await analyzeCached(ref);
+    const analysis = await analyzeCached(ref);
+    if (analysis.title !== undefined) return analysis;
+    const title = (await desktopTitles()).get(sessionId);
+    // Copy rather than mutate: analyzeCached shares one object per mtime, and
+    // a later Desktop rename must not be baked into the cached analysis.
+    return title === undefined ? analysis : { ...analysis, title };
   } catch {
     return undefined;
   }

@@ -5,6 +5,7 @@
 
 export type { ClaudeSessionAnalysis } from "./analyze.js";
 export { analyzeClaudeSession } from "./analyze.js";
+export { loadClaudeDesktopTitles, resolveClaudeDesktopSessionsDirs } from "./desktop.js";
 export type { ClaudeSessionFileRef } from "./discovery.js";
 export { listClaudeSessionFiles, resolveClaudeProjectsDirs } from "./discovery.js";
 export type {

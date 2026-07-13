@@ -166,6 +166,13 @@ the same resolved API port.
   (parallel batches interleave) — linkage must be two-pass.
 - `<task-notification>` user records are harness events, not human prompts —
   they must be excluded from user-turn counts.
+- Desktop-app sessions (`entrypoint: "claude-desktop"`) write NO
+  `ai-title`/`custom-title` records; their title lives only in the Desktop
+  metadata store (`~/Library/Application Support/Claude/claude-code-sessions/
+  <install>/<scope>/local_<desktopId>.json`, `cliSessionId` = transcript UUID).
+  Junrei reads that store as a title fallback (`loadClaudeDesktopTitles`,
+  override dir with `JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR`); a transcript's own
+  title records win when both exist.
 
 ## MCP interface (v1)
 
