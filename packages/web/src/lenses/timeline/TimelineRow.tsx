@@ -252,7 +252,6 @@ function SubagentBlock({
         <span className="mono fs12">{displayName}</span>
         <ModelBadge model={entry.model} />
         {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
-        <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
         {agentHref !== undefined ? (
           <Link className="linkc mono fs10" style={{ marginLeft: "auto" }} to={agentHref}>
             open detail →
@@ -262,6 +261,7 @@ function SubagentBlock({
             open detail →
           </span>
         )}
+        <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
       </div>
       {entry.promptPreview !== undefined && (
         <div className="btxt mut" style={{ fontSize: "12.5px" }}>
