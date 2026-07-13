@@ -88,12 +88,14 @@ Rules of thumb:
 - **Return conclusions, not raw context.** Screenshots, DOM dumps, full logs,
   and large search results stay in the worker context.
 - **Once the spec is clear, the orchestrator stops touching files.** Hand the
-  whole implementation to a `sonnet` worker with a self-contained prompt
-  (objective, file list, constraints, which gates to run); the orchestrator
-  plans before and reviews the diff after. Every main-loop tool call re-reads
-  the entire context at orchestrator prices, and each later user turn
-  re-writes the cache tail after prior-turn thinking blocks are stripped — a
-  fat main context is a recurring per-turn cost, not a one-time one.
+  whole implementation to a worker on the implementation tier the decision
+  table picks for the current harness — never the orchestrator model — with a
+  self-contained prompt (objective, file list, constraints, which gates to
+  run); the orchestrator plans before and reviews the diff after. Every
+  main-loop tool call re-reads the entire context at orchestrator prices, and
+  each later user turn re-writes the cache tail after prior-turn thinking
+  blocks are stripped — a fat main context is a recurring per-turn cost, not
+  a one-time one.
 - **Never explore in parallel with your own scout.** After launching an
   Explore agent, wait for its report, then read only the files you will
   actually edit. Reading the same files in both threads pays twice and
