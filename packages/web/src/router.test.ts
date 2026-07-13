@@ -1,12 +1,13 @@
 import { matchRoutes, type RouteObject } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
-  AGENT_ROUTE_PATH,
   ALL_REPOS,
   agentPath,
   agentRecordPath,
+  CLAUDE_AGENT_ROUTE_PATH,
   CLAUDE_LENSES,
   CLAUDE_SESSION_ROUTE_PATH,
+  CODEX_AGENT_ROUTE_PATH,
   CODEX_LENSES,
   CODEX_SESSION_ROUTE_PATH,
   isLegacyClaudeProjectScopedUrl,
@@ -107,35 +108,54 @@ describe("recordPath", () => {
 
 describe("agentPath", () => {
   it("omits the lens segment for overview (default)", () => {
-    expect(agentPath("abc123", "agentA")).toBe("/session/claude-code/abc123/agent/agentA");
+    expect(agentPath({ source: "claude-code", id: "abc123" }, "agentA")).toBe(
+      "/session/claude-code/abc123/agent/agentA",
+    );
   });
 
   it("includes non-overview lens segments", () => {
-    expect(agentPath("abc123", "agentA", "timeline")).toBe(
+    expect(agentPath({ source: "claude-code", id: "abc123" }, "agentA", "timeline")).toBe(
       "/session/claude-code/abc123/agent/agentA/timeline",
     );
   });
 
   it("percent-encodes id and agentId", () => {
-    expect(agentPath("c d", "e f")).toBe("/session/claude-code/c%20d/agent/e%20f");
+    expect(agentPath({ source: "claude-code", id: "c d" }, "e f")).toBe(
+      "/session/claude-code/c%20d/agent/e%20f",
+    );
+  });
+
+  it("builds a Codex agent path nested under the parent session", () => {
+    expect(agentPath({ source: "codex", id: "abc123" }, "agentA")).toBe(
+      "/session/codex/abc123/agent/agentA",
+    );
+    expect(agentPath({ source: "codex", id: "abc123" }, "agentA", "turns")).toBe(
+      "/session/codex/abc123/agent/agentA/turns",
+    );
   });
 });
 
 describe("agentRecordPath", () => {
   it("appends a record search param to the agent path", () => {
-    expect(agentRecordPath("abc123", "agentA", "timeline", 42)).toBe(
+    expect(agentRecordPath({ source: "claude-code", id: "abc123" }, "agentA", "timeline", 42)).toBe(
       "/session/claude-code/abc123/agent/agentA/timeline?record=42",
     );
   });
 
   it("omits the lens segment for overview but keeps the record param", () => {
-    expect(agentRecordPath("abc123", "agentA", "overview", 7)).toBe(
+    expect(agentRecordPath({ source: "claude-code", id: "abc123" }, "agentA", "overview", 7)).toBe(
       "/session/claude-code/abc123/agent/agentA?record=7",
+    );
+  });
+
+  it("builds a Codex agent record path", () => {
+    expect(agentRecordPath({ source: "codex", id: "abc123" }, "agentA", "timeline", 42)).toBe(
+      "/session/codex/abc123/agent/agentA/timeline?record=42",
     );
   });
 });
 
-describe("route ranking: AGENT_ROUTE_PATH vs CLAUDE_SESSION_ROUTE_PATH", () => {
+describe("route ranking: agent routes vs session routes", () => {
   // Mirrors main.tsx's actual route registration (order included, to prove the
   // ranking — not the declaration order — is what disambiguates them).
   const routes: RouteObject[] = [
@@ -143,7 +163,8 @@ describe("route ranking: AGENT_ROUTE_PATH vs CLAUDE_SESSION_ROUTE_PATH", () => {
       path: "/",
       children: [
         { index: true, id: "index" },
-        { path: AGENT_ROUTE_PATH, id: "agent" },
+        { path: CLAUDE_AGENT_ROUTE_PATH, id: "agent" },
+        { path: CODEX_AGENT_ROUTE_PATH, id: "codex-agent" },
         { path: CLAUDE_SESSION_ROUTE_PATH, id: "claude-session" },
         { path: CODEX_SESSION_ROUTE_PATH, id: "codex-session" },
         { path: "*", id: "catchall" },
@@ -166,9 +187,14 @@ describe("route ranking: AGENT_ROUTE_PATH vs CLAUDE_SESSION_ROUTE_PATH", () => {
     expect(matchedRouteId("/session/codex/id/turns")).toBe("codex-session");
   });
 
-  it("matches agent paths to AGENT_ROUTE_PATH, not CLAUDE_SESSION_ROUTE_PATH with lens='agent'", () => {
+  it("matches agent paths to CLAUDE_AGENT_ROUTE_PATH, not CLAUDE_SESSION_ROUTE_PATH with lens='agent'", () => {
     expect(matchedRouteId("/session/claude-code/id/agent/abc")).toBe("agent");
     expect(matchedRouteId("/session/claude-code/id/agent/abc/timeline")).toBe("agent");
+  });
+
+  it("matches Codex agent paths to CODEX_AGENT_ROUTE_PATH, not CODEX_SESSION_ROUTE_PATH with lens='agent'", () => {
+    expect(matchedRouteId("/session/codex/id/agent/abc")).toBe("codex-agent");
+    expect(matchedRouteId("/session/codex/id/agent/abc/turns")).toBe("codex-agent");
   });
 
   it("a legacy 2-segment URL (project/uuid, no lens) still matches CLAUDE_SESSION_ROUTE_PATH — SessionShell redirects it", () => {

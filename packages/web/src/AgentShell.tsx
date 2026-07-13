@@ -3,16 +3,19 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   type AgentJson,
+  type AnySessionJson,
+  type CodexSessionJson,
   fetchAgentSession,
   fetchSessionDetail,
-  type SessionJson,
   type SubagentNodeJson,
 } from "./api.js";
 import { cacheHitRate, formatDuration, formatTime, formatTokens, formatUsd } from "./format.js";
+import { CodexTurns } from "./lenses/CodexTurns.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
 import { FirstPromptPanel } from "./lenses/FirstPromptPanel.js";
+import { Orchestration } from "./lenses/Orchestration.js";
 import {
   activeModels,
   displayName,
@@ -27,13 +30,26 @@ import { Timeline } from "./lenses/Timeline.js";
 import {
   agentPath,
   agentRecordPath,
+  CLAUDE_LENSES,
+  CODEX_LENSES,
   LENS_LABEL,
   normalizeLens,
   parseRecordParam,
+  type SessionRef,
   sessionPath,
 } from "./router.js";
 import { Band } from "./shell/Band.js";
+import { EstBadge } from "./shell/EstBadge.js";
 import { LensTabs } from "./shell/LensTabs.js";
+import { capsFor } from "./sourceCaps.js";
+
+/**
+ * The agent's own analysis, whichever source produced it: a Claude agent is
+ * analyzed from its sidecar transcript (`fetchAgentSession`); a Codex
+ * sub-agent IS a full session (its own rollout file), so its "own analysis"
+ * is just `fetchSessionDetail` on its own session id.
+ */
+type AnyAgentJson = AgentJson | CodexSessionJson;
 
 interface Crumb {
   key: string;
@@ -81,7 +97,7 @@ function DepthTicks({ depth }: { depth: number }) {
   );
 }
 
-function AgentMetaLine({ node, session }: { node: SubagentNodeJson; session: SessionJson }) {
+function AgentMetaLine({ node, session }: { node: SubagentNodeJson; session: AnySessionJson }) {
   const spawnedAt = node.launchedAt ?? node.startedAt;
   const durationMs = nodeDurationMs(node);
   const parts: ReactNode[] = [
@@ -118,18 +134,21 @@ function AgentMetaLine({ node, session }: { node: SubagentNodeJson; session: Ses
  * design-spec/16-subagent-detail.md's KPI table). `agent` is this agent's own
  * analysis (tokens/cost/msgs/cache); `node` is this agent's entry in the
  * session-level subagent tree, which is the only place launch/child linkage
- * (returnedChars, children) is resolved — an agent analyzed from its own
- * sidecar in isolation can never discover its own children (they're
+ * (returnedChars, children) is resolved — a Claude agent analyzed from its
+ * own sidecar in isolation can never discover its own children (they're
  * discovered via the *session-wide* tool-call ownership scan), so it always
- * reports `subagents: []` even when the tree shows otherwise.
+ * reports `subagents: []` even when the tree shows otherwise. Source
+ * asymmetries mirror the session-level `StatStrip`: Codex has no
+ * per-API-message count (Turns cell instead), no parent-side return capture,
+ * and its costs are list-price estimates (`EstBadge`).
  */
 function AgentStatStrip({
   session,
   agent,
   node,
 }: {
-  session: SessionJson;
-  agent: AgentJson;
+  session: AnySessionJson;
+  agent: AnyAgentJson;
   node: SubagentNodeJson;
 }) {
   const costPct =
@@ -145,6 +164,7 @@ function AgentStatStrip({
         <div className="big mt8 amb">
           {formatUsd(agent.totalUsage.costUsd)}
           {agent.totalUsage.costIsComplete ? "" : "*"}
+          {capsFor(agent).costIsEstimated && <EstBadge />}
         </div>
         <div className="sub">{costPct}% of session</div>
       </div>
@@ -156,16 +176,26 @@ function AgentStatStrip({
             ? `${formatTokens(node.returnedChars)} chars returned`
             : node.asyncLaunch === true
               ? "async · not captured"
-              : "not returned yet"}
+              : agent.source === "codex"
+                ? "return not in log"
+                : "not returned yet"}
         </div>
       </div>
-      <div className="b-cell">
-        <div className="lbl">API msgs</div>
-        <div className="big mt8">{agent.apiMessageCount}</div>
-        <div className="sub">
-          {agent.userTurnCount} turn{agent.userTurnCount === 1 ? "" : "s"}
+      {agent.source === "claude-code" ? (
+        <div className="b-cell">
+          <div className="lbl">API msgs</div>
+          <div className="big mt8">{agent.apiMessageCount}</div>
+          <div className="sub">
+            {agent.userTurnCount} turn{agent.userTurnCount === 1 ? "" : "s"}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="b-cell">
+          <div className="lbl">Turns</div>
+          <div className="big mt8">{agent.userTurnCount}</div>
+          <div className="sub">user turns</div>
+        </div>
+      )}
       <div className="b-cell">
         <div className="lbl">Cache hit</div>
         <div className="big mt8">{(cacheHitRate(agent.totalUsage) * 100).toFixed(0)}%</div>
@@ -193,9 +223,12 @@ function AgentStatStrip({
  * "Return to parent" panel — the literal text this agent handed back to its
  * caller (design-spec/16's replacement for L1's cost-by-model chart). Uses
  * `returnedChars`/`returnedPreview` honestly: never fabricates a token count
- * for what's actually a captured character count.
+ * for what's actually a captured character count. `codex` swaps the empty
+ * state for the honest Codex story: the rollout format has no parent-side
+ * return capture at all, so "no return captured" isn't a gap in THIS launch,
+ * it's a property of the log.
  */
-function ReturnToParentPanel({ node }: { node: SubagentNodeJson }) {
+function ReturnToParentPanel({ node, codex }: { node: SubagentNodeJson; codex: boolean }) {
   return (
     <div
       className="pan"
@@ -219,6 +252,11 @@ function ReturnToParentPanel({ node }: { node: SubagentNodeJson }) {
             ref · typical subagent summary: 1–2k tok
           </div>
         </>
+      ) : codex ? (
+        <div className="mono fs11 mut">
+          Codex rollouts don&apos;t record what a sub-agent thread hands back to its parent — the
+          return text isn&apos;t in the log.
+        </div>
       ) : node.asyncLaunch === true ? (
         <div className="mono fs11 mut">
           This launch was asynchronous — the parent-side result is only the completion
@@ -232,45 +270,68 @@ function ReturnToParentPanel({ node }: { node: SubagentNodeJson }) {
 }
 
 function AgentOverview({
-  id,
+  sessionRef,
+  agentScopedRef,
   agentId,
+  agentParam,
   agent,
   node,
 }: {
-  id: string;
+  /** The parent session this agent is viewed under — breadcrumb/URL root. */
+  sessionRef: SessionRef;
+  /** Where this agent's own transcript is fetched from — see `AgentShell`. */
+  agentScopedRef: SessionRef;
   agentId: string;
-  agent: AgentJson;
+  /** `agentId` for Claude (sidecar-scoped fetches), undefined for Codex. */
+  agentParam: string | undefined;
+  agent: AnyAgentJson;
   node: SubagentNodeJson;
 }) {
   return (
     <>
       <FirstPromptPanel
         session={agent}
-        sessionRef={{ source: "claude-code", id }}
-        agentId={agentId}
+        sessionRef={agentScopedRef}
+        {...(agentParam !== undefined && { agentId: agentParam })}
         label="Launch prompt"
       />
       <div className="hpad fx gap16 mt16">
-        <ContextGrowthChart session={agent} contextHref={agentPath(id, agentId, "context")} bare />
-        <ReturnToParentPanel node={node} />
+        <ContextGrowthChart
+          session={agent}
+          contextHref={agentPath(sessionRef, agentId, "context")}
+          bare
+        />
+        <ReturnToParentPanel node={node} codex={agent.source === "codex"} />
       </div>
     </>
   );
 }
 
+interface Props {
+  /** Which harness this route serves — passed by the route config (main.tsx), same as `SessionShell`. */
+  source: "claude-code" | "codex";
+}
+
 /**
  * Subagent detail (L3) — the entire L1+L2 shell applied to one agent's own
  * transcript instead of the main session, per design-spec/16. Route element
- * for `AGENT_ROUTE_PATH` (`session/claude-code/:id/agent/:agentId/:lens?`).
+ * for `CLAUDE_AGENT_ROUTE_PATH`/`CODEX_AGENT_ROUTE_PATH`
+ * (`session/<source>/:id/agent/:agentId/:lens?`).
  *
  * Fetches two things: the session analysis (for the session title, session
  * totals used in "% of session", and this agent's place in the subagent
  * tree — including launch/return linkage that only the session-wide scan
- * resolves), and this agent's own analysis (for agent-scoped KPIs and
- * charts, analyzed straight off its sidecar transcript — see
- * `getAgentSession` on the server).
+ * resolves), and this agent's own analysis. The second fetch is where the
+ * sources diverge: a Claude agent is a sidecar transcript under its parent
+ * session (`getAgentSession` on the server, record/timeline fetches scoped
+ * with an `agent` param), while a Codex sub-agent is a full session of its
+ * own — its analysis, timeline, and records are all fetched by its own
+ * session id (`agentScopedRef`), no agent param anywhere. Codex agents also
+ * get the real Orchestration lens (their own analysis carries a `subagents`
+ * forest, so nested delegation is visible at any depth) and the Codex-only
+ * "turns" lens, matching the Codex session shell's tab lineup.
  */
-export function AgentShell() {
+export function AgentShell({ source }: Props) {
   const {
     id: idParam,
     agentId: agentIdParam,
@@ -282,30 +343,42 @@ export function AgentShell() {
   const [searchParams] = useSearchParams();
   const record = parseRecordParam(searchParams);
   const navigate = useNavigate();
+  const isCodex = source === "codex";
 
-  const [session, setSession] = useState<SessionJson | null>(null);
+  const sessionRef: SessionRef = isCodex ? { source: "codex", id } : { source: "claude-code", id };
+  // Transcript-scoped fetches (timeline/records/launch prompt): Claude reads
+  // the agent's sidecar through the PARENT session (+ `agent` query param);
+  // Codex reads the agent's OWN session (a sub-agent is a full rollout file).
+  const agentScopedRef: SessionRef = isCodex ? { source: "codex", id: agentId } : sessionRef;
+  const agentParam = isCodex ? undefined : agentId;
+
+  const [session, setSession] = useState<AnySessionJson | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [agent, setAgent] = useState<AgentJson | null>(null);
+  const [agent, setAgent] = useState<AnyAgentJson | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
 
   const recordOpen = record !== undefined;
-  const closeRecordHref = agentPath(id, agentId, lens);
+  const closeRecordHref = agentPath(sessionRef, agentId, lens);
 
   useEffect(() => {
     setSession(null);
     setSessionError(null);
-    fetchSessionDetail({ source: "claude-code", id })
+    const ref: SessionRef =
+      source === "codex" ? { source: "codex", id } : { source: "claude-code", id };
+    fetchSessionDetail(ref)
       .then(setSession)
       .catch((e: unknown) => setSessionError(String(e)));
-  }, [id]);
+  }, [source, id]);
 
   useEffect(() => {
     setAgent(null);
     setAgentError(null);
-    fetchAgentSession(id, agentId)
-      .then(setAgent)
-      .catch((e: unknown) => setAgentError(String(e)));
-  }, [id, agentId]);
+    const fetchAgent: Promise<AnyAgentJson> =
+      source === "codex"
+        ? fetchSessionDetail({ source: "codex", id: agentId })
+        : fetchAgentSession(id, agentId);
+    fetchAgent.then(setAgent).catch((e: unknown) => setAgentError(String(e)));
+  }, [source, id, agentId]);
 
   const ancestorChain = session !== null ? findAgentPath(session.subagents, agentId) : undefined;
   const node = ancestorChain?.[ancestorChain.length - 1];
@@ -321,12 +394,12 @@ export function AgentShell() {
           {
             key: "session",
             label: session.title ?? session.sessionId,
-            href: sessionPath({ source: "claude-code", id }),
+            href: sessionPath(sessionRef),
           },
           ...ancestorChain.slice(0, -1).map((ancestor) => ({
             key: ancestor.agentId,
             label: displayName(ancestor),
-            href: agentPath(id, ancestor.agentId),
+            href: agentPath(sessionRef, ancestor.agentId),
           })),
           {
             key: agentId,
@@ -336,7 +409,9 @@ export function AgentShell() {
       : [{ key: "loading", label: "…" }];
   const depth = ancestorChain?.length ?? 1;
 
-  const buildAgentLensPath = (l: typeof lens) => agentPath(id, agentId, l);
+  const lensTabs = isCodex ? CODEX_LENSES : CLAUDE_LENSES;
+  const lensAvailable = (lensTabs as readonly string[]).includes(lens);
+  const buildAgentLensPath = (l: typeof lens) => agentPath(sessionRef, agentId, l);
 
   return (
     <div className="posrel">
@@ -367,49 +442,71 @@ export function AgentShell() {
           </>
         )}
         <div className="hpad mt16">
-          <LensTabs active={lens} buildPath={buildAgentLensPath} />
+          <LensTabs active={lens} buildPath={buildAgentLensPath} lenses={lensTabs} />
         </div>
         {error !== null && <div className="hpad mt16 mut">Failed to load agent: {error}</div>}
         {loading && <div className="hpad mt16 mut">Analyzing agent…</div>}
+        {ready && !lensAvailable && (
+          <div className="hpad mt16">
+            <div className="pan tile mut">This lens isn&apos;t available for this agent.</div>
+          </div>
+        )}
         {session !== null && agent !== null && node !== undefined && lens === "overview" && (
           <div className="hpad mt16">
-            <AgentOverview id={id} agentId={agentId} agent={agent} node={node} />
+            <AgentOverview
+              sessionRef={sessionRef}
+              agentScopedRef={agentScopedRef}
+              agentId={agentId}
+              agentParam={agentParam}
+              agent={agent}
+              node={node}
+            />
           </div>
         )}
         {ready && lens === "timeline" && (
           <Timeline
-            sessionRef={{ source: "claude-code", id }}
-            agent={agentId}
+            sessionRef={agentScopedRef}
+            {...(agentParam !== undefined && { agent: agentParam })}
             onOpenRecord={(line) => {
-              navigate(agentRecordPath(id, agentId, lens, line));
+              navigate(agentRecordPath(sessionRef, agentId, lens, line));
             }}
           />
         )}
         {session !== null && agent !== null && node !== undefined && lens === "context" && (
           <div className="hpad mt16">
-            <ContextCost session={agent} contextHref={agentPath(id, agentId, "context")} />
+            <ContextCost session={agent} contextHref={agentPath(sessionRef, agentId, "context")} />
           </div>
         )}
         {session !== null && agent !== null && node !== undefined && lens === "files" && (
           <FilesSkills session={agent} />
         )}
-        {ready &&
-          lens !== "overview" &&
-          lens !== "timeline" &&
-          lens !== "context" &&
-          lens !== "files" && (
+        {session !== null &&
+          agent !== null &&
+          node !== undefined &&
+          lens === "orchestration" &&
+          (agent.source === "codex" ? (
+            // A Codex sub-agent's own analysis carries its own `subagents`
+            // forest (see `getCodexSession` on the server), so the real lens
+            // renders here — nested delegation stays visible at any depth.
+            <Orchestration session={agent} />
+          ) : (
             <div className="hpad mt16">
               <div className="pan tile mut">
                 {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
               </div>
             </div>
-          )}
+          ))}
+        {session !== null &&
+          agent !== null &&
+          node !== undefined &&
+          agent.source === "codex" &&
+          lens === "turns" && <CodexTurns session={agent} />}
       </div>
       {record !== undefined && (
         <RecordDetail
-          sessionRef={{ source: "claude-code", id }}
+          sessionRef={agentScopedRef}
           line={record}
-          agent={agentId}
+          {...(agentParam !== undefined && { agent: agentParam })}
           closeHref={closeRecordHref}
         />
       )}

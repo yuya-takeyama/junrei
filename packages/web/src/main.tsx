@@ -4,8 +4,9 @@ import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "reac
 import { AgentShell } from "./AgentShell.js";
 import { App } from "./App.js";
 import {
-  AGENT_ROUTE_PATH,
+  CLAUDE_AGENT_ROUTE_PATH,
   CLAUDE_SESSION_ROUTE_PATH,
+  CODEX_AGENT_ROUTE_PATH,
   CODEX_SESSION_ROUTE_PATH,
   legacyClaudeSessionRedirectTarget,
 } from "./router.js";
@@ -53,12 +54,13 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <SessionList /> },
-      // AGENT_ROUTE_PATH's static "agent" segment outranks CLAUDE_SESSION_ROUTE_PATH's
+      // The agent routes' static "agent" segment outranks the session routes'
       // optional ":lens?" — react-router's route ranking scores static segments
       // higher than dynamic ones regardless of declaration order, so
-      // `/session/claude-code/id/agent/x` always matches this route rather than
-      // being parsed as CLAUDE_SESSION_ROUTE_PATH with lens="agent" (see router.test.ts).
-      { path: AGENT_ROUTE_PATH, element: <AgentShell /> },
+      // `/session/claude-code/id/agent/x` always matches the agent route rather
+      // than being parsed as CLAUDE_SESSION_ROUTE_PATH with lens="agent" (see router.test.ts).
+      { path: CLAUDE_AGENT_ROUTE_PATH, element: <AgentShell source="claude-code" /> },
+      { path: CODEX_AGENT_ROUTE_PATH, element: <AgentShell source="codex" /> },
       { path: CLAUDE_SESSION_ROUTE_PATH, element: <SessionShell source="claude-code" /> },
       { path: CODEX_SESSION_ROUTE_PATH, element: <SessionShell source="codex" /> },
       { path: "*", element: <CatchAll /> },

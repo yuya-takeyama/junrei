@@ -236,14 +236,11 @@ function SubagentBlock({
     }
     if (entry.durationMs !== undefined) metaParts.push(formatDuration(entry.durationMs));
   }
-  // Claude-only route (agentPath) — Codex never emits a "subagent-launch" timeline entry
-  // (a Codex sub-agent is its own full session, not a launch inline in the parent's
-  // transcript — see codex/timeline.ts), so this branch is unreachable for a Codex
-  // sessionRef in practice, but stays type-safe/honest rather than assuming so.
-  const agentHref =
-    sessionRef.source === "claude-code" && entry.agentId !== undefined
-      ? agentPath(sessionRef.id, entry.agentId)
-      : undefined;
+  // Codex never emits a "subagent-launch" timeline entry (a Codex sub-agent
+  // is its own full session, not a launch inline in the parent's transcript —
+  // see codex/timeline.ts), but the nested agent route now exists for both
+  // sources, so no per-source guard is needed here anymore.
+  const agentHref = entry.agentId !== undefined ? agentPath(sessionRef, entry.agentId) : undefined;
   return (
     <div className="blk" style={{ borderStyle: "double", borderWidth: "3px" }}>
       <div className="bhd">

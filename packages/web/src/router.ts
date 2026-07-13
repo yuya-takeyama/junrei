@@ -197,35 +197,45 @@ export function parseRecordParam(searchParams: URLSearchParams): number | undefi
 }
 
 /**
- * react-router path pattern for the agent (subagent detail, L3) shell route,
- * registered with `createBrowserRouter` alongside `CLAUDE_SESSION_ROUTE_PATH`.
- * Claude-only — Codex sub-agent threads are full sessions in their own right
- * (see `sources/codex.ts` on the server), not sidecar transcripts scoped
- * under a parent session, so there's no Codex equivalent of this route. The
- * static `agent` segment disambiguates it from `CLAUDE_SESSION_ROUTE_PATH`'s
+ * react-router path patterns for the agent (subagent detail, L3) shell
+ * routes, registered with `createBrowserRouter` alongside the session route
+ * patterns — one per source, same split as `CLAUDE_SESSION_ROUTE_PATH`/
+ * `CODEX_SESSION_ROUTE_PATH`. A Claude agent is a sidecar transcript scoped
+ * under its session; a Codex sub-agent is a full session of its own (see
+ * `sources/codex.ts` on the server), but both get the same nested URL shape
+ * (`/session/<source>/<id>/agent/<agentId>[/<lens>]`) so a sub-agent's place
+ * in its parent's tree is addressable and breadcrumbable for either source.
+ * The static `agent` segment disambiguates these from the session patterns'
  * optional `:lens?` — react-router ranks a route with more static segments
  * higher, so `/session/claude-code/id/agent/x` matches this pattern rather
  * than being parsed as `CLAUDE_SESSION_ROUTE_PATH` with `lens="agent"` (see
  * router.test.ts).
  */
-export const AGENT_ROUTE_PATH = "session/claude-code/:id/agent/:agentId/:lens?";
+export const CLAUDE_AGENT_ROUTE_PATH = "session/claude-code/:id/agent/:agentId/:lens?";
+export const CODEX_AGENT_ROUTE_PATH = "session/codex/:id/agent/:agentId/:lens?";
 
 /**
  * Build the path for an agent (subagent detail, L3) route — mirrors
- * `sessionPath`, omitting the lens segment for "overview". Claude-only, see
- * `AGENT_ROUTE_PATH`.
+ * `sessionPath`, omitting the lens segment for "overview". `ref` is the
+ * PARENT session the agent is viewed under; works for either source (see
+ * `CLAUDE_AGENT_ROUTE_PATH`/`CODEX_AGENT_ROUTE_PATH`).
  */
-export function agentPath(id: string, agentId: string, lens: Lens = "overview"): string {
-  const base = `/session/claude-code/${encodeURIComponent(id)}/agent/${encodeURIComponent(agentId)}`;
+export function agentPath(ref: SessionRef, agentId: string, lens: Lens = "overview"): string {
+  const base = `/session/${ref.source}/${encodeURIComponent(ref.id)}/agent/${encodeURIComponent(agentId)}`;
   return lens === "overview" ? base : `${base}/${lens}`;
 }
 
 /**
  * Build the path (+ `record` search param) that opens the record slide-over
- * scoped to one agent's own transcript — mirrors `recordPath`. Claude-only.
+ * scoped to one agent's own transcript — mirrors `recordPath`.
  */
-export function agentRecordPath(id: string, agentId: string, lens: Lens, line: number): string {
-  return `${agentPath(id, agentId, lens)}?record=${line}`;
+export function agentRecordPath(
+  ref: SessionRef,
+  agentId: string,
+  lens: Lens,
+  line: number,
+): string {
+  return `${agentPath(ref, agentId, lens)}?record=${line}`;
 }
 
 /** Session-list source filter tab — mirrors the server's `SessionSourceFilter` minus omission (the web always passes one explicitly). */
