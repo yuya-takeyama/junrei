@@ -26,8 +26,9 @@ job well, but only through controls the current harness actually exposes.
 ## Pricing
 
 Per-MTok rates below are cached guidance. Verify the current source when exact
-cost matters. The GPT-5.6 rates come from Junrei's pricing snapshot at
-`packages/core/src/pricing/prices.json` (fetched 2026-07-11).
+cost matters. Rates come from Junrei's pricing snapshot at
+`packages/core/src/shared/pricing/prices.json`; Claude rates were cross-checked
+against measured session costs on 2026-07-13.
 
 ### Claude family
 
@@ -35,8 +36,13 @@ cost matters. The GPT-5.6 rates come from Junrei's pricing snapshot at
 |---|---:|---:|---:|
 | Claude Fable 5 (`fable`) | $10 | $50 | 1.0x |
 | Claude Opus 4.8 (`opus`) | $5 | $25 | 0.5x |
-| Claude Sonnet 5 (`sonnet`) | $3 | $15 | 0.3x |
+| Claude Sonnet 5 (`sonnet`) | $2 | $10 | 0.2x |
 | Claude Haiku 4.5 (`haiku`) | $1 | $5 | 0.1x |
+
+Cache economics (all Claude tiers): cache read = 0.1x input; cache write =
+1.25x input at 5-minute TTL, 2x input at 1-hour TTL — the Claude Code main
+loop uses 1-hour writes ($20/MTok on Fable). On a fat main context, cache
+writes can be the single largest line item (see Measure it).
 
 ### Codex GPT-5.6 family
 
@@ -81,6 +87,19 @@ Rules of thumb:
   are independent. Sequential handoffs add context and coordination cost.
 - **Return conclusions, not raw context.** Screenshots, DOM dumps, full logs,
   and large search results stay in the worker context.
+- **Once the spec is clear, the orchestrator stops touching files.** Hand the
+  whole implementation to a worker on the implementation tier the decision
+  table picks for the current harness — never the orchestrator model — with a
+  self-contained prompt (objective, file list, constraints, which gates to
+  run); the orchestrator plans before and reviews the diff after. Every
+  main-loop tool call re-reads the entire context at orchestrator prices, and
+  each later user turn re-writes the cache tail after prior-turn thinking
+  blocks are stripped — a fat main context is a recurring per-turn cost, not
+  a one-time one.
+- **Never explore in parallel with your own scout.** After launching an
+  Explore agent, wait for its report, then read only the files you will
+  actually edit. Reading the same files in both threads pays twice and
+  permanently fattens the main context.
 
 ## Claude Code controls
 
@@ -157,3 +176,12 @@ This repo is the measuring tool. After significant delegation, check:
 Use the measured model mix, cost, return size, and duplicated exploration to
 adjust future routing. A cheaper model with a precise prompt is the target;
 more agents are not automatically more efficient.
+
+Measured example (Claude Code session `621c4c87`, 2026-07-13, shipped PR #78):
+chore delegation was exemplary — Haiku Explore, Sonnet preview-verifier, and
+Sonnet pr-shepherd moved 39% of tokens for 4.9% of cost — yet the session
+still cost $23.5 because implementation stayed in the Fable main loop (95% of
+spend; half of that was cache writes on a ~220k context, and the main loop
+duplicated its own Explore agent's reads). The two rules above ("orchestrator
+stops touching files", "never explore in parallel with your own scout") come
+from that session.
