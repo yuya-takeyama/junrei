@@ -94,10 +94,6 @@ export interface CodexSessionExtras {
   /** Latest `token_count` event's `rate_limits` snapshot, passed through as-is. */
   rateLimits?: unknown;
   turns: CodexTurnUsage[];
-  /** `function_call` + `custom_tool_call` + `local_shell_call` response items. */
-  toolCallCount: number;
-  /** Best-effort — see the heuristics in `linkToolCalls` below. */
-  toolErrorCount: number;
 }
 
 export interface CodexSessionAnalysis extends SessionAnalysisCore {
@@ -472,8 +468,6 @@ export function analyzeCodexSession(
     spawnedThreadIds,
     reasoningOutputTokens,
     turns,
-    toolCallCount,
-    toolErrorCount,
     ...(sessionMeta?.originator !== undefined && { originator: sessionMeta.originator }),
     ...(sessionMeta?.cliVersion !== undefined && { cliVersion: sessionMeta.cliVersion }),
     ...(sessionMeta?.parentThreadId !== undefined && {
@@ -499,6 +493,8 @@ export function analyzeCodexSession(
     sessionId: sessionMeta?.id ?? ref.sessionId,
     filePath: transcript.filePath,
     userTurnCount,
+    toolCallCount,
+    toolErrorCount,
     models,
     usage,
     totalUsage,

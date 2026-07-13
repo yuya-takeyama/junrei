@@ -47,6 +47,15 @@ export const CODEX_LENSES: readonly Lens[] = [
   "turns",
 ];
 
+/**
+ * Lens lineup per source — a lookup, so the shells (SessionShell/AgentShell)
+ * index it instead of branching on `source` themselves.
+ */
+export const LENSES_BY_SOURCE: Record<SessionRef["source"], readonly Lens[]> = {
+  "claude-code": CLAUDE_LENSES,
+  codex: CODEX_LENSES,
+};
+
 function isLens(value: string | undefined): value is Lens {
   return value !== undefined && (LENSES as readonly string[]).includes(value);
 }

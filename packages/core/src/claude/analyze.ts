@@ -130,6 +130,8 @@ export async function analyzeClaudeSession(filePath: string): Promise<ClaudeSess
     apiErrors: data.apiErrors,
     turnUsage: computeTurnUsage(data),
     toolStats: computeToolStats(data),
+    toolCallCount: data.toolCalls.length,
+    toolErrorCount: data.toolCalls.filter((c) => c.result?.isError === true).length,
     repetitions: computeRepetitions(data),
     exploration: computeExploration(data),
     taskExecutions: computeTaskExecutions(data),

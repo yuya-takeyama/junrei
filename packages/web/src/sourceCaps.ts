@@ -26,6 +26,13 @@ export interface SourceCaps {
   hasApiErrors: boolean;
   /** Per-turn cache-write cost composition chart — Claude only (Codex has no cache-write cost). */
   hasTurnCompositionChart: boolean;
+  /**
+   * Whether the log ever captures what a subagent handed back to its parent
+   * (Claude: the parent-side `tool_result` text). Codex rollouts record no
+   * parent-side return at all, so its absence on a Codex node is a property
+   * of the log format, not of the individual launch.
+   */
+  capturesSubagentReturn: boolean;
   /** True when the session's cost is a Codex API-list-price estimate rather than a billed Claude Code amount. */
   costIsEstimated: boolean;
 }
@@ -36,6 +43,7 @@ const CLAUDE_CAPS: SourceCaps = {
   hasTaskExecutions: true,
   hasApiErrors: true,
   hasTurnCompositionChart: true,
+  capturesSubagentReturn: true,
   costIsEstimated: false,
 };
 
@@ -45,6 +53,7 @@ const CODEX_CAPS: SourceCaps = {
   hasTaskExecutions: false,
   hasApiErrors: false,
   hasTurnCompositionChart: false,
+  capturesSubagentReturn: false,
   costIsEstimated: true,
 };
 

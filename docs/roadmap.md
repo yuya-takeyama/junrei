@@ -314,6 +314,25 @@ extract — so the missing signals shipped as one same-day PR series instead.
   sub-agent's own top-level session page (that page still works for deep
   links, unchanged). No server changes — `getCodexSession` already resolved
   any session id with its own descendant forest — this PR
+- ✅ Per-source branching minimized in the web views by pushing the
+  asymmetries into the entity interface: `toolCallCount`/`toolErrorCount`
+  promoted to `SessionAnalysisCore` as REQUIRED fields (both harnesses
+  genuinely have them — Claude computes them from its tool_use/tool_result
+  pairs, Codex moved them up from `CodexSessionExtras`), and
+  `apiMessageCount`/`apiErrorCount` declared on the core as OPTIONAL
+  (Claude-only concepts; absence MEANS "no such concept", never zero — see
+  the field doc). Views now render presence-driven instead of
+  source-branched: `StatStrip` and `AgentShell`'s KPI strip pick the
+  Turns/msgs-vs-Turns and API-err-vs-tool-err cells off field presence,
+  Orchestration's main-row tool tally reads the core field directly, the
+  subagent-return wording hangs off a new `capturesSubagentReturn` cap
+  (sourceCaps), and the lens lineup is a `LENSES_BY_SOURCE` lookup. The
+  `source === ...` checks that remain are the ones that SHOULD exist:
+  transport dispatch (api.ts routes per source), the caps table itself, and
+  type-narrows that grant access to source-exclusive payloads
+  (`session.codex.*` provenance chips, Claude-only panels, CodexTurns) —
+  this PR
+- ⬜ Fork lineage (`forked_from_id`): parsed and retained on
   `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
   fork-tree UI exists, unlike the sub-agent forest above
 - ⬜ Legacy-format rollout support: pre-2026-02-25 Codex transcripts parse as

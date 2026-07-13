@@ -32,9 +32,14 @@ export function subagentCellText(item: SessionListItem): string {
   return item.subagentCount > 0 ? String(item.subagentCount) : "—";
 }
 
-/** Compact per-row source label for the "All" tab's badge column. */
+/** Compact per-row source label for the "All" tab's badge column — a lookup, extended per new source. */
+const SOURCE_BADGE_LABEL: Record<SessionListItem["source"], string> = {
+  "claude-code": "Claude",
+  codex: "Codex",
+};
+
 export function sourceBadgeLabel(source: SessionListItem["source"]): string {
-  return source === "codex" ? "Codex" : "Claude";
+  return SOURCE_BADGE_LABEL[source];
 }
 
 /**

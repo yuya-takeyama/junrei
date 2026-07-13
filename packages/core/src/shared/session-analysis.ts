@@ -60,6 +60,28 @@ export interface SessionAnalysisCore {
   endedAt?: string;
   durationMs?: number;
   userTurnCount: number;
+  /**
+   * Tool calls issued by the MAIN transcript, and how many of them errored —
+   * genuinely real for both harnesses (Claude: the transcript's
+   * tool_use/tool_result pairs, the same data `toolStats` aggregates per
+   * tool name; Codex: `function_call`/`custom_tool_call`/`local_shell_call`
+   * response items, error tally best-effort — see `linkToolCalls` in
+   * `codex/analyze.ts`). Promoted here so the web renders one code path
+   * instead of summing Claude's `toolStats` in one branch and reading a
+   * Codex-only field in the other.
+   */
+  toolCallCount: number;
+  toolErrorCount: number;
+  /**
+   * API-message / logged-API-error counts — Claude Code concepts with no
+   * Codex analog (a Codex rollout has no per-API-message envelope and no API
+   * error log). Declared here as OPTIONAL, not faked with zeros: absence
+   * means "this harness doesn't expose the concept", so a view can render
+   * presence-driven (`apiMessageCount !== undefined`) instead of branching
+   * on `session.source`. `ClaudeSessionAnalysis` re-declares both required.
+   */
+  apiMessageCount?: number;
+  apiErrorCount?: number;
   models: string[];
   /** Main transcript only — Codex sessions have no subagent concept, so this equals `totalUsage`'s token side. */
   usage: UsageSummary;

@@ -70,8 +70,8 @@ describe("buildCodexSubagentForest", () => {
     expect(childNode.model).toBe("gpt-5.5-explorer"); // child.models[0]
     expect(childNode.promptPreview).toBe("Explore the auth module and report back");
     expect(childNode.usage).toBe(child.usage); // the child's OWN usage, not recursive
-    expect(childNode.toolCallCount).toBe(child.codex.toolCallCount);
-    expect(childNode.toolErrorCount).toBe(child.codex.toolErrorCount);
+    expect(childNode.toolCallCount).toBe(child.toolCallCount);
+    expect(childNode.toolErrorCount).toBe(child.toolErrorCount);
     expect(childNode.startedAt).toBe(child.startedAt);
     expect(childNode.endedAt).toBe(child.endedAt);
     expect(childNode.spawnDepth).toBe(1); // from session_meta's thread_spawn.depth

@@ -194,8 +194,8 @@ describe("analyzeCodexSession", () => {
     const analysis = await analyzeFixture();
     // call-1 (function_call, errored output), call-2 (custom_tool_call, ok),
     // call-3 (local_shell_call, errored via exec_command_end) => 3 calls, 2 errors.
-    expect(analysis.codex.toolCallCount).toBe(3);
-    expect(analysis.codex.toolErrorCount).toBe(2);
+    expect(analysis.toolCallCount).toBe(3);
+    expect(analysis.toolErrorCount).toBe(2);
   });
 
   it("carries the latest token_count rate_limits snapshot through as-is", async () => {

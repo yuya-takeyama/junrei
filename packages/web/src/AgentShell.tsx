@@ -30,9 +30,8 @@ import { Timeline } from "./lenses/Timeline.js";
 import {
   agentPath,
   agentRecordPath,
-  CLAUDE_LENSES,
-  CODEX_LENSES,
   LENS_LABEL,
+  LENSES_BY_SOURCE,
   normalizeLens,
   parseRecordParam,
   type SessionRef,
@@ -138,9 +137,10 @@ function AgentMetaLine({ node, session }: { node: SubagentNodeJson; session: Any
  * own sidecar in isolation can never discover its own children (they're
  * discovered via the *session-wide* tool-call ownership scan), so it always
  * reports `subagents: []` even when the tree shows otherwise. Source
- * asymmetries mirror the session-level `StatStrip`: Codex has no
- * per-API-message count (Turns cell instead), no parent-side return capture,
- * and its costs are list-price estimates (`EstBadge`).
+ * asymmetries mirror the session-level `StatStrip` and are expressed by the
+ * entity interface, not `source` checks: `apiMessageCount` is present only
+ * where the harness has the concept (Turns cell otherwise), return capture
+ * is a `capsFor` capability, and the est. cost marker is a cap too.
  */
 function AgentStatStrip({
   session,
@@ -176,12 +176,12 @@ function AgentStatStrip({
             ? `${formatTokens(node.returnedChars)} chars returned`
             : node.asyncLaunch === true
               ? "async · not captured"
-              : agent.source === "codex"
-                ? "return not in log"
-                : "not returned yet"}
+              : capsFor(agent).capturesSubagentReturn
+                ? "not returned yet"
+                : "return not in log"}
         </div>
       </div>
-      {agent.source === "claude-code" ? (
+      {agent.apiMessageCount !== undefined ? (
         <div className="b-cell">
           <div className="lbl">API msgs</div>
           <div className="big mt8">{agent.apiMessageCount}</div>
@@ -223,12 +223,19 @@ function AgentStatStrip({
  * "Return to parent" panel — the literal text this agent handed back to its
  * caller (design-spec/16's replacement for L1's cost-by-model chart). Uses
  * `returnedChars`/`returnedPreview` honestly: never fabricates a token count
- * for what's actually a captured character count. `codex` swaps the empty
- * state for the honest Codex story: the rollout format has no parent-side
- * return capture at all, so "no return captured" isn't a gap in THIS launch,
- * it's a property of the log.
+ * for what's actually a captured character count. `capturesReturn` (the
+ * `capturesSubagentReturn` capability — see sourceCaps.ts) swaps the empty
+ * state for the honest no-capture story: when the log format records no
+ * parent-side return at all, "no return captured" isn't a gap in THIS
+ * launch, it's a property of the log.
  */
-function ReturnToParentPanel({ node, codex }: { node: SubagentNodeJson; codex: boolean }) {
+function ReturnToParentPanel({
+  node,
+  capturesReturn,
+}: {
+  node: SubagentNodeJson;
+  capturesReturn: boolean;
+}) {
   return (
     <div
       className="pan"
@@ -252,7 +259,7 @@ function ReturnToParentPanel({ node, codex }: { node: SubagentNodeJson; codex: b
             ref · typical subagent summary: 1–2k tok
           </div>
         </>
-      ) : codex ? (
+      ) : !capturesReturn ? (
         <div className="mono fs11 mut">
           Codex rollouts don&apos;t record what a sub-agent thread hands back to its parent — the
           return text isn&apos;t in the log.
@@ -301,7 +308,7 @@ function AgentOverview({
           contextHref={agentPath(sessionRef, agentId, "context")}
           bare
         />
-        <ReturnToParentPanel node={node} codex={agent.source === "codex"} />
+        <ReturnToParentPanel node={node} capturesReturn={capsFor(agent).capturesSubagentReturn} />
       </div>
     </>
   );
@@ -409,7 +416,7 @@ export function AgentShell({ source }: Props) {
       : [{ key: "loading", label: "…" }];
   const depth = ancestorChain?.length ?? 1;
 
-  const lensTabs = isCodex ? CODEX_LENSES : CLAUDE_LENSES;
+  const lensTabs = LENSES_BY_SOURCE[source];
   const lensAvailable = (lensTabs as readonly string[]).includes(lens);
   const buildAgentLensPath = (l: typeof lens) => agentPath(sessionRef, agentId, l);
 
