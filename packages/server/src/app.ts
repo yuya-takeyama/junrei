@@ -87,12 +87,13 @@ export function createApp(options: CreateAppOptions = {}) {
         const source = parseSourceFilter(c.req.query("source"));
         return c.json(await listSessions(limit, source, offset));
       })
-      // Repo-level rollup for the session-list's repo filter (see
-      // `overview.ts`'s doc comment for the exact `repo` key forms this
-      // accepts — a `repoRoot` path or one of the fallback-bucket keys the
-      // web's `repoFilterKey` assigns to a repoRoot-less session).
+      // Repo-level ALL-TIME rollup (see `overview.ts`'s doc comment for the
+      // exact `repo` key forms this accepts — a `repoRoot` path or one of
+      // the fallback-bucket keys the web's `repoFilterKey` assigns).
       // `getRepoOverview` is the one listing+aggregation path this route and
       // the `get_repo_overview` MCP tool both call — see its doc comment.
+      // The web's session-list band no longer fetches this route: it
+      // computes a filter-aware rollup client-side (`computeFilteredOverview`).
       .get("/api/overview", async (c) => {
         const repo = c.req.query("repo");
         if (repo === undefined || repo === "") {

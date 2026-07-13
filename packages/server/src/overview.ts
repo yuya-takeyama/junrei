@@ -239,6 +239,13 @@ export function computeRepoOverview(
  * surfaces silently drifting (e.g. one forgetting the `MAX_LIST_LIMIT`
  * ceiling or filtering by source). See `computeRepoOverview`'s doc comment
  * for the accepted `repoKey` forms.
+ *
+ * Note this is a repo-scoped ALL-TIME rollup (newest `MAX_LIST_LIMIT`
+ * window) with no notion of the web UI's date/search filters — the
+ * session-list band stopped consuming it for exactly that reason and
+ * computes a filter-aware rollup client-side instead (the web's
+ * `computeFilteredOverview`, kept in lockstep with `computeRepoOverview`
+ * above).
  */
 export async function getRepoOverview(repoKey: string): Promise<RepoOverview> {
   const { sessions } = await listSessions(MAX_LIST_LIMIT, "all");
