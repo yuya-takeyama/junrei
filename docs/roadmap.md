@@ -329,6 +329,26 @@ extract — so the missing signals shipped as one same-day PR series instead.
   match; Codex prompts mirrored as both `event_msg` and `response_item` count
   once (same dedup rule as the timeline) — this PR
 
+## Web routing
+
+- ✅ Web app switched from hash-based routing (`createHashRouter`, `#/session/...`
+  URLs) to history/browser routing (`createBrowserRouter`): URLs are now plain
+  paths, e.g. `/session/claude-code/<id>/timeline`. `main.tsx` rewrites a
+  pre-migration `#/session/...[?record=N]` bookmark into a real path (+ search
+  string) via `history.replaceState` before the router reads the location, so
+  old hash bookmarks still resolve through the normal route table (and, for
+  project-scoped legacy shapes, the existing catch-all redirect). The server
+  (`packages/server/src/app.ts`) gained matching production support: `createApp`
+  now optionally serves the built web SPA (`@junrei/web`'s `vite build` output,
+  `webDistDir`, overridable for tests) — real static assets are served by
+  `@hono/node-server`'s `serveStatic` with correct content types, and a
+  trailing `app.get("*", ...)` falls back to `index.html` for any unmatched
+  non-`/api` path so a deep-link reload resolves client-side, while an
+  unmatched `/api/*` path still gets a JSON 404 rather than the SPA shell.
+  Only activates when a build is present (dev's Vite server handles SPA
+  fallback itself, `appType` defaults to `"spa"`, no config change needed) —
+  this PR
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

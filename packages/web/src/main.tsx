@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createHashRouter, Navigate, RouterProvider, useLocation } from "react-router";
+import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router";
 import { AgentShell } from "./AgentShell.js";
 import { App } from "./App.js";
 import {
@@ -32,10 +32,22 @@ function CatchAll() {
   return <SessionList />;
 }
 
-// Hash-based router — matches the app's historical `#/...` URLs (see router.ts).
+// Pre-history-router bookmarks still carry `#/session/...[?record=N]` — the
+// query lived INSIDE the hash back when `createHashRouter` owned routing.
+// Rewrite that hash into a real path (+ search string) before
+// `createBrowserRouter` below reads the location, so a legacy hash bookmark
+// resolves through the normal route table (and, for project-scoped legacy
+// shapes, the `CatchAll` redirect above) instead of landing on a bare `/`
+// with a stray `#/...` fragment.
+if (window.location.hash.startsWith("#/")) {
+  window.history.replaceState(null, "", window.location.hash.slice(1));
+}
+
+// Browser (history) router — plain paths like `/session/claude-code/id/timeline`,
+// no `#` prefix (see router.ts for the path shapes).
 // SessionShell takes an explicit `source` prop per route rather than inferring it from params —
 // the Codex route has no `:project` segment to sniff a sentinel from (see router.ts).
-const router = createHashRouter([
+const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
