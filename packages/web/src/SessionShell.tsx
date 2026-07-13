@@ -120,8 +120,9 @@ interface Props {
 }
 
 /**
- * Shell shared by every session route: identity band with breadcrumb +
- * copyable session id, title block, session-level stat strip, then the
+ * Shell shared by every session route: identity band with the session title
+ * (the JUNREI wordmark is the link back to the sessions list) + copyable
+ * session id, title block, session-level stat strip, then the
  * persistent lens tab bar, then the active lens's content — see
  * design-spec/01-shell.md.
  *
@@ -182,11 +183,6 @@ export function SessionShell({ source }: Props) {
   const title = session?.title ?? session?.sessionId ?? "…";
   const lensTabs = isCodex ? CODEX_LENSES : CLAUDE_LENSES;
   const lensAvailable = (lensTabs as readonly string[]).includes(lens);
-  // Pre-refactor, the Codex breadcrumb's middle segment showed the literal
-  // "codex" sentinel that used to live in `projectDirName`/the `:project`
-  // URL segment — kept identical here now that it's a real per-source label
-  // instead of borrowed URL/data plumbing.
-  const breadcrumbMiddle = isCodex ? "codex" : project;
 
   const handleCopy = () => {
     navigator.clipboard
@@ -206,8 +202,8 @@ export function SessionShell({ source }: Props) {
       >
         <Band
           left={
-            <span className="mono fs11 mut nowrap">
-              <Link to="/">Sessions</Link> / {breadcrumbMiddle} / {title}
+            <span className="bc">
+              <span className="bc-cur">{title}</span>
             </span>
           }
           right={
