@@ -1,10 +1,12 @@
 import type { AnySessionJson } from "../api.js";
+import type { SessionRef } from "../router.js";
 import { ContextGrowthChart } from "./ContextGrowthChart.js";
 import { CostByModelChart } from "./CostByModelChart.js";
 import { FirstPromptPanel } from "./FirstPromptPanel.js";
 
 interface Props {
   session: AnySessionJson;
+  sessionRef: SessionRef;
 }
 
 /**
@@ -22,12 +24,12 @@ interface Props {
  * child component here already accepts `AnySessionJson` and narrows
  * internally wherever Claude-only data would otherwise be assumed.
  */
-export function Overview({ session }: Props) {
+export function Overview({ session, sessionRef }: Props) {
   return (
     <>
       <ContextGrowthChart session={session} />
       <CostByModelChart session={session} />
-      <FirstPromptPanel session={session} />
+      <FirstPromptPanel session={session} sessionRef={sessionRef} />
     </>
   );
 }

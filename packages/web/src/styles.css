@@ -626,6 +626,24 @@ button.tool-hd {
   line-height: 1.55;
   margin-top: 6px;
 }
+.btxt.full {
+  white-space: pre-wrap;
+}
+.exp-toggle {
+  display: inline-block;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.exp-toggle:hover:not(:disabled) {
+  color: var(--amb);
+}
+.exp-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 .dim {
   opacity: 0.6;
 }

@@ -246,7 +246,12 @@ function AgentOverview({
 }) {
   return (
     <>
-      <FirstPromptPanel session={agent} label="Launch prompt" />
+      <FirstPromptPanel
+        session={agent}
+        sessionRef={{ source: "claude-code", project, id }}
+        agentId={agentId}
+        label="Launch prompt"
+      />
       <div className="hpad fx gap16 mt16">
         <ContextGrowthChart
           session={agent}

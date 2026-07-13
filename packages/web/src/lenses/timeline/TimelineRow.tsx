@@ -4,10 +4,13 @@ import type { TimelineEntry } from "../../api.js";
 import { formatDuration, formatTime, formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import { agentPath, type SessionRef } from "../../router.js";
+import { ExpandableText } from "./ExpandableText.js";
 
 export interface TimelineRowProps {
   entry: TimelineEntry;
   sessionRef: SessionRef;
+  /** Scopes the record fetch (via `ExpandableText`) to one subagent's sidecar transcript — mirrors `Timeline`'s own `agent` prop. */
+  agent: string | undefined;
   expanded: boolean;
   onToggleExpand: (line: number) => void;
   registerRef: (line: number, el: HTMLDivElement | null) => void;
@@ -54,9 +57,13 @@ function SourceLine({
 
 function UserBlock({
   entry,
+  sessionRef,
+  agent,
   onOpenRecord,
 }: {
   entry: Extract<TimelineEntry, { kind: "user" }>;
+  sessionRef: SessionRef;
+  agent: string | undefined;
   onOpenRecord: (line: number) => void;
 }) {
   return (
@@ -67,16 +74,27 @@ function UserBlock({
         </span>
         <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
       </div>
-      <div className="btxt">{entry.text}</div>
+      <ExpandableText
+        sessionRef={sessionRef}
+        agent={agent}
+        line={entry.line}
+        kind="user"
+        text={entry.text}
+        truncated={entry.truncated}
+      />
     </div>
   );
 }
 
 function AssistantBlock({
   entry,
+  sessionRef,
+  agent,
   onOpenRecord,
 }: {
   entry: Extract<TimelineEntry, { kind: "assistant-text" }>;
+  sessionRef: SessionRef;
+  agent: string | undefined;
   onOpenRecord: (line: number) => void;
 }) {
   // apiDurationMs is never populated by the API today — omit rather than fake a duration.
@@ -92,16 +110,27 @@ function AssistantBlock({
         {metaParts.length > 0 && <span className="mono fs10 mut">{metaParts.join(" · ")}</span>}
         <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
-      <div className="btxt">{entry.text}</div>
+      <ExpandableText
+        sessionRef={sessionRef}
+        agent={agent}
+        line={entry.line}
+        kind="assistant-text"
+        text={entry.text}
+        truncated={entry.truncated}
+      />
     </div>
   );
 }
 
 function ThinkingBlock({
   entry,
+  sessionRef,
+  agent,
   onOpenRecord,
 }: {
   entry: Extract<TimelineEntry, { kind: "thinking" }>;
+  sessionRef: SessionRef;
+  agent: string | undefined;
   onOpenRecord: (line: number) => void;
 }) {
   return (
@@ -113,7 +142,14 @@ function ThinkingBlock({
         <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
       {entry.text !== "" ? (
-        <div className="btxt">{entry.text}</div>
+        <ExpandableText
+          sessionRef={sessionRef}
+          agent={agent}
+          line={entry.line}
+          kind="thinking"
+          text={entry.text}
+          truncated={entry.truncated}
+        />
       ) : (
         <div className="btxt mut">no readable summary</div>
       )}
@@ -330,6 +366,7 @@ function CompactionBreak({
 export const TimelineRow = memo(function TimelineRow({
   entry,
   sessionRef,
+  agent,
   expanded,
   onToggleExpand,
   registerRef,
@@ -344,11 +381,30 @@ export const TimelineRow = memo(function TimelineRow({
       <span className="gut">
         {entry.timestamp !== undefined ? formatTime(entry.timestamp) : ""}
       </span>
-      {entry.kind === "user" && <UserBlock entry={entry} onOpenRecord={onOpenRecord} />}
-      {entry.kind === "assistant-text" && (
-        <AssistantBlock entry={entry} onOpenRecord={onOpenRecord} />
+      {entry.kind === "user" && (
+        <UserBlock
+          entry={entry}
+          sessionRef={sessionRef}
+          agent={agent}
+          onOpenRecord={onOpenRecord}
+        />
       )}
-      {entry.kind === "thinking" && <ThinkingBlock entry={entry} onOpenRecord={onOpenRecord} />}
+      {entry.kind === "assistant-text" && (
+        <AssistantBlock
+          entry={entry}
+          sessionRef={sessionRef}
+          agent={agent}
+          onOpenRecord={onOpenRecord}
+        />
+      )}
+      {entry.kind === "thinking" && (
+        <ThinkingBlock
+          entry={entry}
+          sessionRef={sessionRef}
+          agent={agent}
+          onOpenRecord={onOpenRecord}
+        />
+      )}
       {entry.kind === "tool-call" && (
         <ToolBlock
           entry={entry}
