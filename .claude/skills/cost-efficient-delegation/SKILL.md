@@ -61,11 +61,11 @@ when their individual tasks are easy.
 
 ## Decision table
 
-On Codex, reach the model in the Codex column through a predefined role when
-possible: `agent_type: "explorer"` pins gpt-5.6-luna/low (read-only) and
-`agent_type: "worker"` pins gpt-5.6-terra/medium — defined in
-`.codex/agents/*.toml`. Rows without a matching role need the direct
-`model`/`reasoning_effort` params (see Codex controls below).
+On Codex, pass the Codex column through spawn_agent's `model` /
+`reasoning_effort` params when the live schema exposes them (default from
+rust-v0.145.0-alpha.7), always with a partial fork (`fork_turns: "none"` or a
+numeric value). Built-in roles reachable via `agent_type` pin no model on
+their own (see Codex controls below).
 
 | Delegated task | Claude | Codex | effort |
 |---|---|---|---|
@@ -128,20 +128,23 @@ inherit session model.
 
 Model routing on Codex, in order of preference:
 
-1. **Predefined roles** (works on current builds in this repo): spawn with
-   `agent_type: "explorer"` (gpt-5.6-luna, low, read-only) or
-   `agent_type: "worker"` (gpt-5.6-terra, medium). The roles live in
-   `.codex/agents/*.toml` and pin `model`/`model_reasoning_effort`; the
-   selector is visible because `.codex/config.toml` sets
-   `hide_spawn_agent_metadata = false`. Define a new role file there when a
-   recurring task shape has no matching role.
-2. **Direct overrides** (0.145.0-alpha.7+): when the live schema shows
-   `model`/`reasoning_effort`, pass the GPT-5.6 choice from the decision
-   table.
-3. **Neither exposed** (older stable, or outside this repo): the child
-   inherits the parent's live-turn model. Do not spawn merely to obtain a
-   cheaper tier — spawn only for real parallelism or context isolation, and
-   do not claim model-tier savings.
+1. **Direct overrides** (default-exposed from rust-v0.145.0-alpha.7): when
+   the live schema shows `model`/`reasoning_effort`, pass the GPT-5.6 choice
+   from the decision table. Slugs are validated against the live models list
+   at spawn time.
+2. **Roles via `agent_type`** (visible because `.codex/config.toml` sets
+   `hide_spawn_agent_metadata = false`): the built-in `explorer` is a
+   read-only scout and `worker` an execution role, but built-ins pin no
+   model — combine them with the direct overrides above. If spawn-time
+   params prove insufficient (e.g. a build without them), custom role TOMLs
+   under `.codex/agents/*.toml` (`name`, `description`,
+   `developer_instructions`, plus `model` / `model_reasoning_effort` /
+   `sandbox_mode`) can pin a tier per role and override same-name built-ins;
+   this repo deliberately starts without committed role files.
+3. **No overrides exposed** (older builds): the child inherits the parent's
+   live-turn model. Do not spawn merely to obtain a cheaper tier — spawn
+   only for real parallelism or context isolation, and do not claim
+   model-tier savings.
 
 Constraints that apply to 1 and 2 — a violation makes Codex reject the spawn
 or silently keep the parent model:
@@ -179,15 +182,16 @@ source of truth.
 - Start a routine worker session with `codex --model gpt-5.6-terra` or
   `codex --model gpt-5.6-luna`; reserve `gpt-5.6-sol` for orchestration and the
   hardest tasks.
-- Per-subagent routing is configured in this repo: `.codex/config.toml` sets
-  `[features.multi_agent_v2] hide_spawn_agent_metadata = false`, and
-  `.codex/agents/*.toml` define the pinned roles. Mirror both into
-  `~/.codex/` to get the same behavior in other repos.
+- This repo's `.codex/config.toml` sets
+  `[features.multi_agent_v2] hide_spawn_agent_metadata = false` to expose the
+  `agent_type` selector; mirror it into `~/.codex/config.toml` for other
+  repos. Custom role TOMLs (`.codex/agents/` or `~/.codex/agents/`) that pin
+  `model`/`model_reasoning_effort` remain available if spawn-time params are
+  not enough.
 - Re-check the spawn_agent schema after Codex upgrades: `model` /
   `reasoning_effort` become directly available with
   `expose_spawn_agent_model_overrides` (default-on from
-  rust-v0.145.0-alpha.7). Role files whose model slug the models list
-  rejects need updating to a current slug.
+  rust-v0.145.0-alpha.7).
 
 ## Measure it
 

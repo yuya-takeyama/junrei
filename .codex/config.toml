@@ -4,9 +4,12 @@
 project_doc_fallback_filenames = ["CLAUDE.md"]
 
 # Expose the `agent_type` selector on the spawn_agent tool schema (hidden by
-# default upstream) so the model can pick the purpose-specific roles defined
-# under .codex/agents/ per call. Note: a full-history fork
-# (fork_turns: "all", the default) rejects role/model overrides — spawn roles
+# default upstream) so the model can pick built-in roles (`explorer` is a
+# read-only scout). Model routing itself uses spawn_agent's own `model` /
+# `reasoning_effort` params, exposed by default on builds from
+# rust-v0.145.0-alpha.7; custom role TOMLs under .codex/agents/ can pin models
+# per role if spawn-time params ever prove insufficient. Note: a full-history
+# fork (fork_turns: "all", the default) rejects role/model overrides — spawn
 # with fork_turns "none" or a numeric turn count.
 [features.multi_agent_v2]
 hide_spawn_agent_metadata = false
