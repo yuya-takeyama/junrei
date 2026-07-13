@@ -13,6 +13,8 @@
 
 :root {
   /* dark (default) */
+  /* Native widgets (date pickers, select dropdowns) follow the theme. */
+  color-scheme: dark;
   --bg: #191411;
   --pan: #211a14;
   --bd: #382d20;
@@ -36,6 +38,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #191411;
   --pan: #211a14;
   --bd: #382d20;
@@ -54,6 +57,7 @@
 }
 
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #faf6ee;
   --pan: #f1eadc;
   --bd: #d9cdb4;
@@ -73,6 +77,7 @@
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
+    color-scheme: light;
     --bg: #faf6ee;
     --pan: #f1eadc;
     --bd: #d9cdb4;

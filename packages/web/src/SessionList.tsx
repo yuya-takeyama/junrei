@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
+import {
+  DATE_FILTER_PRESET_DAYS,
+  dateFilterFromSelectValue,
+  dateFilterSelectValue,
+  matchesDateFilter,
+  useStoredDateFilter,
+} from "./dateFilter.js";
 import { formatDateTime, formatDuration, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel, MODEL_CLASS_ORDER } from "./modelClass.js";
@@ -39,15 +46,6 @@ const SOURCE_TAB_LABEL: Record<SourceTab, string> = {
   codex: "Codex",
 };
 const SOURCE_TAB_ORDER: readonly SourceTab[] = ["all", "claude-code", "codex"];
-
-type DateFilter = "14" | "30" | "all";
-const DATE_FILTER_CYCLE: readonly DateFilter[] = ["all", "14", "30"];
-const DATE_FILTER_LABEL: Record<DateFilter, string> = {
-  all: "all dates",
-  "14": "last 14 days",
-  "30": "last 30 days",
-};
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 function ModelMixBar({ mix }: { mix: ModelMixEntry[] }) {
   const total = mix.reduce((sum, m) => sum + m.outputTokens, 0);
@@ -91,7 +89,7 @@ export function SessionList() {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [dateFilter, setDateFilter] = useStoredDateFilter();
   const [searchParams, setSearchParams] = useSearchParams();
   // Persisted in the URL (`?source=`/`?repo=`/`?page=`) rather than component
   // state so a reload or shared link keeps the selection — same pattern as
@@ -143,7 +141,7 @@ export function SessionList() {
 
   const filtered = useMemo(() => {
     if (sessions === null) return [];
-    const cutoff = dateFilter === "all" ? undefined : Date.now() - Number(dateFilter) * DAY_MS;
+    const now = Date.now();
     const needle = search.trim().toLowerCase();
     return sessions.filter((s) => {
       if (repoFilter !== ALL_REPOS && repoFilterKey(s) !== repoFilter) return false;
@@ -151,17 +149,9 @@ export function SessionList() {
         const title = (s.title ?? s.firstUserPrompt ?? s.sessionId).toLowerCase();
         if (!title.includes(needle)) return false;
       }
-      if (cutoff !== undefined) {
-        if (s.startedAt === undefined || Date.parse(s.startedAt) < cutoff) return false;
-      }
-      return true;
+      return matchesDateFilter(s.startedAt, dateFilter, now);
     });
   }, [sessions, repoFilter, search, dateFilter]);
-
-  const cycleDateFilter = () => {
-    const index = DATE_FILTER_CYCLE.indexOf(dateFilter);
-    setDateFilter(DATE_FILTER_CYCLE[(index + 1) % DATE_FILTER_CYCLE.length] ?? "all");
-  };
 
   const pageCount = Math.max(1, Math.ceil(total / LIST_LIMIT));
   const goToPage = (next: number) => {
@@ -224,9 +214,53 @@ export function SessionList() {
               </option>
             ))}
           </select>
-          <button type="button" className="chip" onClick={cycleDateFilter}>
-            {DATE_FILTER_LABEL[dateFilter]} ▾
-          </button>
+          <select
+            className={dateFilter.kind === "all" ? "chip" : "chip on"}
+            value={dateFilterSelectValue(dateFilter)}
+            onChange={(e) => {
+              setDateFilter(dateFilterFromSelectValue(e.target.value));
+            }}
+            aria-label="Filter by date"
+          >
+            <option value="all">all dates</option>
+            {DATE_FILTER_PRESET_DAYS.map((days) => (
+              <option key={days} value={String(days)}>
+                last {days} days
+              </option>
+            ))}
+            <option value="custom">custom range…</option>
+          </select>
+          {dateFilter.kind === "custom" && (
+            <>
+              <input
+                className="chip on"
+                type="date"
+                value={dateFilter.from ?? ""}
+                max={dateFilter.to}
+                onChange={(e) => {
+                  setDateFilter({
+                    ...dateFilter,
+                    from: e.target.value === "" ? undefined : e.target.value,
+                  });
+                }}
+                aria-label="From date"
+              />
+              <span className="mono fs11 mut">→</span>
+              <input
+                className="chip on"
+                type="date"
+                value={dateFilter.to ?? ""}
+                min={dateFilter.from}
+                onChange={(e) => {
+                  setDateFilter({
+                    ...dateFilter,
+                    to: e.target.value === "" ? undefined : e.target.value,
+                  });
+                }}
+                aria-label="To date"
+              />
+            </>
+          )}
           <input
             className="chip"
             style={{ minWidth: "180px" }}
