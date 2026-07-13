@@ -11,20 +11,22 @@ import {
 interface Props {
   /**
    * The rows every active filter left visible (repo ∩ date ∩ title search) —
-   * the same array the table below the band renders from. The caller only
-   * shows the band when a specific repo is selected, which also guarantees
-   * the whole listable window is loaded (an active filter switches the fetch
-   * to the full window — see `sessionsFetchWindow`), so these rows are the
-   * complete filtered set, not one page.
+   * the same array the table below the band renders from. The list always
+   * fetches the whole listable window (bounded server-side by the date
+   * filter, see `dateFilterFetchBounds`/`LIST_WINDOW_LIMIT`), so these rows
+   * are the complete filtered set, not one page.
    */
   sessions: readonly SessionListItem[];
 }
 
 /**
  * Aggregate band for the session list (L0), shown between the filter bar and
- * the table once a specific repo is selected. Dogfooding showed this was the
- * top capability gap: reading a repo's total cost, fable-vs-sonnet split, and
- * per-day trend all required client-side jq, with no in-app equivalent.
+ * the table for every list view now — no repo needs to be selected. With the
+ * default last-7-days date filter this reads as "this week at a glance";
+ * narrowing by repo/date/search narrows the band the same way it narrows the
+ * table below it. Dogfooding showed this was the top capability gap: reading
+ * a repo's total cost, fable-vs-sonnet split, and per-day trend all required
+ * client-side jq, with no in-app equivalent.
  *
  * Computed client-side from the already-fetched filtered rows (see
  * `computeFilteredOverview`) rather than fetched from `GET /api/overview`:
@@ -34,7 +36,7 @@ interface Props {
  * the table structurally impossible, and drops a fetch (plus its
  * silent-failure path) besides.
  */
-export function RepoOverviewBand({ sessions }: Props) {
+export function OverviewBand({ sessions }: Props) {
   const overview = useMemo(() => computeFilteredOverview(sessions), [sessions]);
 
   const delegatedShare = formatDelegatedShare(overview.delegation);

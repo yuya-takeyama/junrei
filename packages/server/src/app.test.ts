@@ -453,6 +453,43 @@ describe("Codex routes", () => {
     const junkBody = (await junk.json()) as { sessions: unknown[] };
     expect(junkBody.sessions.length).toBe(fullBody.sessions.length);
   });
+
+  it("GET /api/sessions threads sinceMs/untilMs through to the listing (a bound before the Unix epoch empties the page but leaves `total` unbounded)", async () => {
+    const app = createApp();
+    const full = await app.request("/api/sessions?source=all");
+    const fullBody = (await full.json()) as { total: number };
+
+    // untilMs=1 (1970-01-01T00:00:00.001Z) is before every fixture's real
+    // startedAt, so nothing qualifies — but `total` must stay the full
+    // listable count regardless (see `SessionListBounds`'s doc comment).
+    const res = await app.request("/api/sessions?source=all&untilMs=1");
+    const body = (await res.json()) as { sessions: unknown[]; total: number };
+    expect(body.sessions).toEqual([]);
+    expect(body.total).toBe(fullBody.total);
+  });
+
+  it("GET /api/sessions ignores invalid sinceMs/untilMs (non-numeric, zero, negative) exactly like omitting them", async () => {
+    const app = createApp();
+    const base = await app.request("/api/sessions?source=all");
+    const baseBody = (await base.json()) as {
+      sessions: Array<{ source: string; sessionId: string }>;
+      total: number;
+    };
+
+    for (const junk of ["banana", "0", "-5", ""]) {
+      const res = await app.request(
+        `/api/sessions?source=all&sinceMs=${encodeURIComponent(junk)}&untilMs=${encodeURIComponent(junk)}`,
+      );
+      const body = (await res.json()) as {
+        sessions: Array<{ source: string; sessionId: string }>;
+        total: number;
+      };
+      expect(body.sessions.map((s) => `${s.source}:${s.sessionId}`)).toEqual(
+        baseBody.sessions.map((s) => `${s.source}:${s.sessionId}`),
+      );
+      expect(body.total).toBe(baseBody.total);
+    }
+  });
 });
 
 describe("GET /api/overview", () => {

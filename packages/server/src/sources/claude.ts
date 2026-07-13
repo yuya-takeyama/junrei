@@ -23,6 +23,7 @@ import {
 import {
   type ModelMixEntry,
   mixFromUsageTree,
+  type SessionListBounds,
   type SessionListItemBase,
   type SourceAdapter,
   sliceDelegation,
@@ -139,31 +140,67 @@ function startProxyMs(ref: ClaudeSessionFileRef): number {
 }
 
 /**
+ * How far `startProxyMs` (file birthtime/mtime) is allowed to drift from a
+ * transcript's real `startedAt` before `claudeListItems` will still analyze
+ * it when `bounds` is given. The proxy is a filesystem timestamp, not the
+ * transcript's own claim about when it started (synced/copied files, clock
+ * skew, etc.), so pruning on the proxy ALONE — with no slack — could skip a
+ * ref that the exact post-filter (below) would have kept. 24h is generous
+ * enough to absorb ordinary drift while still letting a 7-day default window
+ * skip the vast majority of old sessions.
+ */
+const PROXY_MARGIN_MS = 24 * 60 * 60 * 1000;
+
+/**
  * List Claude sessions as `{ entries, total }` — entries carry `sortMs` (the
  * session's start time in epoch ms, see `ListingAdapter` in sessions.ts).
  *
  * `max` bounds how many transcripts get ANALYZED, not just how many rows come
  * back: refs are ordered by `startProxyMs` (no parsing needed) and analysis
  * stops once `max` items exist, so a first page of 50 costs ~50 transcript
- * parses instead of every session on the machine. `total` is the full ref
- * count — cheap (stat-level) and what pagination needs. It can overcount by
- * however many unreadable files got skipped; a short last page is the
- * accepted trade for not parsing everything just to count.
+ * parses instead of every session on the machine. `bounds` (see
+ * `SessionListBounds`) is a second, independent lever on the same cost: a
+ * ref whose `startProxyMs` falls outside `[sinceMs, untilMs)` by more than
+ * `PROXY_MARGIN_MS` is skipped WITHOUT being analyzed at all (`continue`, not
+ * `break` — proxy order isn't perfectly reliable, so a later ref can still be
+ * in range even after an out-of-range one). This is the mechanism that makes
+ * the web's default last-7-days view cheap: most sessions on a long-lived
+ * machine never get parsed at all. Once a ref survives that coarse
+ * pre-filter and gets analyzed, its EXACT `sortMs` (the real `startedAt`,
+ * not the proxy) is checked against the same bounds and the entry is
+ * dropped if it doesn't actually qualify — the margin only widens which
+ * refs get a chance at analysis, it never widens the final result. The
+ * accepted failure mode (same shape as the existing proxy-based sort order
+ * failing to be exact): a ref whose proxy lies MORE than `PROXY_MARGIN_MS`
+ * from its real start time can be pruned away and never analyzed at all,
+ * even though its real `startedAt` would have qualified.
+ *
+ * `total` is the full ref count — cheap (stat-level) and what pagination
+ * needs — regardless of `max` or `bounds`. It can overcount by however many
+ * unreadable files got skipped; a short last page is the accepted trade for
+ * not parsing everything just to count.
  */
 export async function claudeListItems(
   max?: number,
+  bounds?: SessionListBounds,
 ): Promise<{ entries: { item: ClaudeSessionListItem; sortMs: number }[]; total: number }> {
   const refs = [...(await listClaudeRefs())].sort((a, b) => startProxyMs(b) - startProxyMs(a));
   const titles = await desktopTitles();
   const entries: { item: ClaudeSessionListItem; sortMs: number }[] = [];
   for (const ref of refs) {
     if (max !== undefined && entries.length >= max) break;
+    const proxyMs = startProxyMs(ref);
+    if (bounds?.sinceMs !== undefined && proxyMs < bounds.sinceMs - PROXY_MARGIN_MS) continue;
+    if (bounds?.untilMs !== undefined && proxyMs >= bounds.untilMs + PROXY_MARGIN_MS) continue;
     try {
       const analysis = await analyzeCached(ref);
       const startedMs = analysis.startedAt === undefined ? NaN : Date.parse(analysis.startedAt);
+      const sortMs = Number.isNaN(startedMs) ? proxyMs : startedMs;
+      if (bounds?.sinceMs !== undefined && sortMs < bounds.sinceMs) continue;
+      if (bounds?.untilMs !== undefined && sortMs >= bounds.untilMs) continue;
       entries.push({
         item: toListItem(analysis, ref, titles.get(analysis.sessionId)),
-        sortMs: Number.isNaN(startedMs) ? startProxyMs(ref) : startedMs,
+        sortMs,
       });
     } catch {
       // Unreadable session — skip rather than failing the whole list.

@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeSessionListItem, CodexSessionListItem } from "./api.js";
 import {
   disambiguateBasenames,
-  FILTER_SCAN_LIMIT,
   projectFilterKey,
   repoFilterKey,
   repoOptionsFor,
-  sessionsFetchWindow,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -53,37 +51,57 @@ const codexItem: CodexSessionListItem = {
 };
 
 describe("sessionsListQuery", () => {
-  it("passes the active tab through as the `source` query param, plus the page window", () => {
-    expect(sessionsListQuery("all", "50", "0")).toEqual({
-      limit: "50",
+  it("passes the active tab through as the `source` query param, plus the fetch window", () => {
+    expect(sessionsListQuery("all", "500", "0")).toEqual({
+      limit: "500",
       offset: "0",
       source: "all",
     });
-    expect(sessionsListQuery("claude-code", "50", "100")).toEqual({
-      limit: "50",
-      offset: "100",
+    expect(sessionsListQuery("claude-code", "500", "0")).toEqual({
+      limit: "500",
+      offset: "0",
       source: "claude-code",
     });
-    expect(sessionsListQuery("codex", "50", "50")).toEqual({
-      limit: "50",
-      offset: "50",
+    expect(sessionsListQuery("codex", "500", "0")).toEqual({
+      limit: "500",
+      offset: "0",
       source: "codex",
     });
   });
-});
 
-describe("sessionsFetchWindow", () => {
-  it("fetches exactly one server page when no client-side filter is active", () => {
-    expect(sessionsFetchWindow(false, 1, 50)).toEqual({ limit: 50, offset: 0 });
-    expect(sessionsFetchWindow(false, 3, 50)).toEqual({ limit: 50, offset: 100 });
+  it("omits sinceMs/untilMs entirely when bounds is omitted or has neither set (an 'all dates' filter)", () => {
+    expect(sessionsListQuery("all", "500", "0")).toEqual({
+      limit: "500",
+      offset: "0",
+      source: "all",
+    });
+    expect(sessionsListQuery("all", "500", "0", {})).toEqual({
+      limit: "500",
+      offset: "0",
+      source: "all",
+    });
   });
 
-  it("fetches the whole listable window when a filter is active — pagination happens after filtering", () => {
-    expect(sessionsFetchWindow(true, 1, 50)).toEqual({ limit: FILTER_SCAN_LIMIT, offset: 0 });
-  });
-
-  it("keeps the window identical across pages while a filter is active, so paging never refetches", () => {
-    expect(sessionsFetchWindow(true, 3, 50)).toEqual(sessionsFetchWindow(true, 1, 50));
+  it("includes sinceMs/untilMs as strings only when defined", () => {
+    expect(sessionsListQuery("all", "500", "0", { sinceMs: 1000 })).toEqual({
+      limit: "500",
+      offset: "0",
+      source: "all",
+      sinceMs: "1000",
+    });
+    expect(sessionsListQuery("all", "500", "0", { untilMs: 2000 })).toEqual({
+      limit: "500",
+      offset: "0",
+      source: "all",
+      untilMs: "2000",
+    });
+    expect(sessionsListQuery("all", "500", "0", { sinceMs: 1000, untilMs: 2000 })).toEqual({
+      limit: "500",
+      offset: "0",
+      source: "all",
+      sinceMs: "1000",
+      untilMs: "2000",
+    });
   });
 });
 

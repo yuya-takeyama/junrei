@@ -1,9 +1,18 @@
 import type { SessionSource } from "@junrei/core";
 import { type ClaudeSessionListItem, claudeAdapter } from "./sources/claude.js";
 import { type CodexSessionListItem, codexAdapter } from "./sources/codex.js";
+import type { SessionListBounds } from "./sources/shared.js";
 
 /** Either harness's list item, discriminated on `source`. */
 export type AnySessionListItem = ClaudeSessionListItem | CodexSessionListItem;
+
+/**
+ * Session-START-time bounds, epoch ms — `sinceMs` inclusive, `untilMs`
+ * exclusive. Re-exported from `sources/shared.ts`, where it's actually
+ * defined (see that file's doc comment on why: `shared.ts` can't import back
+ * from this module without creating a cycle).
+ */
+export type { SessionListBounds } from "./sources/shared.js";
 
 /** `"all"` merges both harnesses. */
 export type SessionSourceFilter = SessionSource | "all";
@@ -28,19 +37,26 @@ export const MAX_LIST_LIMIT = 500;
  * which source's route it's handling, so it calls each adapter's own typed
  * methods directly rather than through this generic surface.
  *
- * `listItems(max)` returns AT MOST `max` entries, ordered by `sortMs` desc —
- * the session's start time in epoch ms, falling back to a file-timestamp
- * proxy when the transcript carries no `startedAt`. `max` is a cost bound,
- * not just a truncation: the Claude adapter uses it to skip ANALYZING
- * transcripts that can't make the requested page (the whole point of
- * paginating — the first page no longer parses every session on the
- * machine). `total` is the source's full listable-session count regardless
- * of `max`, so pagination can be sized without analyzing everything.
+ * `listItems(max, bounds)` returns AT MOST `max` entries, ordered by
+ * `sortMs` desc — the session's start time in epoch ms, falling back to a
+ * file-timestamp proxy when the transcript carries no `startedAt`. `max` is
+ * a cost bound, not just a truncation: the Claude adapter uses it to skip
+ * ANALYZING transcripts that can't make the requested page (the whole point
+ * of paginating — the first page no longer parses every session on the
+ * machine). `bounds` (see `SessionListBounds`, re-exported above) is a
+ * second, independent cost bound on the same axis: a date filter narrows
+ * which sessions are eligible at all, so the Claude adapter also uses it to
+ * skip analysis for refs outside the window (see `claudeListItems`) — the
+ * mechanism that makes a 7-day default list view cheap even when `max` alone
+ * wouldn't have excluded an old session. `total` is the source's full
+ * listable-session count regardless of `max`/`bounds`, so pagination can be
+ * sized without analyzing everything.
  */
 interface ListingAdapter {
   source: SessionSource;
   listItems(
     max?: number,
+    bounds?: SessionListBounds,
   ): Promise<{ entries: { item: AnySessionListItem; sortMs: number }[]; total: number }>;
 }
 
@@ -63,15 +79,20 @@ export interface SessionListPage {
  * contribute to the window. Omitted `source` also means `"all"` — every
  * client (web, MCP) is expected to pass `source` explicitly when it wants
  * one harness only; there is no back-compat Claude-only default left (see
- * app.ts).
+ * app.ts). `bounds` (optional session-START-time bounds, see
+ * `SessionListBounds`) is passed through to every adapter unchanged — it
+ * narrows which sessions are eligible BEFORE `offset`/`limit` apply, and
+ * never affects `total` (still every listable session regardless of
+ * `bounds`, same as it's always been regardless of `limit`).
  */
 export async function listSessions(
   limit: number,
   source: SessionSourceFilter = "all",
   offset = 0,
+  bounds?: SessionListBounds,
 ): Promise<SessionListPage> {
   const adapters = source === "all" ? registry : registry.filter((a) => a.source === source);
-  const results = await Promise.all(adapters.map((a) => a.listItems(offset + limit)));
+  const results = await Promise.all(adapters.map((a) => a.listItems(offset + limit, bounds)));
   const sessions = results
     .flatMap((r) => r.entries)
     .sort((a, b) => b.sortMs - a.sortMs)

@@ -3,52 +3,49 @@ import { formatProject } from "./format.js";
 import type { SourceTab } from "./router.js";
 
 /**
- * Query params for `GET /api/sessions` given the active source tab — pulled
- * out of `SessionList` so the "which source did we actually ask the server
- * for" decision is independently testable without mocking `fetch`/the Hono
- * RPC client. `SourceTab` already matches the server's `source` query values
- * 1:1 (`"all" | "claude-code" | "codex"`), so this is mostly identity, but
- * keeping it a named function documents that the web always passes `source`
- * explicitly now — omitting it would silently fall back to Claude-only on
- * the server (see `sessions.ts`'s `listSessions` default).
+ * How many rows `GET /api/sessions` fetches for ANY list view — the whole
+ * listable window, not one server page; pagination happens client-side over
+ * the (repo ∩ date ∩ search) filtered rows instead (see `SessionList.tsx`).
+ * Mirrors the server's `MAX_LIST_LIMIT` clamp (`@junrei/server`'s
+ * sessions.ts); kept as a web-local constant rather than imported because
+ * the only runtime import from `@junrei/server` the web bundle can afford is
+ * `type AppType` (see api.ts) — pulling a value would drag Node-only server
+ * code into the browser build. Fetching this much used to happen only when a
+ * client-side filter was active (plain browsing paged server-side instead) —
+ * now that every list view sends a `sinceMs`/`untilMs` date bound (default
+ * last 7 days), the server itself prunes which transcripts get analyzed, so
+ * always fetching the whole window is cheap in the common case instead of a
+ * fixed-size compromise.
+ */
+export const LIST_WINDOW_LIMIT = 500;
+
+/**
+ * Query params for `GET /api/sessions` given the active source tab and
+ * optional date bounds — pulled out of `SessionList` so the "which source
+ * and bounds did we actually ask the server for" decision is independently
+ * testable without mocking `fetch`/the Hono RPC client. `SourceTab` already
+ * matches the server's `source` query values 1:1 (`"all" | "claude-code" |
+ * "codex"`), so this is mostly identity, but keeping it a named function
+ * documents that the web always passes `source` explicitly now — omitting it
+ * would silently fall back to Claude-only on the server (see `sessions.ts`'s
+ * `listSessions` default). `sinceMs`/`untilMs` (epoch ms, from
+ * `dateFilterFetchBounds`) are included only when defined — an "all dates"
+ * filter sends neither, matching the server's own "absent means unbounded"
+ * convention.
  */
 export function sessionsListQuery(
   tab: SourceTab,
   limit: string,
   offset: string,
-): { limit: string; offset: string; source: SourceTab } {
-  return { limit, offset, source: tab };
-}
-
-/**
- * How many rows to fetch when a client-side filter is active — the whole
- * listable window, not one page. Mirrors the server's `MAX_LIST_LIMIT` clamp
- * (`@junrei/server`'s sessions.ts); kept as a web-local constant rather than
- * imported because the only runtime import from `@junrei/server` the web
- * bundle can afford is `type AppType` (see api.ts) — pulling a value would
- * drag Node-only server code into the browser build.
- */
-export const FILTER_SCAN_LIMIT = 500;
-
-/**
- * Fetch window for `GET /api/sessions` given the paging mode. Plain browsing
- * pages on the server: exactly `pageSize` rows at the requested page's
- * offset, so the first paint only waits on one page's worth of transcript
- * analysis. With any client-side filter (repo / date / title search) active,
- * pagination has to happen AFTER filtering — a per-page fetch would scatter
- * matches across server pages and leave the pager sized by the unfiltered
- * total — so the fetch switches to the whole listable window
- * (`FILTER_SCAN_LIMIT`, always from offset 0: the page number must not leak
- * into the fetch) and the filtered rows are paged client-side.
- */
-export function sessionsFetchWindow(
-  filterActive: boolean,
-  page: number,
-  pageSize: number,
-): { limit: number; offset: number } {
-  return filterActive
-    ? { limit: FILTER_SCAN_LIMIT, offset: 0 }
-    : { limit: pageSize, offset: (page - 1) * pageSize };
+  bounds: { sinceMs?: number; untilMs?: number } = {},
+): { limit: string; offset: string; source: SourceTab; sinceMs?: string; untilMs?: string } {
+  return {
+    limit,
+    offset,
+    source: tab,
+    ...(bounds.sinceMs !== undefined && { sinceMs: String(bounds.sinceMs) }),
+    ...(bounds.untilMs !== undefined && { untilMs: String(bounds.untilMs) }),
+  };
 }
 
 /**

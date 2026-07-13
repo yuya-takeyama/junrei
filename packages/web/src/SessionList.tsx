@@ -4,6 +4,7 @@ import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
 import {
   DATE_FILTER_PRESET_DAYS,
+  dateFilterFetchBounds,
   dateFilterFromSelectValue,
   dateFilterSelectValue,
   matchesDateFilter,
@@ -12,7 +13,7 @@ import {
 import { formatDateTime, formatDuration, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel, MODEL_CLASS_ORDER } from "./modelClass.js";
-import { RepoOverviewBand } from "./RepoOverviewBand.js";
+import { OverviewBand } from "./OverviewBand.js";
 import {
   ALL_REPOS,
   parseListPage,
@@ -23,10 +24,10 @@ import {
   sessionRefOf,
 } from "./router.js";
 import {
+  LIST_WINDOW_LIMIT,
   projectFilterKey,
   repoFilterKey,
   repoOptionsFor,
-  sessionsFetchWindow,
   sessionsListQuery,
   sourceBadgeLabel,
   subagentCellText,
@@ -34,13 +35,11 @@ import {
 import { Band } from "./shell/Band.js";
 
 /**
- * Rows per page. Kept small on purpose: the server only ANALYZES enough
- * transcripts to fill the requested page (see `claudeListItems` in
- * `@junrei/server`), so this number is what the first paint waits on —
- * deeper pages stay reachable via the pager below the list. Only plain
- * browsing pages on the server, though — an active repo/date/search filter
- * switches the fetch to the whole listable window so counting and paging can
- * happen after filtering (see `sessionsFetchWindow`).
+ * Rows per CLIENT-side page. The fetch itself is always the whole listable
+ * window (`LIST_WINDOW_LIMIT`, bounded server-side by the date filter — see
+ * `dateFilterFetchBounds`), so this only controls how many of the already-
+ * fetched (repo ∩ date ∩ search) filtered rows render per page; deeper pages
+ * stay reachable via the pager below the list.
  */
 const LIST_LIMIT = 50;
 
@@ -103,16 +102,14 @@ export function SessionList() {
   const repoFilter = parseRepoParam(searchParams.get("repo"));
   const page = parseListPage(searchParams.get("page"));
 
-  // Any client-side filter flips the list from server paging to
-  // fetch-the-window-then-page (see `sessionsFetchWindow`) — a bound-less
-  // "custom" date range counts too, which just means one slightly bigger
-  // fetch before the user picks a bound.
-  const filterActive =
-    repoFilter !== ALL_REPOS || dateFilter.kind !== "all" || search.trim() !== "";
-  const { limit: fetchLimit, offset: fetchOffset } = sessionsFetchWindow(
-    filterActive,
-    page,
-    LIST_LIMIT,
+  // Server-side date bounds for the CURRENT date filter (default: last 7
+  // days — see `DEFAULT_DATE_FILTER`), memoized on `dateFilter` alone so the
+  // fetch effect below only re-runs when the resolved bounds actually change,
+  // not on every render (`dateFilterFetchBounds` rounds the "last N days"
+  // case to a stable 5-minute mark for exactly this reason).
+  const { sinceMs, untilMs } = useMemo(
+    () => dateFilterFetchBounds(dateFilter, Date.now()),
+    [dateFilter],
   );
 
   useEffect(() => {
@@ -124,10 +121,16 @@ export function SessionList() {
     // Always pass `source` explicitly: an omitted `source` defaults to
     // Claude-only on the server (back-compat for pre-Codex clients — see
     // `listSessions` in sessions.ts), which would silently hide Codex rows
-    // even on the "All" tab.
+    // even on the "All" tab. Always fetches the whole listable window
+    // (`LIST_WINDOW_LIMIT`, offset 0) — repo/search/page filtering and
+    // paging all happen client-side below; only the source tab or the date
+    // bounds can change what the server needs to analyze.
     client.api.sessions
       .$get({
-        query: sessionsListQuery(sourceTab, String(fetchLimit), String(fetchOffset)),
+        query: sessionsListQuery(sourceTab, String(LIST_WINDOW_LIMIT), "0", {
+          ...(sinceMs !== undefined && { sinceMs }),
+          ...(untilMs !== undefined && { untilMs }),
+        }),
       })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
@@ -143,10 +146,9 @@ export function SessionList() {
     return () => {
       stale = true;
     };
-    // Keyed on the resolved fetch window, not `page`/`filterActive` directly:
-    // while a filter is active the window is constant ({500, 0}), so paging
-    // through filtered rows never refetches.
-  }, [sourceTab, fetchLimit, fetchOffset]);
+    // Deliberately NOT keyed on repoFilter/search/page: those only affect the
+    // client-side filter/pager below, never what gets fetched.
+  }, [sourceTab, sinceMs, untilMs]);
 
   const repoOptions = useMemo(() => {
     if (sessions === null) return [];
@@ -172,17 +174,15 @@ export function SessionList() {
     });
   }, [sessions, repoFilter, search, dateFilter]);
 
-  // With a filter active the fetched window is the whole list, so the pager
-  // is sized by (and slices) the FILTERED rows; plain browsing keeps
-  // server-side paging sized by the server's unfiltered total.
-  const pageCount = Math.max(1, Math.ceil((filterActive ? filtered.length : total) / LIST_LIMIT));
+  // The fetch is always the whole listable window now, so the pager is
+  // always sized by (and slices) the FILTERED rows — there's no more
+  // server-paging mode to branch on.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / LIST_LIMIT));
   // A stale `?page=` past the filtered range (shared link, or a filter that
   // shrank the list before its handler could reset the param) clamps to the
   // last page instead of rendering an empty page under a lying pager.
-  const activePage = filterActive ? Math.min(page, pageCount) : page;
-  const pageRows = filterActive
-    ? filtered.slice((activePage - 1) * LIST_LIMIT, activePage * LIST_LIMIT)
-    : filtered;
+  const activePage = Math.min(page, pageCount);
+  const pageRows = filtered.slice((activePage - 1) * LIST_LIMIT, activePage * LIST_LIMIT);
   const goToPage = (next: number) => {
     const params = new URLSearchParams(searchParams);
     // Page 1 is the canonical no-param URL, same as the "all" source tab.
@@ -320,23 +320,24 @@ export function SessionList() {
           />
           <span className="mono fs11 mut num nowrap">
             {sessions === null ? "…" : `${String(filtered.length)} of ${String(total)}`}
-            {/* Same "incomplete" marker convention as the cost column's `*`:
-                the filter only scanned the fetched window, so matches older
-                than it can't be counted. */}
-            {sessions !== null && filterActive && sessions.length < total && (
-              <span title={`filtered over the newest ${String(sessions.length)} sessions only`}>
-                *
-              </span>
+            {/* `total` is the unbounded listable count, so `filtered.length
+                < total` is the NORMAL state with a date filter active — not
+                truncation. The `*` instead marks when the fetch itself hit
+                the server's window cap (`LIST_WINDOW_LIMIT`): older in-range
+                matches may exist beyond what was even fetched. */}
+            {sessions !== null && sessions.length >= LIST_WINDOW_LIMIT && (
+              <span title={`fetched the newest ${String(sessions.length)} sessions only`}>*</span>
             )}{" "}
             sessions
           </span>
         </div>
       </div>
 
-      {/* Rendered only once the rows are loaded — mirrors the old
-          fetch-silently-then-appear behavior, and guarantees the band never
-          aggregates a half-loaded list. */}
-      {repoFilter !== ALL_REPOS && sessions !== null && <RepoOverviewBand sessions={filtered} />}
+      {/* Rendered for every list view now (repo ∩ date ∩ search, not just a
+          selected repo) — only once the rows are loaded, which mirrors the
+          old fetch-silently-then-appear behavior and guarantees the band
+          never aggregates a half-loaded list. */}
+      {sessions !== null && <OverviewBand sessions={filtered} />}
 
       {error !== null && <div className="mut hpad">Failed to load sessions: {error}</div>}
       {error === null && sessions === null && <div className="mut hpad">Analyzing sessions…</div>}
