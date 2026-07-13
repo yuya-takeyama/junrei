@@ -148,6 +148,62 @@ describe("Claude Code timeline + record routes", () => {
   });
 });
 
+describe("Claude Desktop title fallback", () => {
+  const DESKTOP_DIR = join(FIXTURES_DIR, "claude-desktop");
+  const DESKTOP_TITLED_SESSION = "44444444-4444-4444-4444-444444444445";
+  let previousConfigDir: string | undefined;
+  let previousDesktopDir: string | undefined;
+
+  beforeAll(() => {
+    previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    previousDesktopDir = process.env.JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR;
+    process.env.CLAUDE_CONFIG_DIR = FIXTURES_DIR;
+    process.env.JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR = DESKTOP_DIR;
+  });
+
+  afterAll(() => {
+    if (previousConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+    if (previousDesktopDir === undefined) {
+      delete process.env.JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR;
+    } else {
+      process.env.JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR = previousDesktopDir;
+    }
+  });
+
+  it("detail: a session with no title records in its transcript gets the Desktop title", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${DESKTOP_TITLED_SESSION}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { analysis: { title?: string } };
+    expect(body.analysis.title).toBe("Desktop-titled session");
+  });
+
+  it("detail: a transcript's own ai-title wins over a Desktop title", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { analysis: { title?: string } };
+    // The desktop fixture maps this session to "Desktop title must lose".
+    expect(body.analysis.title).toBe("Fix foo bug");
+  });
+
+  it("list: items carry the same fallback titles", async () => {
+    const app = createApp();
+    const res = await app.request("/api/sessions?source=claude-code");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      sessions: Array<{ sessionId: string; title?: string }>;
+    };
+    const bySessionId = new Map(body.sessions.map((s) => [s.sessionId, s.title]));
+    expect(bySessionId.get(DESKTOP_TITLED_SESSION)).toBe("Desktop-titled session");
+    expect(bySessionId.get(SESSION_ID)).toBe("Fix foo bug");
+  });
+});
+
 const CODEX_HOME = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/codex-home");
 const CODEX_SESSION_ID = "11111111-1111-1111-1111-111111111111";
 

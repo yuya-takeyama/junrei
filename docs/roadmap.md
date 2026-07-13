@@ -135,6 +135,13 @@ extract — so the missing signals shipped as one same-day PR series instead.
   full text" toggle, and the Overview/agent-detail first-prompt strip
   (500-char preview) fetches the untruncated text on first expand; both
   lazily fetch via the existing record API and cache the result — this PR
+- ✅ Desktop session titles — Desktop-app sessions write no `ai-title`/
+  `custom-title` records, so their rows fell back to the raw session UUID;
+  the Claude adapter now joins the Desktop metadata store
+  (`claude-code-sessions/**/local_*.json`, `cliSessionId` → `title`,
+  mtime-cached) as a title fallback on list items, session detail, and MCP
+  (`JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR` overrides the store location) — this
+  PR
 
 ## Codex CLI sessions
 
