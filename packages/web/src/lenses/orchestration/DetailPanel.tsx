@@ -60,16 +60,9 @@ function ModelBreakdown({ models }: { models: readonly ModelUsageSummary[] }) {
 
 function MainDetail({ session, sessionLive }: { session: AnySessionJson; sessionLive: boolean }) {
   const models = activeModels(session.usage.byModel);
-  // Claude: per-tool-call stats (toolStats). Codex has no such breakdown —
-  // codex.toolCallCount/toolErrorCount already covers the whole main turn.
-  const toolCallCount =
-    session.source === "claude-code"
-      ? session.toolStats.reduce((sum, s) => sum + s.callCount, 0)
-      : session.codex.toolCallCount;
-  const toolErrorCount =
-    session.source === "claude-code"
-      ? session.toolStats.reduce((sum, s) => sum + s.errorCount, 0)
-      : session.codex.toolErrorCount;
+  // Main-transcript tool tallies — a `SessionAnalysisCore` field both
+  // sources populate (see `@junrei/core`'s session-analysis.ts).
+  const { toolCallCount, toolErrorCount } = session;
   const mainShare = costShare(session.usage.total.costUsd, session.totalUsage.costUsd);
 
   return (

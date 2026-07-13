@@ -88,8 +88,6 @@ function toListItem(
   ref: ClaudeSessionFileRef,
   desktopTitle?: string,
 ): ClaudeSessionListItem {
-  const toolCallCount = analysis.toolStats.reduce((sum, s) => sum + s.callCount, 0);
-  const toolErrorCount = analysis.toolStats.reduce((sum, s) => sum + s.errorCount, 0);
   const title = analysis.title ?? desktopTitle;
   return {
     source: "claude-code",
@@ -107,8 +105,8 @@ function toListItem(
     cacheReadTokens: analysis.totalUsage.cacheReadTokens,
     subagentCount: analysis.subagentCount,
     compactionCount: analysis.compactions.length,
-    toolCallCount,
-    toolErrorCount,
+    toolCallCount: analysis.toolCallCount,
+    toolErrorCount: analysis.toolErrorCount,
     sizeBytes: ref.sizeBytes,
     modelMix: computeModelMix(analysis),
     usageByModel: sliceUsageByModel(analysis.totalUsageByModel),

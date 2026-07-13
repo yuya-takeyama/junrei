@@ -11,9 +11,8 @@ import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
 import {
-  CLAUDE_LENSES,
-  CODEX_LENSES,
   isLegacyClaudeProjectScopedUrl,
+  LENSES_BY_SOURCE,
   normalizeLens,
   parseRecordParam,
   recordPath,
@@ -187,7 +186,7 @@ export function SessionShell({ source }: Props) {
   }
 
   const title = session?.title ?? session?.sessionId ?? "…";
-  const lensTabs = isCodex ? CODEX_LENSES : CLAUDE_LENSES;
+  const lensTabs = LENSES_BY_SOURCE[source];
   const lensAvailable = (lensTabs as readonly string[]).includes(lens);
 
   const handleCopy = () => {
@@ -239,11 +238,7 @@ export function SessionShell({ source }: Props) {
         )}
         {error === null && session !== null && !lensAvailable && (
           <div className="hpad mt16">
-            <div className="pan tile mut">
-              {isCodex
-                ? "This lens isn't available for Codex sessions."
-                : "This lens isn't available for this session."}
-            </div>
+            <div className="pan tile mut">This lens isn&apos;t available for this session.</div>
           </div>
         )}
         {error === null && session !== null && lens === "overview" && (
