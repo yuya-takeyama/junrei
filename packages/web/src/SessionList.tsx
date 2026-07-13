@@ -333,7 +333,10 @@ export function SessionList() {
         </div>
       </div>
 
-      {repoFilter !== ALL_REPOS && <RepoOverviewBand repo={repoFilter} />}
+      {/* Rendered only once the rows are loaded — mirrors the old
+          fetch-silently-then-appear behavior, and guarantees the band never
+          aggregates a half-loaded list. */}
+      {repoFilter !== ALL_REPOS && sessions !== null && <RepoOverviewBand sessions={filtered} />}
 
       {error !== null && <div className="mut hpad">Failed to load sessions: {error}</div>}
       {error === null && sessions === null && <div className="mut hpad">Analyzing sessions…</div>}

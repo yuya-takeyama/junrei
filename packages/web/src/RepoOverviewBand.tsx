@@ -1,46 +1,41 @@
-import { useEffect, useState } from "react";
-import type { RepoOverview } from "./api.js";
-import { fetchRepoOverview } from "./api.js";
+import { useMemo } from "react";
+import type { SessionListItem } from "./api.js";
 import { formatDelegatedShare, formatUsd } from "./format.js";
-import { dayBars, formatUtcDayLabel, topModelShare } from "./repoOverviewHelpers.js";
+import {
+  computeFilteredOverview,
+  dayBars,
+  formatUtcDayLabel,
+  topModelShare,
+} from "./repoOverviewHelpers.js";
 
 interface Props {
-  /** Repo filter key (see `repoFilterKey`) — the caller only renders this band when one specific repo is selected, never for `ALL_REPOS`. */
-  repo: string;
+  /**
+   * The rows every active filter left visible (repo ∩ date ∩ title search) —
+   * the same array the table below the band renders from. The caller only
+   * shows the band when a specific repo is selected, which also guarantees
+   * the whole listable window is loaded (an active filter switches the fetch
+   * to the full window — see `sessionsFetchWindow`), so these rows are the
+   * complete filtered set, not one page.
+   */
+  sessions: readonly SessionListItem[];
 }
 
 /**
- * Repo-level aggregate band for the session list (L0), shown between the
- * filter bar and the table once a specific repo is selected. Dogfooding
- * showed this was the top capability gap: reading a repo's total cost,
- * fable-vs-sonnet split, and per-day trend all required client-side jq, with
- * no in-app equivalent (see `@junrei/server`'s `overview.ts`, which this
- * fetches via `fetchRepoOverview`).
+ * Aggregate band for the session list (L0), shown between the filter bar and
+ * the table once a specific repo is selected. Dogfooding showed this was the
+ * top capability gap: reading a repo's total cost, fable-vs-sonnet split, and
+ * per-day trend all required client-side jq, with no in-app equivalent.
  *
- * Loading is silent (renders nothing until data arrives) and a fetch failure
- * is logged and swallowed (the band just doesn't render) — this is a
- * supplementary aggregate above the session table, not a primary view, so it
- * fails quiet rather than showing a spinner or error banner.
+ * Computed client-side from the already-fetched filtered rows (see
+ * `computeFilteredOverview`) rather than fetched from `GET /api/overview`:
+ * the server rollup is repo-scoped but ALL-TIME, so it silently ignored the
+ * date filter and title search — a June-only range still showed the repo's
+ * full history. Deriving from the table's own rows makes disagreement with
+ * the table structurally impossible, and drops a fetch (plus its
+ * silent-failure path) besides.
  */
-export function RepoOverviewBand({ repo }: Props) {
-  const [overview, setOverview] = useState<RepoOverview | null>(null);
-
-  useEffect(() => {
-    setOverview(null);
-    let stale = false;
-    fetchRepoOverview(repo)
-      .then((data) => {
-        if (!stale) setOverview(data);
-      })
-      .catch((e: unknown) => {
-        console.error("Failed to load repo overview:", e);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [repo]);
-
-  if (overview === null) return null;
+export function RepoOverviewBand({ sessions }: Props) {
+  const overview = useMemo(() => computeFilteredOverview(sessions), [sessions]);
 
   const delegatedShare = formatDelegatedShare(overview.delegation);
   const topModel = topModelShare(overview);

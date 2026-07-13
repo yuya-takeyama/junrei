@@ -24,24 +24,16 @@ export type ModelMixEntry = SessionListItem["modelMix"][number];
 
 type RepoOverviewResponse = InferResponseType<typeof client.api.overview.$get>;
 
-/** Repo-level rollup — see `@junrei/server`'s `overview.ts` for the exact aggregation. */
-export type RepoOverview = Extract<RepoOverviewResponse, { overview: unknown }>["overview"];
-
 /**
- * Fetch the repo-level rollup for one repo key (a `repoRoot` path, or one of
- * the fallback-bucket keys `repoFilterKey` assigns — see `overview.ts`'s doc
- * comment on the server for the exact accepted forms). Throws on a non-2xx
- * response — the session-list band this feeds treats any failure the same
- * way (log + omit the band), so there's no separate "not found" case to
- * distinguish here unlike `fetchRecordDetail`'s 404.
+ * Repo-level rollup shape — see `@junrei/server`'s `overview.ts` for the
+ * exact aggregation. The web no longer FETCHES `GET /api/overview` (the
+ * session-list band computes its filter-aware rollup client-side — see
+ * `computeFilteredOverview` in repoOverviewHelpers.ts), but the response
+ * type is still the canonical source for the band's field shapes
+ * (`byModel`/`perDay`/`delegation`), keeping them pinned to what the server
+ * (and the `get_repo_overview` MCP tool) actually serves.
  */
-export async function fetchRepoOverview(repo: string): Promise<RepoOverview> {
-  const res = await client.api.overview.$get({ query: { repo } });
-  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-  const body = await res.json();
-  if (!("overview" in body)) throw new Error("malformed overview response");
-  return body.overview;
-}
+export type RepoOverview = Extract<RepoOverviewResponse, { overview: unknown }>["overview"];
 
 type ClaudeSessionResponse = InferResponseType<
   (typeof client.api.sessions)["claude-code"][":id"]["$get"]
