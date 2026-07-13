@@ -59,7 +59,7 @@ export function RepoOverviewBand({ repo }: Props) {
           {!overview.costIsComplete && (
             <span className="mut" title="some usage in this repo has no known pricing">
               {" "}
-              · est.
+              · incomplete
             </span>
           )}
         </div>

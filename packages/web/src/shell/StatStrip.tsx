@@ -3,8 +3,6 @@ import { Link } from "react-router";
 import type { AnySessionJson } from "../api.js";
 import { cacheHitRate, formatDelegatedShare, formatTokens, formatUsd } from "../format.js";
 import { sessionPath, sessionRefOf } from "../router.js";
-import { capsFor } from "../sourceCaps.js";
-import { EstBadge } from "./EstBadge.js";
 
 interface Props {
   session: AnySessionJson;
@@ -20,12 +18,10 @@ interface Props {
  * `apiMessageCount`/`apiErrorCount` are PRESENT only where the harness has
  * the concept (see `SessionAnalysisCore` — absence means "no such concept",
  * never zero), so the Turns and Compact cells render presence-driven;
- * `toolCallCount`/`toolErrorCount` are core fields both sources populate;
- * the est. marker on the dollar figure is a `capsFor` concern (Codex costs
- * are list-price estimates). The Total-cost subline is source-uniform:
- * `totalUsage` folds in descendant threads for both sources, so the
- * delegated split from `session.delegation` is the honest caption either
- * way.
+ * `toolCallCount`/`toolErrorCount` are core fields both sources populate.
+ * The Total-cost subline is source-uniform: `totalUsage` folds in
+ * descendant threads for both sources, so the delegated split from
+ * `session.delegation` is the honest caption either way.
  */
 export function StatStrip({ session }: Props) {
   const ref = sessionRefOf(session);
@@ -41,7 +37,6 @@ export function StatStrip({ session }: Props) {
         <div className="big mt8 amb">
           {formatUsd(session.totalUsage.costUsd)}
           {session.totalUsage.costIsComplete ? "" : "*"}
-          {capsFor(session).costIsEstimated && <EstBadge />}
         </div>
         <div className="sub num">
           {formatUsd(session.delegation.subagents.costUsd ?? 0)} delegated

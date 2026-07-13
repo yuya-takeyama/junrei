@@ -8,8 +8,7 @@ import type { AnySessionJson, SessionListItem } from "./api.js";
  * caller reads intent (`caps.hasApiErrors`) rather than re-deriving it.
  *
  * Only covers capabilities that were previously expressed as inline
- * `session.source === ...` conditionals in more than one place, or whose
- * name clarifies non-obvious asymmetry (Codex's estimated-cost marker).
+ * `session.source === ...` conditionals in more than one place.
  * Purely local one-off branches (e.g.
  * `SessionShell`'s "turns" lens gate, which already reads `CODEX_LENSES`)
  * are left as direct `source` checks — routing them through this module too
@@ -33,8 +32,6 @@ export interface SourceCaps {
    * of the log format, not of the individual launch.
    */
   capturesSubagentReturn: boolean;
-  /** True when the session's cost is a Codex API-list-price estimate rather than a billed Claude Code amount. */
-  costIsEstimated: boolean;
 }
 
 const CLAUDE_CAPS: SourceCaps = {
@@ -44,7 +41,6 @@ const CLAUDE_CAPS: SourceCaps = {
   hasApiErrors: true,
   hasTurnCompositionChart: true,
   capturesSubagentReturn: true,
-  costIsEstimated: false,
 };
 
 const CODEX_CAPS: SourceCaps = {
@@ -54,7 +50,6 @@ const CODEX_CAPS: SourceCaps = {
   hasApiErrors: false,
   hasTurnCompositionChart: false,
   capturesSubagentReturn: false,
-  costIsEstimated: true,
 };
 
 /** Resolve capabilities for a full session analysis (AnySessionJson) or a session-list row. */

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeSessionListItem, CodexSessionListItem } from "./api.js";
 import {
   disambiguateBasenames,
-  isEstimatedCost,
   projectFilterKey,
   repoFilterKey,
   repoOptionsFor,
@@ -93,13 +92,6 @@ describe("sourceBadgeLabel", () => {
   it("labels each source", () => {
     expect(sourceBadgeLabel("claude-code")).toBe("Claude");
     expect(sourceBadgeLabel("codex")).toBe("Codex");
-  });
-});
-
-describe("isEstimatedCost", () => {
-  it("is true only for Codex rows", () => {
-    expect(isEstimatedCost(claudeItem)).toBe(false);
-    expect(isEstimatedCost(codexItem)).toBe(true);
   });
 });
 

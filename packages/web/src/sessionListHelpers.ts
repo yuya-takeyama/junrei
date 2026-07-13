@@ -1,7 +1,6 @@
 import type { SessionListItem } from "./api.js";
 import { formatProject } from "./format.js";
 import type { SourceTab } from "./router.js";
-import { capsFor } from "./sourceCaps.js";
 
 /**
  * Query params for `GET /api/sessions` given the active source tab — pulled
@@ -53,11 +52,6 @@ export function sourceBadgeLabel(source: SessionListItem["source"]): string {
  */
 export function projectFilterKey(item: SessionListItem): string {
   return item.source === "codex" ? "codex" : item.projectDirName;
-}
-
-/** Whether a session-list row's cost figure is a Codex API-list-price estimate rather than a billed amount. */
-export function isEstimatedCost(item: SessionListItem): boolean {
-  return capsFor(item).costIsEstimated;
 }
 
 // Fallback-bucket key prefixes for sessions with no `repoRoot` (pre-#36 data,

@@ -3,8 +3,6 @@ import type { AnySessionJson } from "../api.js";
 import { formatUsd } from "../format.js";
 import { classifyModel, modelShortLabel } from "../modelClass.js";
 import { sessionPath, sessionRefOf } from "../router.js";
-import { EstBadge } from "../shell/EstBadge.js";
-import { capsFor } from "../sourceCaps.js";
 
 interface Props {
   session: AnySessionJson;
@@ -34,7 +32,6 @@ export function CostByModelChart({ session }: Props) {
           <span className="fx ac gap12">
             <span className="mono fs11 mut">
               main {formatUsd(mainCost)} · delegated {formatUsd(delegatedCost)}
-              {capsFor(session).costIsEstimated && <EstBadge />}
             </span>
             <Link className="linkc mono fs11" to={orchestrationHref}>
               → orchestration
