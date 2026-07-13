@@ -23,4 +23,5 @@ export type { CodexTranscript } from "./parser.js";
 export { parseCodexTranscriptFile } from "./parser.js";
 export type { CodexDeferredSearchField, CodexSearchExtraction } from "./search.js";
 export { extractCodexSearchFields } from "./search.js";
+export { loadCodexSessionIndexTitles } from "./session-index.js";
 export { buildCodexTimeline, getCodexRecordDetail } from "./timeline.js";

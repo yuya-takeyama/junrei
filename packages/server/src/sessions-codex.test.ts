@@ -187,6 +187,19 @@ beforeAll(async () => {
     copyTreeRewrite(CLAUDE_FIXTURES_DIR, scratchClaudeDir),
     copyTreeRewrite(CODEX_HOME, scratchCodexHome),
   ]);
+  // Thread-name index (see loadCodexSessionIndexTitles): 22222222 has no
+  // thread_name_updated event in its rollout (newer Codex never writes one),
+  // 11111111 has one ("Fix flaky test") that this index entry must BEAT (a
+  // post-session rename only touches the index). 33333333 is deliberately
+  // absent so a session with neither source stays title-less.
+  await writeFile(
+    join(scratchCodexHome, "session_index.jsonl"),
+    [
+      '{"id":"22222222-2222-2222-2222-222222222222","thread_name":"Index-only thread name","updated_at":"2026-07-02T09:05:00Z"}',
+      '{"id":"11111111-1111-1111-1111-111111111111","thread_name":"Renamed in Codex UI","updated_at":"2026-07-05T00:00:00Z"}',
+      "",
+    ].join("\n"),
+  );
   await stampFixtureMtimes(scratchClaudeDir, scratchCodexHome);
 });
 
@@ -351,6 +364,26 @@ describe("listSessions (source filter + Codex merge)", () => {
     expect(items.some((i) => i.source === "claude-code")).toBe(true);
   });
 
+  it("list: a session named only in session_index.jsonl gets that thread name as its title", async () => {
+    const { sessions: items } = await listSessions(50, "codex");
+    const indexOnly = items.find((i) => i.sessionId === "22222222-2222-2222-2222-222222222222");
+    expect(indexOnly?.title).toBe("Index-only thread name");
+  });
+
+  it("list: the index name wins over a rollout thread_name_updated event", async () => {
+    const { sessions: items } = await listSessions(50, "codex");
+    const renamed = items.find((i) => i.sessionId === "11111111-1111-1111-1111-111111111111");
+    // The rollout's own event says "Fix flaky test"; the index rename is newer.
+    expect(renamed?.title).toBe("Renamed in Codex UI");
+  });
+
+  it("list: a session in neither the index nor its rollout stays title-less", async () => {
+    const { sessions: items } = await listSessions(50, "codex");
+    const untitled = items.find((i) => i.sessionId === "33333333-3333-3333-3333-333333333333");
+    expect(untitled).toBeDefined();
+    expect(untitled?.title).toBeUndefined();
+  });
+
   it("missing CODEX_HOME yields zero Codex items, no error", async () => {
     const previous = process.env.CODEX_HOME;
     process.env.CODEX_HOME = join(scratchCodexHome, "does-not-exist");
@@ -408,6 +441,13 @@ describe("getCodexSession", () => {
       costUsd: 0,
       messageCount: 0,
     });
+  });
+
+  it("detail: carries the session_index.jsonl thread name, beating the rollout's own event", async () => {
+    const indexOnly = await getCodexSession("22222222-2222-2222-2222-222222222222");
+    expect(indexOnly?.title).toBe("Index-only thread name");
+    const renamed = await getCodexSession("11111111-1111-1111-1111-111111111111");
+    expect(renamed?.title).toBe("Renamed in Codex UI");
   });
 
   it("returns undefined for an unknown session id", async () => {

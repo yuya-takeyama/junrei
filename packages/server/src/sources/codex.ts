@@ -9,6 +9,7 @@ import {
   type FileAccessEntry,
   getCodexRecordDetail,
   listCodexSessionFiles,
+  loadCodexSessionIndexTitles,
   type ModelUsageSummary,
   mergeCodexFileAccess,
   mergeUsageByModel,
@@ -280,15 +281,31 @@ interface CodexAnalyzedRef {
  * in mtime order, so building a forest for one session requires having
  * analyzed all of them first). Legacy/empty-format and unreadable files are
  * skipped, same as `codexListItems`/`getCodexSession` always did.
+ *
+ * Thread names from `$CODEX_HOME/session_index.jsonl` are overlaid onto each
+ * analysis's `title` here (the Codex analog of Claude's Desktop-title
+ * fallback — see `desktopTitles` in `sources/claude.ts`): newer Codex
+ * versions never write `thread_name_updated` into the rollout, and a rename
+ * made after the session ended only touches the index, so the INDEX name
+ * wins when both exist. Overlaying at this single funnel covers the session
+ * list, session detail, and sub-agent forest descriptions alike.
  */
 async function listCodexAnalyzed(): Promise<CodexAnalyzedRef[]> {
   const refs = await listCodexRefs();
+  const indexTitles = await loadCodexSessionIndexTitles(resolveCodexHome(process.env));
   const out: CodexAnalyzedRef[] = [];
   for (const ref of refs) {
     try {
       const analysis = await analyzeCodexCached(ref);
       if (analysis === undefined) continue; // legacy/empty format — not listable.
-      out.push({ ref, analysis });
+      const indexTitle = indexTitles.get(analysis.sessionId);
+      // Copy rather than mutate: analyzeCodexCached shares one object per
+      // mtime, and a later index rename must not be baked into the cache.
+      const overlaid =
+        indexTitle === undefined || indexTitle === analysis.title
+          ? analysis
+          : { ...analysis, title: indexTitle };
+      out.push({ ref, analysis: overlaid });
     } catch {
       // Unreadable session — skip rather than failing the whole list.
     }
