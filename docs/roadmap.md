@@ -354,6 +354,17 @@ extract — so the missing signals shipped as one same-day PR series instead.
   `styles/tokens.css` (dark + light), every short label carries the raw id as
   a tooltip, and mix bars/badges/tables across all lenses derive from the
   same table — this PR
+- ✅ Codex-only "est." cost badge removed (`EstBadge`, `costIsEstimated` cap):
+  its premise — Claude Code costs are billed amounts, Codex costs are
+  estimates — was false. BOTH sources compute cost the same way, token usage
+  from the log × the shared `prices.json` list-price snapshot
+  (`estimateCostComponents` in `claude/metrics.ts` and `codex/analyze.ts`);
+  no billed amount is ever read from either log. Every dollar figure is an
+  estimate, so the per-row/per-cell marker conveyed a false asymmetry
+  ("no badge = actual"). The list column header already reads "Cost est";
+  the `*` incomplete-cost marker (unpriced model in the mix) stays, and
+  `RepoOverviewBand`'s incomplete-cost subline now says "incomplete" instead
+  of the misleading "est." — this PR
 
 ## Transcript search (MCP)
 

@@ -38,7 +38,6 @@ import {
   sessionPath,
 } from "./router.js";
 import { Band } from "./shell/Band.js";
-import { EstBadge } from "./shell/EstBadge.js";
 import { LensTabs } from "./shell/LensTabs.js";
 import { capsFor } from "./sourceCaps.js";
 
@@ -139,8 +138,8 @@ function AgentMetaLine({ node, session }: { node: SubagentNodeJson; session: Any
  * reports `subagents: []` even when the tree shows otherwise. Source
  * asymmetries mirror the session-level `StatStrip` and are expressed by the
  * entity interface, not `source` checks: `apiMessageCount` is present only
- * where the harness has the concept (Turns cell otherwise), return capture
- * is a `capsFor` capability, and the est. cost marker is a cap too.
+ * where the harness has the concept (Turns cell otherwise), and return
+ * capture is a `capsFor` capability.
  */
 function AgentStatStrip({
   session,
@@ -164,7 +163,6 @@ function AgentStatStrip({
         <div className="big mt8 amb">
           {formatUsd(agent.totalUsage.costUsd)}
           {agent.totalUsage.costIsComplete ? "" : "*"}
-          {capsFor(agent).costIsEstimated && <EstBadge />}
         </div>
         <div className="sub">{costPct}% of session</div>
       </div>

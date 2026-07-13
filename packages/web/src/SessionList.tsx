@@ -16,7 +16,6 @@ import {
   sessionRefOf,
 } from "./router.js";
 import {
-  isEstimatedCost,
   projectFilterKey,
   repoFilterKey,
   repoOptionsFor,
@@ -25,7 +24,6 @@ import {
   subagentCellText,
 } from "./sessionListHelpers.js";
 import { Band } from "./shell/Band.js";
-import { EstBadge } from "./shell/EstBadge.js";
 
 /**
  * Rows per page. Kept small on purpose: the server only ANALYZES enough
@@ -310,7 +308,6 @@ export function SessionList() {
               <span className={s.totalCostUsd === 0 ? "num fs12 cellr mut" : "num fs12 cellr"}>
                 {formatUsd(s.totalCostUsd)}
                 {s.costIsComplete ? "" : "*"}
-                {isEstimatedCost(s) && <EstBadge />}
               </span>
               <ModelMixBar mix={s.modelMix} />
               <span className={s.subagentCount > 0 ? "num fs12 cellr" : "num fs12 cellr mut"}>
