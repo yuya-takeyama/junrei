@@ -158,6 +158,27 @@ extract — so the missing signals shipped as one same-day PR series instead.
   analysis cache, so the web can infer "still running" (`isSessionLive`,
   5-minute generous window) without a live socket. Codex nodes keep `status`
   honestly undefined — no parent-side completion evidence exists to read
+- ✅ Server-side date bounds + default last-7-days view: `GET /api/sessions`
+  gains optional `sinceMs`/`untilMs` (session START time, epoch ms) via a new
+  `SessionListBounds` threaded through `listSessions` to both adapters. The
+  Claude adapter prunes analysis by it — a ref whose file-timestamp proxy
+  falls outside the window (±24h margin, then an exact post-filter on the
+  real `startedAt` once analyzed) is skipped without ever being parsed — the
+  mechanism that makes a narrow date filter cheap instead of just a smaller
+  page over an unchanged full scan; the Codex adapter (which always analyzes
+  its whole pool for sub-agent-forest reasons) applies it as a post-filter
+  instead. `total` keeps its unbounded meaning either way. Web: the session
+  list now always fetches the whole listable window in one request
+  (`LIST_WINDOW_LIMIT`, was `FILTER_SCAN_LIMIT` and only used when a
+  client-side filter was active — the separate server-paging mode is gone)
+  with `sinceMs`/`untilMs` from the new `dateFilterFetchBounds` (rounded to a
+  stable 5-minute mark so the fetch effect doesn't refetch on every render);
+  a first-time viewer's date filter now defaults to "last 7 days"
+  (`DEFAULT_DATE_FILTER`) instead of "all" — a stored `"all"` or any other
+  prior choice is still respected exactly. `RepoOverviewBand` is renamed
+  `OverviewBand` and renders for every list view now, not just when a repo is
+  selected — with the new default it reads as "this week at a glance" — this
+  PR
 
 ## Codex CLI sessions
 

@@ -85,7 +85,21 @@ export function createApp(options: CreateAppOptions = {}) {
         const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
         // Omitted `source` means "all" — see `listSessions`'s doc comment.
         const source = parseSourceFilter(c.req.query("source"));
-        return c.json(await listSessions(limit, source, offset));
+        // Optional session-START-time bounds (epoch ms, `sinceMs` inclusive /
+        // `untilMs` exclusive — see `SessionListBounds`) driving the web's
+        // date filter server-side: a non-integer or non-positive value is
+        // treated the same as an absent one, same convention as `limit`/
+        // `offset` above.
+        const rawSinceMs = Number.parseInt(c.req.query("sinceMs") ?? "", 10);
+        const sinceMs = Number.isInteger(rawSinceMs) && rawSinceMs > 0 ? rawSinceMs : undefined;
+        const rawUntilMs = Number.parseInt(c.req.query("untilMs") ?? "", 10);
+        const untilMs = Number.isInteger(rawUntilMs) && rawUntilMs > 0 ? rawUntilMs : undefined;
+        return c.json(
+          await listSessions(limit, source, offset, {
+            ...(sinceMs !== undefined && { sinceMs }),
+            ...(untilMs !== undefined && { untilMs }),
+          }),
+        );
       })
       // Repo-level ALL-TIME rollup (see `overview.ts`'s doc comment for the
       // exact `repo` key forms this accepts — a `repoRoot` path or one of

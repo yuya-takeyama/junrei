@@ -14,6 +14,23 @@ export interface ModelMixEntry {
 }
 
 /**
+ * Session-START-time bounds for `listItems`/`listSessions`, epoch ms —
+ * `sinceMs` inclusive, `untilMs` exclusive. Defined here (rather than in
+ * `sessions.ts`, despite that being the module that mainly consumes it) and
+ * re-exported from there, so this module never has to import back from
+ * `sessions.ts`: `sessions.ts` already depends on this file transitively via
+ * `claudeAdapter`/`codexAdapter` (`sources/claude.ts` / `sources/codex.ts`
+ * both import from here), so the reverse edge would be a cycle. See
+ * `sources/claude.ts`'s `claudeListItems` for the cost-saving reason this
+ * exists: a bound lets the Claude adapter skip ANALYZING transcripts outside
+ * the requested window, not just filter them out afterward.
+ */
+export interface SessionListBounds {
+  sinceMs?: number;
+  untilMs?: number;
+}
+
+/**
  * Slim per-model rollup for a session-list row, sourced from
  * `analysis.totalUsageByModel` (main + all subagents, recursively — same
  * scope as `ModelMixEntry` above). Deliberately lean: no `messageCount` (list
@@ -144,8 +161,17 @@ export interface SessionListItemBase {
  */
 export interface SourceAdapter<Key, Item extends SessionListItemBase, Detail> {
   source: SessionSource;
-  /** Pagination contract (`max`, `sortMs`, `total`) — see `sessions.ts`'s `ListingAdapter`. */
-  listItems(max?: number): Promise<{ entries: { item: Item; sortMs: number }[]; total: number }>;
+  /**
+   * Pagination contract (`max`, `sortMs`, `total`) — see `sessions.ts`'s
+   * `ListingAdapter`. `bounds` narrows which sessions are eligible at all
+   * (see `SessionListBounds`); each adapter applies it differently — the
+   * Claude adapter prunes analysis, the Codex adapter post-filters its
+   * already-analyzed pool (see each adapter's own `listItems` doc comment).
+   */
+  listItems(
+    max?: number,
+    bounds?: SessionListBounds,
+  ): Promise<{ entries: { item: Item; sortMs: number }[]; total: number }>;
   getDetail(key: Key): Promise<Detail | undefined>;
   getTimeline(key: Key, agentId?: string): Promise<TimelineEntry[] | undefined>;
   getRecordDetail(key: Key, line: number, agentId?: string): Promise<RecordDetail | undefined>;

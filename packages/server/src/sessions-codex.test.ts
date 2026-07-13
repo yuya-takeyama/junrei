@@ -395,6 +395,34 @@ describe("listSessions (source filter + Codex merge)", () => {
       process.env.CODEX_HOME = previous;
     }
   });
+
+  // Codex has no proxy-pruning step (see `codexListItems`'s doc comment) —
+  // bounds are a pure post-filter on each session's real `startedAt`, so
+  // these bounds are chosen directly from the fixtures' real start times
+  // (see the FIXTURE_MTIMES comment above: the mtime stamps only preserve
+  // RELATIVE order, not real dates, so a Claude-side bounds test needs its
+  // own setup — see sessions.test.ts).
+  it("sinceMs/untilMs bounds filter Codex sessions by session START time, while `total` stays the full unbounded count", async () => {
+    // Excludes 66666666 (2026-07-01T08:00, the orphaned sub-agent) below and
+    // 77777777 (2026-07-03T09:00, the orchestration parent) above.
+    const sinceMs = Date.parse("2026-07-01T09:00:00.000Z");
+    const untilMs = Date.parse("2026-07-03T00:00:00.000Z");
+    const { sessions: items, total } = await listSessions(50, "codex", 0, { sinceMs, untilMs });
+    expect(total).toBe(5);
+    expect(items.map((i) => i.sessionId.slice(0, 8))).toEqual([
+      "33333333", // 2026-07-02T09:30
+      "22222222", // 2026-07-02T09:00
+      "11111111", // 2026-07-01T10:00
+    ]);
+  });
+
+  it("an explicit but empty bounds object behaves exactly like omitting bounds entirely", async () => {
+    const withEmptyBounds = await listSessions(50, "codex", 0, {});
+    const withoutBounds = await listSessions(50, "codex");
+    expect(withEmptyBounds.sessions.map((i) => i.sessionId)).toEqual(
+      withoutBounds.sessions.map((i) => i.sessionId),
+    );
+  });
 });
 
 describe("getCodexSession", () => {

@@ -360,11 +360,13 @@ a.l0g:hover {
   border-bottom: 1px solid var(--bd);
 }
 
-/* Repo overview band — aggregate stat strip shown above the table when a
-   specific repo is selected (see RepoOverviewBand.tsx). Mirrors `.b-strip`/
-   `.b-cell`'s look (dotted separators, uppercase `.lbl`, `.big`/`.sub` value
-   pairs) without the hover/link affordance those carry — these cells aren't
-   navigable. */
+/* Overview band — aggregate stat strip shown above the table for every
+   session-list view (see OverviewBand.tsx). Mirrors `.b-strip`/`.b-cell`'s
+   look (dotted separators, uppercase `.lbl`, `.big`/`.sub` value pairs)
+   without the hover/link affordance those carry — these cells aren't
+   navigable. Class names keep the `rob-` (repo-overview-band) prefix from
+   before the band stopped being repo-gated — no visual/behavioral change,
+   renaming CSS classes purely for the sake of it isn't worth the churn. */
 .rob-strip {
   display: flex;
   flex-wrap: wrap;

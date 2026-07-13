@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_DATES,
   DATE_FILTER_PRESET_DAYS,
+  DEFAULT_DATE_FILTER,
+  dateFilterFetchBounds,
   dateFilterFromSelectValue,
   dateFilterSelectValue,
   matchesDateFilter,
@@ -77,13 +79,22 @@ describe("parseDateFilter / serializeDateFilter", () => {
     }
   });
 
-  it("falls back to 'all' on missing, corrupt, or unrecognized storage", () => {
-    expect(parseDateFilter(null)).toEqual(ALL_DATES);
+  it("defaults to the last-7-days filter when NOTHING is stored yet (a first-time viewer)", () => {
+    expect(parseDateFilter(null)).toEqual(DEFAULT_DATE_FILTER);
+    expect(DEFAULT_DATE_FILTER).toEqual({ kind: "last", days: 7 });
+  });
+
+  it("falls back to 'all' (not the default) on corrupt or unrecognized storage — a stored value means the viewer already chose once", () => {
     expect(parseDateFilter("not json")).toEqual(ALL_DATES);
     expect(parseDateFilter('"14"')).toEqual(ALL_DATES);
     expect(parseDateFilter('{"kind":"weekly"}')).toEqual(ALL_DATES);
     // A preset that no longer exists must not leave the dropdown value dangling.
     expect(parseDateFilter('{"kind":"last","days":90}')).toEqual(ALL_DATES);
+  });
+
+  it("an explicit stored 'all' always round-trips to ALL_DATES, never silently promoted to the default", () => {
+    expect(parseDateFilter(serializeDateFilter(ALL_DATES))).toEqual(ALL_DATES);
+    expect(parseDateFilter('{"kind":"all"}')).toEqual(ALL_DATES);
   });
 
   it("drops malformed custom bounds instead of the whole filter", () => {
@@ -112,5 +123,63 @@ describe("select-value mapping", () => {
   it("maps unknown select values to 'all'", () => {
     expect(dateFilterFromSelectValue("90")).toEqual(ALL_DATES);
     expect(dateFilterFromSelectValue("")).toEqual(ALL_DATES);
+  });
+});
+
+describe("dateFilterFetchBounds", () => {
+  it("imposes no bound at all for 'all'", () => {
+    expect(dateFilterFetchBounds(ALL_DATES, NOW)).toEqual({});
+  });
+
+  it("bounds sinceMs to N days before now for a 'last' preset, rounded down to a 5-minute mark", () => {
+    const { sinceMs, untilMs } = dateFilterFetchBounds({ kind: "last", days: 7 }, NOW);
+    expect(untilMs).toBeUndefined();
+    expect(sinceMs).toBeDefined();
+    // NOW is exactly noon, so 7 days before it is already on a 5-minute mark —
+    // the rounding must be a no-op here.
+    expect(sinceMs).toBe(NOW - 7 * DAY_MS);
+  });
+
+  it("rounds down to the nearest 5-minute mark when now isn't already aligned", () => {
+    const unaligned = Date.parse("2026-07-13T12:03:47.000Z");
+    const { sinceMs } = dateFilterFetchBounds({ kind: "last", days: 7 }, unaligned);
+    const expectedFloor = Date.parse("2026-07-13T12:00:00.000Z") - 7 * DAY_MS;
+    expect(sinceMs).toBe(expectedFloor);
+  });
+
+  it("gives two 'now' values inside the same 5-minute window the IDENTICAL sinceMs — the whole point of rounding, so a re-render never refetches on its own", () => {
+    const first = Date.parse("2026-07-13T12:01:00.000Z");
+    const second = first + 10_000; // 10s later, same 5-minute window
+    const a = dateFilterFetchBounds({ kind: "last", days: 14 }, first);
+    const b = dateFilterFetchBounds({ kind: "last", days: 14 }, second);
+    expect(a).toEqual(b);
+  });
+
+  it("crossing a real 5-minute boundary DOES change sinceMs", () => {
+    const before = Date.parse("2026-07-13T12:04:59.000Z");
+    const after = Date.parse("2026-07-13T12:05:00.000Z");
+    const a = dateFilterFetchBounds({ kind: "last", days: 7 }, before);
+    const b = dateFilterFetchBounds({ kind: "last", days: 7 }, after);
+    expect(a.sinceMs).not.toBe(b.sinceMs);
+  });
+
+  it("maps a custom range's local-day bounds the same way matchesDateFilter interprets them, with no rounding", () => {
+    const bothBounds = dateFilterFetchBounds(
+      { kind: "custom", from: "2026-07-01", to: "2026-07-13" },
+      NOW,
+    );
+    expect(bothBounds).toEqual({
+      sinceMs: new Date(2026, 6, 1).getTime(),
+      untilMs: new Date(2026, 6, 13).getTime() + DAY_MS,
+    });
+
+    const fromOnly = dateFilterFetchBounds({ kind: "custom", from: "2026-07-01" }, NOW);
+    expect(fromOnly).toEqual({ sinceMs: new Date(2026, 6, 1).getTime() });
+
+    const toOnly = dateFilterFetchBounds({ kind: "custom", to: "2026-07-01" }, NOW);
+    expect(toOnly).toEqual({ untilMs: new Date(2026, 6, 1).getTime() + DAY_MS });
+
+    const neither = dateFilterFetchBounds({ kind: "custom" }, NOW);
+    expect(neither).toEqual({});
   });
 });

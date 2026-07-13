@@ -23,6 +23,7 @@ import {
 import {
   type ModelMixEntry,
   mixFromUsageTree,
+  type SessionListBounds,
   type SessionListItemBase,
   type SourceAdapter,
   sliceDelegation,
@@ -398,12 +399,19 @@ async function listCodexAnalyzed(): Promise<CodexAnalyzedRef[]> {
  * Unlike `claudeListItems`, `max` only truncates the RESULT — every rollout
  * still gets analyzed, because sub-agent exclusion and each parent's
  * forest-inclusive totals both need the full analysis pool (see
- * `listCodexAnalyzed`). Entries carry `sortMs` = the session's start time
- * (falling back to file mtime — see `ListingAdapter` in sessions.ts), and
- * `total` counts every listable session, not just the returned page.
+ * `listCodexAnalyzed`). `bounds` (see `SessionListBounds`) is likewise a
+ * pure RESULT filter here rather than an analysis-skipping optimization like
+ * the Claude adapter's: it's applied by `sortMs` AFTER the sub-agent
+ * exclusion above and BEFORE the sort/slice below, so a bounded page still
+ * reflects the correct merged order. `total` is computed BEFORE that date
+ * filter (right after exclusion), so it stays the count of every listable
+ * session regardless of `bounds` — same unbounded meaning `max` already had.
+ * Entries carry `sortMs` = the session's start time (falling back to file
+ * mtime — see `ListingAdapter` in sessions.ts).
  */
 export async function codexListItems(
   max?: number,
+  bounds?: SessionListBounds,
 ): Promise<{ entries: { item: CodexSessionListItem; sortMs: number }[]; total: number }> {
   const pool = await listCodexAnalyzed();
   const analyses = pool.map((p) => p.analysis);
@@ -422,8 +430,17 @@ export async function codexListItems(
       sortMs: Number.isNaN(startedMs) ? ref.mtimeMs : startedMs,
     });
   }
-  entries.sort((a, b) => b.sortMs - a.sortMs);
-  return { entries: max === undefined ? entries : entries.slice(0, max), total: entries.length };
+  const total = entries.length;
+  const withinBounds = entries.filter((e) => {
+    if (bounds?.sinceMs !== undefined && e.sortMs < bounds.sinceMs) return false;
+    if (bounds?.untilMs !== undefined && e.sortMs >= bounds.untilMs) return false;
+    return true;
+  });
+  withinBounds.sort((a, b) => b.sortMs - a.sortMs);
+  return {
+    entries: max === undefined ? withinBounds : withinBounds.slice(0, max),
+    total,
+  };
 }
 
 async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | undefined> {
