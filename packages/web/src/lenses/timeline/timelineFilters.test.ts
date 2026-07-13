@@ -91,10 +91,16 @@ describe("isEntryVisible", () => {
     expect(visible).not.toContain(API_ERROR);
   });
 
-  it("thinking follows the assistant chip", () => {
+  it("thinking has its own chip, separate from assistant", () => {
     const focused = toggleChip(DEFAULT_CHIPS, "assistant");
     const visible = ALL.filter((e) => isEntryVisible(e, "full", focused));
-    expect(visible).toEqual([ASSISTANT, THINKING]);
+    expect(visible).toEqual([ASSISTANT]);
+  });
+
+  it("focusing the thinking chip shows only thinking entries", () => {
+    const focused = toggleChip(DEFAULT_CHIPS, "thinking");
+    const visible = ALL.filter((e) => isEntryVisible(e, "full", focused));
+    expect(visible).toEqual([THINKING]);
   });
 
   it("task-notification follows the tool chip", () => {
@@ -114,7 +120,8 @@ describe("computeChipCounts", () => {
   it("tallies each kind into its chip bucket, mirroring chipAllows", () => {
     expect(computeChipCounts(ALL)).toEqual({
       user: 1,
-      assistant: 2, // assistant-text + thinking
+      assistant: 1,
+      thinking: 1,
       tool: 2, // ok tool-call + task-notification
       subagent: 1,
       error: 2,
@@ -128,6 +135,7 @@ describe("toggleChip", () => {
     expect(toggleChip(DEFAULT_CHIPS, "user")).toEqual({
       user: true,
       assistant: false,
+      thinking: false,
       tool: false,
       subagent: false,
       error: false,
@@ -169,6 +177,7 @@ describe("toggleChip", () => {
     expect(toggleChip(reset, "error")).toEqual({
       user: false,
       assistant: false,
+      thinking: false,
       tool: false,
       subagent: false,
       error: true,

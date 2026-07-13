@@ -9,6 +9,7 @@ export const DIAL_STOPS: readonly DetailDial[] = ["user-only", "minimal", "full"
 export interface ChipState {
   user: boolean;
   assistant: boolean;
+  thinking: boolean;
   tool: boolean;
   subagent: boolean;
   error: boolean;
@@ -18,6 +19,7 @@ export interface ChipState {
 export const DEFAULT_CHIPS: ChipState = {
   user: true,
   assistant: true,
+  thinking: true,
   tool: true,
   subagent: true,
   error: true,
@@ -43,6 +45,7 @@ export function toggleChip(chips: ChipState, key: keyof ChipState): ChipState {
     return {
       user: key === "user",
       assistant: key === "assistant",
+      thinking: key === "thinking",
       tool: key === "tool",
       subagent: key === "subagent",
       error: key === "error",
@@ -75,22 +78,23 @@ function kindAllowedByDial(kind: TimelineEntry["kind"], dial: DetailDial): boole
 }
 
 /**
- * Chip visibility per entry. Only 6 chips exist (user/assistant/tool/
- * subagent/error/compaction), so kinds without a dedicated chip join the
- * nearest domain: `thinking` is assistant output, and `task-notification`
- * is the completion signal of a tool-launched background task. Every kind
- * belongs to exactly one chip, so focusing a single chip never leaks other
- * kinds. A `tool-call` in error status belongs to the "error" chip's
- * domain, not "tool"'s, so toggling "tool" off still leaves failed calls
- * visible until "error" is also off.
+ * Chip visibility per entry. Only 7 chips exist (user/assistant/thinking/
+ * tool/subagent/error/compaction), so kinds without a dedicated chip join
+ * the nearest domain: `task-notification` is the completion signal of a
+ * tool-launched background task. Every kind belongs to exactly one chip,
+ * so focusing a single chip never leaks other kinds. A `tool-call` in
+ * error status belongs to the "error" chip's domain, not "tool"'s, so
+ * toggling "tool" off still leaves failed calls visible until "error" is
+ * also off.
  */
 export function chipAllows(entry: TimelineEntry, chips: ChipState): boolean {
   switch (entry.kind) {
     case "user":
       return chips.user;
     case "assistant-text":
-    case "thinking":
       return chips.assistant;
+    case "thinking":
+      return chips.thinking;
     case "tool-call":
       return entry.status === "error" ? chips.error : chips.tool;
     case "task-notification":
@@ -113,6 +117,7 @@ export function isEntryVisible(entry: TimelineEntry, dial: DetailDial, chips: Ch
 export interface ChipCounts {
   user: number;
   assistant: number;
+  thinking: number;
   tool: number;
   subagent: number;
   error: number;
@@ -130,6 +135,7 @@ export function computeChipCounts(entries: readonly TimelineEntry[]): ChipCounts
   const counts: ChipCounts = {
     user: 0,
     assistant: 0,
+    thinking: 0,
     tool: 0,
     subagent: 0,
     error: 0,
@@ -141,8 +147,10 @@ export function computeChipCounts(entries: readonly TimelineEntry[]): ChipCounts
         counts.user += 1;
         break;
       case "assistant-text":
-      case "thinking":
         counts.assistant += 1;
+        break;
+      case "thinking":
+        counts.thinking += 1;
         break;
       case "tool-call":
         if (entry.status === "error") counts.error += 1;

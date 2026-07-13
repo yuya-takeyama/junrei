@@ -32,6 +32,7 @@ const DIAL_LABEL: Record<DetailDial, string> = {
 const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "err" | "amb" }> = [
   { key: "user", label: "user" },
   { key: "assistant", label: "assistant" },
+  { key: "thinking", label: "thinking" },
   { key: "tool", label: "tool" },
   { key: "subagent", label: "subagent" },
   { key: "error", label: "error", tone: "err" },
