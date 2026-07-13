@@ -260,7 +260,9 @@ export function SessionList() {
             <span className="lbl cellr">Cost est</span>
             <span className="lbl">Model mix</span>
             <span className="lbl cellr">Sub</span>
-            <span className="lbl cellr">Err</span>
+            <span className="lbl cellr nowrap" title="Failed tool calls">
+              Tool err
+            </span>
             <span className="lbl cellr">Cmp</span>
           </div>
           {filtered.map((s) => (

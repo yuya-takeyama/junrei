@@ -344,13 +344,13 @@ select.chip {
 
 .l0g {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) 100px 52px 44px 64px 84px 36px 36px 36px;
+  grid-template-columns: 96px minmax(0, 1fr) 100px 52px 44px 64px 84px 36px 60px 36px;
   gap: 12px;
   align-items: center;
   padding: 7px 20px;
   border-bottom: 1px dotted var(--bd);
   font-size: 12.5px;
-  min-width: 800px;
+  min-width: 824px;
   color: inherit;
 }
 a.l0g:hover {

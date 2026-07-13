@@ -85,7 +85,7 @@ export function StatStrip({ session }: Props) {
 
   if (session.source === "claude-code") {
     cells.push(
-      <Cell key="compact" label="Compact / err" href={contextHref}>
+      <Cell key="compact" label="Compact / API err" href={contextHref}>
         <div className="big mt8">
           {session.compactions.length}
           <span className="mut" style={{ fontSize: "15px" }}>
