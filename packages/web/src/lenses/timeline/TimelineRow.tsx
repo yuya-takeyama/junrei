@@ -72,7 +72,7 @@ function UserBlock({
         <span className="lbl" style={{ color: "var(--amb)" }}>
           User
         </span>
-        <SourceLine line={entry.line} onOpenRecord={onOpenRecord} />
+        <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
       <ExpandableText
         sessionRef={sessionRef}
