@@ -6,6 +6,7 @@ import {
   buildSessionData,
   type ClaudeSessionAnalysis,
   type ClaudeSessionFileRef,
+  findClaudeSessionFileById,
   getClaudeRecordDetail,
   listClaudeSessionFiles,
   listSubagentRefs,
@@ -28,9 +29,15 @@ import {
   sliceUsageByModel,
 } from "./shared.js";
 
-/** Key identifying one Claude Code session — a munged project dir plus the session UUID. */
+/**
+ * Key identifying one Claude Code session — the bare session UUID.
+ * `CodexSessionKey`-symmetric (Claude used to be scoped by `{project, id}`
+ * — the munged project dir was needed to build the file path — but session
+ * ids are UUIDv4, so a bare id resolves unambiguously via `findRefById`
+ * below; the project dir is still resolved internally, it just no longer
+ * needs to be supplied by the caller).
+ */
 export interface ClaudeSessionKey {
-  project: string;
   id: string;
 }
 
@@ -167,19 +174,21 @@ export async function claudeListItems(
   return { entries, total: refs.length };
 }
 
-async function findRef(
-  projectDirName: string,
-  sessionId: string,
-): Promise<ClaudeSessionFileRef | undefined> {
-  const refs = await listClaudeRefs();
-  return refs.find((r) => r.projectDirName === projectDirName && r.sessionId === sessionId);
+/**
+ * Resolve a session's file ref by bare id alone — the project dir is no
+ * longer part of the lookup key (see `ClaudeSessionKey`'s doc comment). Uses
+ * `findClaudeSessionFileById` (`@junrei/core`'s discovery module), which
+ * stats one candidate path per project dir rather than reading every
+ * project's full contents like `listClaudeRefs`/`listClaudeSessionFiles`
+ * does — cheaper for a single-session lookup. `undefined` for an unknown id.
+ */
+async function findRefById(sessionId: string): Promise<ClaudeSessionFileRef | undefined> {
+  const dirs = await resolveClaudeProjectsDirs();
+  return findClaudeSessionFileById(dirs, sessionId);
 }
 
-export async function getSession(
-  projectDirName: string,
-  sessionId: string,
-): Promise<ClaudeSessionAnalysis | undefined> {
-  const ref = await findRef(projectDirName, sessionId);
+export async function getSession(sessionId: string): Promise<ClaudeSessionAnalysis | undefined> {
+  const ref = await findRefById(sessionId);
   if (ref === undefined) return undefined;
   try {
     const analysis = await analyzeCached(ref);
@@ -207,11 +216,8 @@ export async function getSession(
  * hiccup, ...) degrades to `undefined` rather than failing the whole session
  * detail request over a liveness nicety.
  */
-export async function getClaudeLastActivityAt(
-  projectDirName: string,
-  sessionId: string,
-): Promise<string | undefined> {
-  const ref = await findRef(projectDirName, sessionId);
+export async function getClaudeLastActivityAt(sessionId: string): Promise<string | undefined> {
+  const ref = await findRefById(sessionId);
   if (ref === undefined) return undefined;
   try {
     let latestMs = ref.mtimeMs;
@@ -242,11 +248,10 @@ export async function getClaudeLastActivityAt(
  * `undefined` when the main session or the sidecar file doesn't exist.
  */
 async function findAgentRef(
-  projectDirName: string,
   sessionId: string,
   agentId: string,
 ): Promise<ClaudeSessionFileRef | undefined> {
-  const mainRef = await findRef(projectDirName, sessionId);
+  const mainRef = await findRefById(sessionId);
   if (mainRef === undefined) return undefined;
   const filePath = join(subagentsDirFor(mainRef.filePath), `agent-${agentId}.jsonl`);
   try {
@@ -254,7 +259,7 @@ async function findAgentRef(
     return {
       sessionId: agentId,
       filePath,
-      projectDirName,
+      projectDirName: mainRef.projectDirName,
       mtimeMs: stats.mtimeMs,
       birthtimeMs: stats.birthtimeMs,
       sizeBytes: stats.size,
@@ -273,11 +278,10 @@ async function findAgentRef(
  * Codex equivalent of this lookup.
  */
 export async function getAgentSession(
-  projectDirName: string,
   sessionId: string,
   agentId: string,
 ): Promise<ClaudeSessionAnalysis | undefined> {
-  const ref = await findAgentRef(projectDirName, sessionId, agentId);
+  const ref = await findAgentRef(sessionId, agentId);
   if (ref === undefined) return undefined;
   try {
     return await analyzeCached(ref);
@@ -319,11 +323,10 @@ async function resolveThreadData(
 
 /** Full-transcript timeline for the Timeline lens (L2). `agentId` scopes it to one subagent. */
 export async function getTimeline(
-  projectDirName: string,
   sessionId: string,
   agentId?: string,
 ): Promise<TimelineEntry[] | undefined> {
-  const ref = await findRef(projectDirName, sessionId);
+  const ref = await findRefById(sessionId);
   if (ref === undefined) return undefined;
   try {
     const data = await resolveThreadData(ref, agentId);
@@ -336,12 +339,11 @@ export async function getTimeline(
 
 /** Full detail for one source line — for the Record detail (L3) slide-over. */
 export async function getSessionRecordDetail(
-  projectDirName: string,
   sessionId: string,
   line: number,
   agentId?: string,
 ): Promise<RecordDetail | undefined> {
-  const ref = await findRef(projectDirName, sessionId);
+  const ref = await findRefById(sessionId);
   if (ref === undefined) return undefined;
   try {
     const data = await resolveThreadData(ref, agentId);
@@ -356,24 +358,23 @@ export async function getSessionRecordDetail(
  * The Claude Code source adapter — one cohesive object app.ts/sessions.ts
  * dispatch to instead of scattering `if (source === "claude-code")` checks.
  * `getDetail`/`getTimeline`/`getRecordDetail` are keyed by `ClaudeSessionKey`
- * ({project, id}); `getAgentSession` above is exported separately since
- * agent-detail lookups have no Codex counterpart and don't fit the shared
- * shape (see `sources/codex.ts`'s `codexAdapter` for its sibling). Checked
- * against `SourceAdapter` (see `sources/shared.ts`) via `satisfies` so both
- * adapters are held to the same contract without widening this object's own
- * inferred type.
+ * ({id} — see its doc comment); `getAgentSession` above is exported
+ * separately since agent-detail lookups have no Codex counterpart and don't
+ * fit the shared shape (see `sources/codex.ts`'s `codexAdapter` for its
+ * sibling). Checked against `SourceAdapter` (see `sources/shared.ts`) via
+ * `satisfies` so both adapters are held to the same contract without
+ * widening this object's own inferred type.
  */
 export const claudeAdapter = {
   source: "claude-code" as const,
   listItems: claudeListItems,
   getDetail: (key: ClaudeSessionKey): Promise<ClaudeSessionAnalysis | undefined> =>
-    getSession(key.project, key.id),
+    getSession(key.id),
   getTimeline: (key: ClaudeSessionKey, agentId?: string): Promise<TimelineEntry[] | undefined> =>
-    getTimeline(key.project, key.id, agentId),
+    getTimeline(key.id, agentId),
   getRecordDetail: (
     key: ClaudeSessionKey,
     line: number,
     agentId?: string,
-  ): Promise<RecordDetail | undefined> =>
-    getSessionRecordDetail(key.project, key.id, line, agentId),
+  ): Promise<RecordDetail | undefined> => getSessionRecordDetail(key.id, line, agentId),
 } satisfies SourceAdapter<ClaudeSessionKey, ClaudeSessionListItem, ClaudeSessionAnalysis>;

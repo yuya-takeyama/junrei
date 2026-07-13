@@ -64,46 +64,105 @@ export function normalizeLens(value: string | undefined): Lens {
 
 /**
  * Identifies one session to link/fetch — mirrors the server's per-source key
- * shapes (`ClaudeSessionKey`/`CodexSessionKey` in `@junrei/server`): Claude
- * scopes by `{project, id}`, Codex by `{id}` alone. `sessionPath`/`recordPath`
- * below take this instead of a bare `project`/`id` pair (the pre-refactor
- * shape, back when a `projectDirName: "codex"` sentinel let Codex sessions
- * pretend to have a project) so a caller can never build a URL for the wrong
- * source by accident.
+ * shapes (`ClaudeSessionKey`/`CodexSessionKey` in `@junrei/server`), both now
+ * `{id}` alone: session ids are UUIDv4, so Claude no longer needs a project
+ * dir to disambiguate a lookup (see `ClaudeSessionKey`'s doc comment on the
+ * server) — matching Codex, which never had a project-dir concept.
  */
-export type SessionRef =
-  | { source: "claude-code"; project: string; id: string }
-  | { source: "codex"; id: string };
+export type SessionRef = { source: "claude-code"; id: string } | { source: "codex"; id: string };
 
 /** Builds a `SessionRef` from a session-list row (`AnySessionListItem` on the server) — see `SessionRef`. */
 export function sessionRefOf(item: {
   source: "claude-code" | "codex";
   sessionId: string;
-  projectDirName?: string;
 }): SessionRef {
-  return item.source === "codex"
-    ? { source: "codex", id: item.sessionId }
-    : { source: "claude-code", project: item.projectDirName ?? "", id: item.sessionId };
+  return { source: item.source, id: item.sessionId };
 }
 
-/** react-router path pattern for the Claude Code session shell route, registered with `createHashRouter`. */
-export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:project/:id/:lens?";
+/**
+ * react-router path pattern for the Claude Code session shell route,
+ * registered with `createHashRouter` — bare session id, no `:project`
+ * segment (dropped once bare-id server lookup made it unnecessary — see
+ * `SessionRef`'s doc comment). Symmetric with `CODEX_SESSION_ROUTE_PATH`.
+ */
+export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:id/:lens?";
 
 /** react-router path pattern for the Codex session shell route — no `:project` segment (Codex has none). */
 export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?";
 
 /**
+ * UUID (v4-shaped) matcher used by the legacy-URL guards below — a
+ * `projectDirName` always starts with `-` (an encoded absolute path) and is
+ * never a UUID, so this is an unambiguous way to tell a real session id apart
+ * from a stale `:project` segment.
+ */
+export const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Build the path for a session route (no leading `#` — `createHashRouter`
  * prepends it, and `<Link to>` targets are always plain pathnames). Omits the
  * lens segment for "overview" to match the historical hash shape
- * (`#/session/.../id` rather than `#/session/.../id/overview`).
+ * (`#/session/.../id` rather than `#/session/.../id/overview`). Both sources
+ * share the same shape now (`/session/<source>/<id>[/<lens>]`) — see
+ * `SessionRef`'s doc comment.
  */
 export function sessionPath(ref: SessionRef, lens: Lens = "overview"): string {
-  const base =
-    ref.source === "codex"
-      ? `/session/codex/${encodeURIComponent(ref.id)}`
-      : `/session/claude-code/${encodeURIComponent(ref.project)}/${encodeURIComponent(ref.id)}`;
+  const base = `/session/${ref.source}/${encodeURIComponent(ref.id)}`;
   return lens === "overview" ? base : `${base}/${lens}`;
+}
+
+/**
+ * True when a Claude Code session route's `:id`/`:lens?` params are actually
+ * the legacy 2-segment URL shape (`#/session/claude-code/<projectDirName>/<uuid>`,
+ * no explicit lens) — under `CLAUDE_SESSION_ROUTE_PATH`'s pattern, this SHORT
+ * legacy shape still matches (`:id` capturing the stale project dir, `:lens`
+ * capturing the real id), so `SessionShell` consults this to redirect it
+ * on the spot. A `projectDirName` is never UUID-shaped (see `SESSION_UUID_RE`'s
+ * doc comment), so "id isn't a UUID but lens is" is unambiguous — never true
+ * for a current-shape URL, where the id segment is always the raw UUID.
+ * Longer legacy shapes (explicit lens, or the agent-drilldown route) don't
+ * match this route at all and fall through to the catch-all instead — see
+ * `legacyClaudeSessionRedirectTarget`.
+ */
+export function isLegacyClaudeProjectScopedUrl(
+  idParam: string | undefined,
+  lensParam: string | undefined,
+): boolean {
+  return (
+    idParam !== undefined &&
+    !SESSION_UUID_RE.test(idParam) &&
+    lensParam !== undefined &&
+    SESSION_UUID_RE.test(lensParam)
+  );
+}
+
+/**
+ * Legacy URL guard (web-only) for bookmarked Claude Code session links that
+ * still carry the old `:project` segment in a shape LONGER than
+ * `CLAUDE_SESSION_ROUTE_PATH` can match — `#/session/claude-code/<projectDirName>/<uuid>/<lens>[?record=N]`
+ * or the legacy agent-drilldown shape
+ * `#/session/claude-code/<projectDirName>/<uuid>/agent/<agentId>[/<lens>]`.
+ * These fall through every registered route to react-router's catch-all,
+ * where this helper is consulted (see main.tsx). The plain 2-segment legacy
+ * shape (`.../<project>/<uuid>` with no lens) is SHORT enough to still match
+ * `CLAUDE_SESSION_ROUTE_PATH`'s optional `:lens?`, so it's handled inside
+ * `SessionShell` instead (see its own UUID guard).
+ *
+ * Returns the redirect target (new path + preserved query string), or
+ * `undefined` when `pathname` doesn't match the legacy shape — the catch-all
+ * falls back to the session list in that case, same as before this guard
+ * existed.
+ */
+export function legacyClaudeSessionRedirectTarget(
+  pathname: string,
+  search: string,
+): string | undefined {
+  const match = /^\/session\/claude-code\/([^/]+)\/([^/]+)((?:\/.*)?)$/.exec(pathname);
+  if (match === null) return undefined;
+  const [, project, id, rest] = match;
+  if (project === undefined || id === undefined || rest === undefined) return undefined;
+  if (SESSION_UUID_RE.test(project) || !SESSION_UUID_RE.test(id)) return undefined;
+  return `/session/claude-code/${id}${rest}${search}`;
 }
 
 /**
@@ -111,7 +170,7 @@ export function sessionPath(ref: SessionRef, lens: Lens = "overview"): string {
  * (L3, screen 8) for a given source line — see `RecordDetail.tsx`.
  *
  * The record slide-over is addressed with a `?record=<line>` query segment
- * appended to the session path (e.g. `#/session/claude-code/proj/id/timeline?record=42`)
+ * appended to the session path (e.g. `#/session/claude-code/id/timeline?record=42`)
  * rather than component-local state. Reasons: (1) it makes a specific record
  * shareable/bookmarkable, matching how every other drill-down in this app is
  * a real URL; (2) opening the panel pushes a history entry, so the browser
@@ -140,24 +199,19 @@ export function parseRecordParam(searchParams: URLSearchParams): number | undefi
  * under a parent session, so there's no Codex equivalent of this route. The
  * static `agent` segment disambiguates it from `CLAUDE_SESSION_ROUTE_PATH`'s
  * optional `:lens?` — react-router ranks a route with more static segments
- * higher, so `/session/claude-code/p/id/agent/x` matches this pattern rather
+ * higher, so `/session/claude-code/id/agent/x` matches this pattern rather
  * than being parsed as `CLAUDE_SESSION_ROUTE_PATH` with `lens="agent"` (see
  * router.test.ts).
  */
-export const AGENT_ROUTE_PATH = "session/claude-code/:project/:id/agent/:agentId/:lens?";
+export const AGENT_ROUTE_PATH = "session/claude-code/:id/agent/:agentId/:lens?";
 
 /**
  * Build the path for an agent (subagent detail, L3) route — mirrors
  * `sessionPath`, omitting the lens segment for "overview". Claude-only, see
  * `AGENT_ROUTE_PATH`.
  */
-export function agentPath(
-  project: string,
-  id: string,
-  agentId: string,
-  lens: Lens = "overview",
-): string {
-  const base = `/session/claude-code/${encodeURIComponent(project)}/${encodeURIComponent(id)}/agent/${encodeURIComponent(agentId)}`;
+export function agentPath(id: string, agentId: string, lens: Lens = "overview"): string {
+  const base = `/session/claude-code/${encodeURIComponent(id)}/agent/${encodeURIComponent(agentId)}`;
   return lens === "overview" ? base : `${base}/${lens}`;
 }
 
@@ -165,14 +219,8 @@ export function agentPath(
  * Build the path (+ `record` search param) that opens the record slide-over
  * scoped to one agent's own transcript — mirrors `recordPath`. Claude-only.
  */
-export function agentRecordPath(
-  project: string,
-  id: string,
-  agentId: string,
-  lens: Lens,
-  line: number,
-): string {
-  return `${agentPath(project, id, agentId, lens)}?record=${line}`;
+export function agentRecordPath(id: string, agentId: string, lens: Lens, line: number): string {
+  return `${agentPath(id, agentId, lens)}?record=${line}`;
 }
 
 /** Session-list source filter tab — mirrors the server's `SessionSourceFilter` minus omission (the web always passes one explicitly). */

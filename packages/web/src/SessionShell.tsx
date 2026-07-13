@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { type AnySessionJson, fetchSessionDetail, type SessionRef } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
 import { CodexTurns } from "./lenses/CodexTurns.js";
@@ -13,6 +13,7 @@ import { Timeline } from "./lenses/Timeline.js";
 import {
   CLAUDE_LENSES,
   CODEX_LENSES,
+  isLegacyClaudeProjectScopedUrl,
   normalizeLens,
   parseRecordParam,
   recordPath,
@@ -126,7 +127,7 @@ interface Props {
  * persistent lens tab bar, then the active lens's content — see
  * design-spec/01-shell.md.
  *
- * Rendered as either the `session/claude-code/:project/:id/:lens?` or
+ * Rendered as either the `session/claude-code/:id/:lens?` or
  * `session/codex/:id/:lens?` route element (see main.tsx) — id/lens/record
  * all come from the router rather than props, so opening/closing the record
  * slide-over is a plain navigation and never remounts this component or its
@@ -145,20 +146,18 @@ interface Props {
  * equivalent) — see `CLAUDE_LENSES`/`CODEX_LENSES`.
  */
 export function SessionShell({ source }: Props) {
-  const {
-    project: projectParam,
-    id: idParam,
-    lens: lensParam,
-  } = useParams<"project" | "id" | "lens">();
-  const id = idParam ?? "";
+  const { id: idParam, lens: lensParam } = useParams<"id" | "lens">();
   const isCodex = source === "codex";
-  // "" for Codex (no project segment on that route) — only used for the Claude ref/breadcrumb.
-  const project = projectParam ?? "";
-  const ref: SessionRef = isCodex
-    ? { source: "codex", id }
-    : { source: "claude-code", project, id };
-  const lens = normalizeLens(lensParam);
   const [searchParams] = useSearchParams();
+
+  // Legacy bookmark guard — see `isLegacyClaudeProjectScopedUrl`'s doc
+  // comment (router.ts) for the exact URL shape this catches. Codex never
+  // had a `:project` segment, so this is always false for that source.
+  const isLegacyProjectScopedUrl = !isCodex && isLegacyClaudeProjectScopedUrl(idParam, lensParam);
+
+  const id = isLegacyProjectScopedUrl ? "" : (idParam ?? "");
+  const ref: SessionRef = isCodex ? { source: "codex", id } : { source: "claude-code", id };
+  const lens = normalizeLens(isLegacyProjectScopedUrl ? undefined : lensParam);
   const record = parseRecordParam(searchParams);
   const navigate = useNavigate();
 
@@ -169,16 +168,23 @@ export function SessionShell({ source }: Props) {
   const closeRecordHref = sessionPath(ref, lens);
 
   // `ref` is rebuilt fresh (a new object) on every render — depend on its
-  // primitive parts (`source`/`project`/`id`, already plain locals above)
-  // instead so this effect doesn't re-fire every render.
+  // primitive parts (`source`/`id`, already plain locals above) instead so
+  // this effect doesn't re-fire every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: depend on ref's primitive parts (see comment above), not the object itself.
   useEffect(() => {
+    if (isLegacyProjectScopedUrl) return;
     setSession(null);
     setError(null);
     fetchSessionDetail(ref)
       .then(setSession)
       .catch((e: unknown) => setError(String(e)));
-  }, [source, project, id]);
+  }, [source, id, isLegacyProjectScopedUrl]);
+
+  if (isLegacyProjectScopedUrl) {
+    const target = sessionPath({ source: "claude-code", id: lensParam as string });
+    const search = searchParams.toString();
+    return <Navigate replace to={search === "" ? target : `${target}?${search}`} />;
+  }
 
   const title = session?.title ?? session?.sessionId ?? "…";
   const lensTabs = isCodex ? CODEX_LENSES : CLAUDE_LENSES;

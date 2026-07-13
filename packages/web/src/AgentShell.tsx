@@ -232,13 +232,11 @@ function ReturnToParentPanel({ node }: { node: SubagentNodeJson }) {
 }
 
 function AgentOverview({
-  project,
   id,
   agentId,
   agent,
   node,
 }: {
-  project: string;
   id: string;
   agentId: string;
   agent: AgentJson;
@@ -248,16 +246,12 @@ function AgentOverview({
     <>
       <FirstPromptPanel
         session={agent}
-        sessionRef={{ source: "claude-code", project, id }}
+        sessionRef={{ source: "claude-code", id }}
         agentId={agentId}
         label="Launch prompt"
       />
       <div className="hpad fx gap16 mt16">
-        <ContextGrowthChart
-          session={agent}
-          contextHref={agentPath(project, id, agentId, "context")}
-          bare
-        />
+        <ContextGrowthChart session={agent} contextHref={agentPath(id, agentId, "context")} bare />
         <ReturnToParentPanel node={node} />
       </div>
     </>
@@ -267,7 +261,7 @@ function AgentOverview({
 /**
  * Subagent detail (L3) — the entire L1+L2 shell applied to one agent's own
  * transcript instead of the main session, per design-spec/16. Route element
- * for `AGENT_ROUTE_PATH` (`session/:project/:id/agent/:agentId/:lens?`).
+ * for `AGENT_ROUTE_PATH` (`session/claude-code/:id/agent/:agentId/:lens?`).
  *
  * Fetches two things: the session analysis (for the session title, session
  * totals used in "% of session", and this agent's place in the subagent
@@ -278,12 +272,10 @@ function AgentOverview({
  */
 export function AgentShell() {
   const {
-    project: projectParam,
     id: idParam,
     agentId: agentIdParam,
     lens: lensParam,
-  } = useParams<"project" | "id" | "agentId" | "lens">();
-  const project = projectParam ?? "";
+  } = useParams<"id" | "agentId" | "lens">();
   const id = idParam ?? "";
   const agentId = agentIdParam ?? "";
   const lens = normalizeLens(lensParam);
@@ -297,23 +289,23 @@ export function AgentShell() {
   const [agentError, setAgentError] = useState<string | null>(null);
 
   const recordOpen = record !== undefined;
-  const closeRecordHref = agentPath(project, id, agentId, lens);
+  const closeRecordHref = agentPath(id, agentId, lens);
 
   useEffect(() => {
     setSession(null);
     setSessionError(null);
-    fetchSessionDetail({ source: "claude-code", project, id })
+    fetchSessionDetail({ source: "claude-code", id })
       .then(setSession)
       .catch((e: unknown) => setSessionError(String(e)));
-  }, [project, id]);
+  }, [id]);
 
   useEffect(() => {
     setAgent(null);
     setAgentError(null);
-    fetchAgentSession(project, id, agentId)
+    fetchAgentSession(id, agentId)
       .then(setAgent)
       .catch((e: unknown) => setAgentError(String(e)));
-  }, [project, id, agentId]);
+  }, [id, agentId]);
 
   const ancestorChain = session !== null ? findAgentPath(session.subagents, agentId) : undefined;
   const node = ancestorChain?.[ancestorChain.length - 1];
@@ -329,12 +321,12 @@ export function AgentShell() {
           {
             key: "session",
             label: session.title ?? session.sessionId,
-            href: sessionPath({ source: "claude-code", project, id }),
+            href: sessionPath({ source: "claude-code", id }),
           },
           ...ancestorChain.slice(0, -1).map((ancestor) => ({
             key: ancestor.agentId,
             label: displayName(ancestor),
-            href: agentPath(project, id, ancestor.agentId),
+            href: agentPath(id, ancestor.agentId),
           })),
           {
             key: agentId,
@@ -344,7 +336,7 @@ export function AgentShell() {
       : [{ key: "loading", label: "…" }];
   const depth = ancestorChain?.length ?? 1;
 
-  const buildAgentLensPath = (l: typeof lens) => agentPath(project, id, agentId, l);
+  const buildAgentLensPath = (l: typeof lens) => agentPath(id, agentId, l);
 
   return (
     <div className="posrel">
@@ -381,21 +373,21 @@ export function AgentShell() {
         {loading && <div className="hpad mt16 mut">Analyzing agent…</div>}
         {session !== null && agent !== null && node !== undefined && lens === "overview" && (
           <div className="hpad mt16">
-            <AgentOverview project={project} id={id} agentId={agentId} agent={agent} node={node} />
+            <AgentOverview id={id} agentId={agentId} agent={agent} node={node} />
           </div>
         )}
         {ready && lens === "timeline" && (
           <Timeline
-            sessionRef={{ source: "claude-code", project, id }}
+            sessionRef={{ source: "claude-code", id }}
             agent={agentId}
             onOpenRecord={(line) => {
-              navigate(agentRecordPath(project, id, agentId, lens, line));
+              navigate(agentRecordPath(id, agentId, lens, line));
             }}
           />
         )}
         {session !== null && agent !== null && node !== undefined && lens === "context" && (
           <div className="hpad mt16">
-            <ContextCost session={agent} contextHref={agentPath(project, id, agentId, "context")} />
+            <ContextCost session={agent} contextHref={agentPath(id, agentId, "context")} />
           </div>
         )}
         {session !== null && agent !== null && node !== undefined && lens === "files" && (
@@ -415,7 +407,7 @@ export function AgentShell() {
       </div>
       {record !== undefined && (
         <RecordDetail
-          sessionRef={{ source: "claude-code", project, id }}
+          sessionRef={{ source: "claude-code", id }}
           line={record}
           agent={agentId}
           closeHref={closeRecordHref}

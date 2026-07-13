@@ -88,3 +88,52 @@ export async function listClaudeSessionFiles(
   }
   return refs.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
+
+/**
+ * Resolve a Claude session file by bare session ID alone, without knowing
+ * which project directory it lives under — the server's bare-ID lookup (see
+ * `findRefById` in `@junrei/server`'s `sources/claude.ts`) so a session
+ * URL/API path can carry just the UUID, mirroring Codex's project-less
+ * session id. Cheaper than `listClaudeSessionFiles`: rather than reading
+ * every project dir's full contents, this lists project DIR NAMES once and
+ * stats exactly one candidate path (`{projectDir}/{sessionId}.jsonl`) per
+ * project dir — no need to read or stat any other session file.
+ *
+ * Session ids are UUIDv4, so a collision across two project dirs is
+ * practically impossible; if one somehow exists anyway (e.g. a stale copy),
+ * the file with the newest mtime wins, deterministically.
+ */
+export async function findClaudeSessionFileById(
+  projectsDirs: string[],
+  sessionId: string,
+): Promise<ClaudeSessionFileRef | undefined> {
+  let best: ClaudeSessionFileRef | undefined;
+  for (const projectsDir of projectsDirs) {
+    let projectDirs: string[];
+    try {
+      projectDirs = await readdir(projectsDir);
+    } catch {
+      continue;
+    }
+    for (const projectDirName of projectDirs) {
+      const filePath = join(projectsDir, projectDirName, `${sessionId}.jsonl`);
+      try {
+        const info = await stat(filePath);
+        if (!info.isFile()) continue;
+        if (best === undefined || info.mtimeMs > best.mtimeMs) {
+          best = {
+            sessionId,
+            filePath,
+            projectDirName,
+            mtimeMs: info.mtimeMs,
+            birthtimeMs: info.birthtimeMs,
+            sizeBytes: info.size,
+          };
+        }
+      } catch {
+        // Not present in this project dir — try the next.
+      }
+    }
+  }
+  return best;
+}

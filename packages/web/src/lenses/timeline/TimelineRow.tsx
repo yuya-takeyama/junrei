@@ -242,7 +242,7 @@ function SubagentBlock({
   // sessionRef in practice, but stays type-safe/honest rather than assuming so.
   const agentHref =
     sessionRef.source === "claude-code" && entry.agentId !== undefined
-      ? agentPath(sessionRef.project, sessionRef.id, entry.agentId)
+      ? agentPath(sessionRef.id, entry.agentId)
       : undefined;
   return (
     <div className="blk" style={{ borderStyle: "double", borderWidth: "3px" }}>

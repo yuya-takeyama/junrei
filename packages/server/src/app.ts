@@ -58,31 +58,32 @@ export function createApp() {
         }
         return c.json({ overview: await getRepoOverview(repo) });
       })
-      // Source-prefixed routes, symmetric between the two harnesses: Claude
-      // scopes by `{project, id}` (a munged project dir plus the session
-      // UUID), Codex by `{id}` alone (Codex has no project-dir concept). The
-      // two prefixes are disjoint path segments, so — unlike the old
-      // unprefixed routes this replaces — there's no registration-order
-      // collision to guard against.
-      .get("/api/sessions/claude-code/:project/:id", async (c) => {
-        const project = c.req.param("project");
+      // Source-prefixed routes, symmetric between the two harnesses: both
+      // Claude and Codex now scope by `{id}` alone (a bare session UUID) —
+      // Claude used to require a munged project dir too, but session ids are
+      // UUIDv4, so a bare id resolves unambiguously (see `findRefById` in
+      // `sources/claude.ts`); the project dir is still resolved internally,
+      // it's just no longer part of the URL. The two prefixes are disjoint
+      // path segments, so — unlike the old unprefixed routes this replaces —
+      // there's no registration-order collision to guard against.
+      .get("/api/sessions/claude-code/:id", async (c) => {
         const id = c.req.param("id");
         // `lastActivityAt` is computed fresh per request (never baked into the
         // mtime-cached `analysis` object — see `getClaudeLastActivityAt`'s doc
         // comment) so it always reflects the CURRENT filesystem state, even
         // when `analysis` itself is served from cache.
         const [analysis, lastActivityAt] = await Promise.all([
-          claudeAdapter.getDetail({ project, id }),
-          getClaudeLastActivityAt(project, id),
+          claudeAdapter.getDetail({ id }),
+          getClaudeLastActivityAt(id),
         ]);
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
         return c.json({ analysis, lastActivityAt });
       })
-      .get("/api/sessions/claude-code/:project/:id/timeline", async (c) => {
+      .get("/api/sessions/claude-code/:id/timeline", async (c) => {
         const entries = await claudeAdapter.getTimeline(
-          { project: c.req.param("project"), id: c.req.param("id") },
+          { id: c.req.param("id") },
           c.req.query("agent"),
         );
         if (entries === undefined) {
@@ -90,13 +91,13 @@ export function createApp() {
         }
         return c.json({ entries });
       })
-      .get("/api/sessions/claude-code/:project/:id/record/:line", async (c) => {
+      .get("/api/sessions/claude-code/:id/record/:line", async (c) => {
         const line = Number.parseInt(c.req.param("line"), 10);
         if (!Number.isInteger(line) || line < 1) {
           return c.json({ error: "record not found" } as const, 404);
         }
         const detail = await claudeAdapter.getRecordDetail(
-          { project: c.req.param("project"), id: c.req.param("id") },
+          { id: c.req.param("id") },
           line,
           c.req.query("agent"),
         );
@@ -108,12 +109,8 @@ export function createApp() {
       // Claude-only: Codex sub-agent threads are full sessions in their own
       // right (fetch them via the codex detail route above), not sidecar
       // transcripts scoped under a parent session.
-      .get("/api/sessions/claude-code/:project/:id/agents/:agentId", async (c) => {
-        const analysis = await getAgentSession(
-          c.req.param("project"),
-          c.req.param("id"),
-          c.req.param("agentId"),
-        );
+      .get("/api/sessions/claude-code/:id/agents/:agentId", async (c) => {
+        const analysis = await getAgentSession(c.req.param("id"), c.req.param("agentId"));
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }

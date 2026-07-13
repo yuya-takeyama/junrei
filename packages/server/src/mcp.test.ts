@@ -95,11 +95,11 @@ describe("MCP tools", () => {
     expect(summary.contextTimeline.points).toBeGreaterThan(0);
   });
 
-  it("get_session_summary still works for a Claude session (source: 'claude-code' + project)", async () => {
+  it("get_session_summary works for a Claude session via source: 'claude-code' + sessionId alone (no project needed)", async () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_session_summary",
-      arguments: { source: "claude-code", project: CLAUDE_PROJECT, sessionId: CLAUDE_SESSION_ID },
+      arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
     const summary = JSON.parse(textOf(result)) as {
@@ -114,14 +114,14 @@ describe("MCP tools", () => {
     expect(summary.delegation?.subagents.tokens).toBeGreaterThan(0);
   });
 
-  it("get_session_summary errors clearly when source: 'claude-code' omits project", async () => {
+  it("session-scoped tools 404 clearly for an unknown Claude session id", async () => {
     client = await connect();
     const result = await client.callTool({
       name: "get_session_summary",
-      arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      arguments: { source: "claude-code", sessionId: "does-not-exist" },
     });
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("project is required");
+    expect(textOf(result)).toContain("Session not found");
   });
 
   it("get_subagent_tree works for a Codex session too (a leaf session with no sub-agents)", async () => {

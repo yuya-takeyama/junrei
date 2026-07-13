@@ -23,8 +23,8 @@ export const MAX_LIST_LIMIT = 500;
  * `sources/codex.ts`) is a richer object with its own `getDetail`/
  * `getTimeline`/`getRecordDetail` methods keyed by that source's own key
  * shape (`ClaudeSessionKey`/`CodexSessionKey`) — those aren't part of this
- * shared interface because the key shapes differ (Claude scopes by
- * `{project, id}`, Codex by `{id}` alone) and app.ts already knows statically
+ * shared interface because, even though both key shapes are now `{id}` alone
+ * (see `ClaudeSessionKey`'s doc comment), app.ts already knows statically
  * which source's route it's handling, so it calls each adapter's own typed
  * methods directly rather than through this generic surface.
  *

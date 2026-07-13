@@ -275,6 +275,26 @@ extract — so the missing signals shipped as one same-day PR series instead.
   and fails if `shared/` imports `claude/`/`codex/`, or `claude/`/`codex/`
   import each other. Moves + splits + renames only — zero behavior change,
   same routes/payloads/computations — this PR
+- ✅ Claude Code session URLs/API routes are now bare-id, matching Codex's
+  existing shape: `session/claude-code/:project/:id/:lens?` →
+  `session/claude-code/:id/:lens?` (agent drilldown likewise drops
+  `:project`), `GET /api/sessions/claude-code/:project/:id` (+ suffixes) →
+  `GET /api/sessions/claude-code/:id`. Server resolves a bare id via
+  `findClaudeSessionFileById` (`@junrei/core`'s discovery module): stats one
+  `{sessionId}.jsonl` candidate per project dir rather than reading every
+  project's full contents; session ids are UUIDv4 so a cross-project
+  collision is practically impossible, but the newest-mtime file wins if one
+  ever occurs. `ClaudeSessionKey` is now `{id}` alone (was `{project, id}`),
+  matching `CodexSessionKey`; the MCP `sessionRef` shape dropped its
+  `project` field the same way (session-scoped tools resolve by `sessionId`
+  alone now — `search_sessions`' own `project` filter is unrelated and
+  unchanged). Old bookmarked URLs still work: a 2-segment legacy URL
+  (`.../<project>/<uuid>`, no lens) is redirected inside `SessionShell`
+  (its `:id`/`:lens?` params land on the stale project dir/real id
+  respectively — a `projectDirName` is never UUID-shaped, so this is
+  unambiguous); a longer legacy URL (explicit lens, or the agent-drilldown
+  route) falls through to react-router's catch-all, which strips the
+  `:project` segment and redirects — this PR
 - ⬜ Fork lineage (`forked_from_id`): parsed and retained on
   `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
   fork-tree UI exists, unlike the sub-agent forest above

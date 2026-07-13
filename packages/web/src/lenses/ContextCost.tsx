@@ -14,9 +14,10 @@ interface Props {
    * necessarily a self-link back to the current page — harmless for the
    * session shell (its default resolution already points here), but the
    * agent detail shell must pass its own `agentPath(..., "context")`
-   * explicitly: an agent's own sidecar analysis carries a `sessionId` /
-   * `projectDirName` that don't correspond to real route params, so the
-   * chart's built-in default resolution would build a broken href.
+   * explicitly: an agent's own sidecar analysis carries a `sessionId` that
+   * doesn't correspond to a real route param (it's the sidecar's own
+   * filename stem, not the session's), so the chart's built-in default
+   * resolution would build a broken href.
    */
   contextHref?: string;
 }

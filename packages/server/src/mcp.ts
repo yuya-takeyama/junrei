@@ -20,13 +20,6 @@ import {
 const sessionRef = {
   source: z.enum(["claude-code", "codex"]).describe("Which harness the session came from"),
   sessionId: z.string().describe("Session UUID (from list_sessions)"),
-  project: z
-    .string()
-    .optional()
-    .describe(
-      "Munged project directory name (from list_sessions) — required for claude-code " +
-        "sessions, ignored for codex.",
-    ),
 };
 
 function jsonResult(value: unknown) {
@@ -39,18 +32,6 @@ function notFound(sessionId: string) {
       {
         type: "text" as const,
         text: `Session not found: ${sessionId}. Use list_sessions to discover sessions.`,
-      },
-    ],
-    isError: true,
-  };
-}
-
-function missingProject() {
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: "project is required for claude-code sessions (from list_sessions).",
       },
     ],
     isError: true,
@@ -100,19 +81,18 @@ function notAvailableForCodex() {
 type SessionRefArgs = {
   source: "claude-code" | "codex";
   sessionId: string;
-  project?: string | undefined;
 };
 
 type ResolvedAnalysis =
   | { source: "claude-code"; analysis: ClaudeSessionAnalysis }
   | { source: "codex"; analysis: CodexSessionAnalysisWithSubagents }
-  | { error: ReturnType<typeof notFound> | ReturnType<typeof missingProject> };
+  | { error: ReturnType<typeof notFound> };
 
 /**
- * Resolve either harness's analysis from `{source, sessionId, project?}`:
- * `source: "codex"` looks up by `sessionId` alone (Codex has no project-dir
- * concept); `source: "claude-code"` requires `project` and errors clearly
- * when it's missing rather than silently guessing.
+ * Resolve either harness's analysis from `{source, sessionId}` — both sources
+ * now look up by bare session id alone (Claude used to also require
+ * `project`, but session ids are UUIDv4, so a bare id resolves unambiguously;
+ * see `ClaudeSessionKey`'s doc comment in `sources/claude.ts`).
  */
 async function resolveAnalysis(args: SessionRefArgs): Promise<ResolvedAnalysis> {
   if (args.source === "codex") {
@@ -121,8 +101,7 @@ async function resolveAnalysis(args: SessionRefArgs): Promise<ResolvedAnalysis> 
       ? { error: notFound(args.sessionId) }
       : { source: "codex", analysis };
   }
-  if (args.project === undefined) return { error: missingProject() };
-  const analysis = await getSession(args.project, args.sessionId);
+  const analysis = await getSession(args.sessionId);
   return analysis === undefined
     ? { error: notFound(args.sessionId) }
     : { source: "claude-code", analysis };
@@ -248,7 +227,7 @@ export function createMcpServer(): McpServer {
         "titles — never against raw JSON, so quotes/newlines in the query need no escaping " +
         "and JSON escaping in the log can never split a match. Use it to find WHICH past " +
         "session mentioned something while spending minimal context: each result carries the " +
-        "session ref fields (`source`/`sessionId`/`project`) the session-scoped tools take, " +
+        "session ref fields (`source`/`sessionId`) the session-scoped tools take, " +
         "a short snippet per matched record with its source line number, an exact per-session " +
         "`matchCount`, and explicit truncation flags (`matchesTruncated`/`resultsTruncated` — " +
         "a capped list is never silently complete). Drill into a hit with get_session_summary " +
@@ -414,10 +393,9 @@ export function createMcpServer(): McpServer {
         "depends on the task. Claude Code sessions only.",
       inputSchema: sessionRef,
     },
-    async ({ source, project, sessionId }) => {
+    async ({ source, sessionId }) => {
       if (source === "codex") return notAvailableForCodex();
-      if (project === undefined) return missingProject();
-      const analysis = await getSession(project, sessionId);
+      const analysis = await getSession(sessionId);
       return analysis === undefined
         ? notFound(sessionId)
         : jsonResult({ repetitions: analysis.repetitions });
@@ -460,10 +438,9 @@ export function createMcpServer(): McpServer {
         "Claude Code sessions only.",
       inputSchema: sessionRef,
     },
-    async ({ source, project, sessionId }) => {
+    async ({ source, sessionId }) => {
       if (source === "codex") return notAvailableForCodex();
-      if (project === undefined) return missingProject();
-      const analysis = await getSession(project, sessionId);
+      const analysis = await getSession(sessionId);
       return analysis === undefined
         ? notFound(sessionId)
         : jsonResult({ taskExecutions: analysis.taskExecutions });
