@@ -8,6 +8,17 @@ import { fileURLToPath } from "node:url";
 const SOURCE_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
+// Model ids Codex writes into rollouts that LiteLLM has no key for, priced by
+// copying a LiteLLM-covered model's entry. "codex-auto-review" is the slug of
+// Codex's auto-review ("guardian") turns; OpenAI documents the feature as
+// GPT-5.4 Thinking at low reasoning (https://alignment.openai.com/auto-review/)
+// and bills API-key usage under it (https://github.com/openai/codex/issues/19420),
+// so gpt-5.4's rates apply. An upstream entry with the alias's own key wins if
+// LiteLLM ever adds one.
+const MODEL_ALIASES = {
+  "codex-auto-review": "gpt-5.4",
+};
+
 const KEPT_FIELDS = [
   "input_cost_per_token",
   "output_cost_per_token",
@@ -33,7 +44,8 @@ for (const [model, entry] of Object.entries(raw)) {
   // Codex CLI sessions report bare OpenAI ids (e.g. "gpt-5.5", "gpt-5.2-codex") with
   // no provider prefix, so only the unprefixed litellm keys are relevant here.
   const isOpenAiGpt5 = /^gpt-5/.test(model);
-  if (!isClaude && !isOpenAiGpt5) continue;
+  const isKnownAlias = Object.hasOwn(MODEL_ALIASES, model);
+  if (!isClaude && !isOpenAiGpt5 && !isKnownAlias) continue;
   const kept = {};
   for (const field of KEPT_FIELDS) {
     if (typeof entry[field] === "number") {
@@ -47,9 +59,18 @@ for (const [model, entry] of Object.entries(raw)) {
   }
 }
 
+for (const [alias, target] of Object.entries(MODEL_ALIASES)) {
+  snapshot[alias] ??= snapshot[target];
+  if (snapshot[alias] === undefined) {
+    throw new Error(
+      `Alias target "${target}" missing from upstream snapshot (needed by "${alias}")`,
+    );
+  }
+}
+
 const out = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../packages/core/src/pricing/prices.json",
+  "../packages/core/src/shared/pricing/prices.json",
 );
 await writeFile(
   out,
