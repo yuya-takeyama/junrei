@@ -44,7 +44,7 @@ export async function fetchRepoOverview(repo: string): Promise<RepoOverview> {
 }
 
 type ClaudeSessionResponse = InferResponseType<
-  (typeof client.api.sessions)["claude-code"][":project"][":id"]["$get"]
+  (typeof client.api.sessions)["claude-code"][":id"]["$get"]
 >;
 type CodexSessionResponse = InferResponseType<(typeof client.api.sessions.codex)[":id"]["$get"]>;
 type AnySessionResponseBody = ClaudeSessionResponse | CodexSessionResponse;
@@ -115,9 +115,7 @@ export async function fetchSessionDetail(ref: SessionRef): Promise<AnySessionJso
   const res =
     ref.source === "codex"
       ? await client.api.sessions.codex[":id"].$get({ param: { id: ref.id } })
-      : await client.api.sessions["claude-code"][":project"][":id"].$get({
-          param: { project: ref.project, id: ref.id },
-        });
+      : await client.api.sessions["claude-code"][":id"].$get({ param: { id: ref.id } });
   if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
   const body = (await res.json()) as AnySessionResponseBody;
   const analysis = unwrapSessionResponse(body);
@@ -126,7 +124,7 @@ export async function fetchSessionDetail(ref: SessionRef): Promise<AnySessionJso
 }
 
 type ClaudeTimelineResponse = InferResponseType<
-  (typeof client.api.sessions)["claude-code"][":project"][":id"]["timeline"]["$get"]
+  (typeof client.api.sessions)["claude-code"][":id"]["timeline"]["$get"]
 >;
 export type TimelineEntry = Extract<
   ClaudeTimelineResponse,
@@ -138,8 +136,8 @@ export async function fetchTimeline(ref: SessionRef, agentId?: string): Promise<
   const res =
     ref.source === "codex"
       ? await client.api.sessions.codex[":id"].timeline.$get({ param: { id: ref.id } })
-      : await client.api.sessions["claude-code"][":project"][":id"].timeline.$get({
-          param: { project: ref.project, id: ref.id },
+      : await client.api.sessions["claude-code"][":id"].timeline.$get({
+          param: { id: ref.id },
           ...(agentId !== undefined && { query: { agent: agentId } }),
         });
   if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
@@ -148,7 +146,7 @@ export async function fetchTimeline(ref: SessionRef, agentId?: string): Promise<
 }
 
 type RecordResponse = InferResponseType<
-  (typeof client.api.sessions)["claude-code"][":project"][":id"]["record"][":line"]["$get"]
+  (typeof client.api.sessions)["claude-code"][":id"]["record"][":line"]["$get"]
 >;
 /** Discriminated union of every record kind the slide-over (L3, screen 8) can render. */
 export type RecordDetail = Exclude<RecordResponse, { error: string }>;
@@ -169,8 +167,8 @@ export async function fetchRecordDetail(
       ? await client.api.sessions.codex[":id"].record[":line"].$get({
           param: { id: ref.id, line: String(line) },
         })
-      : await client.api.sessions["claude-code"][":project"][":id"].record[":line"].$get({
-          param: { project: ref.project, id: ref.id, line: String(line) },
+      : await client.api.sessions["claude-code"][":id"].record[":line"].$get({
+          param: { id: ref.id, line: String(line) },
           ...(agentId !== undefined && { query: { agent: agentId } }),
         });
   if (res.status === 404) return { notFound: true };
@@ -179,10 +177,10 @@ export async function fetchRecordDetail(
 }
 
 type AgentResponse = InferResponseType<
-  (typeof client.api.sessions)["claude-code"][":project"][":id"]["agents"][":agentId"]["$get"]
+  (typeof client.api.sessions)["claude-code"][":id"]["agents"][":agentId"]["$get"]
 >;
 /**
- * A subagent's own analysis (`GET .../claude-code/:project/:id/agents/:agentId`)
+ * A subagent's own analysis (`GET .../claude-code/:id/agents/:agentId`)
  * — deliberately the same `ClaudeSessionAnalysis` JSON shape as `SessionJson`
  * (just analyzed from the agent's sidecar transcript instead of the main
  * one), so every session-level component (ContextGrowthChart,
@@ -193,13 +191,9 @@ type AgentResponse = InferResponseType<
 export type AgentJson = Extract<AgentResponse, { analysis: unknown }>["analysis"];
 
 /** Fetch a subagent's own analysis. Claude-only — see `AgentJson`. */
-export async function fetchAgentSession(
-  project: string,
-  id: string,
-  agentId: string,
-): Promise<AgentJson> {
-  const res = await client.api.sessions["claude-code"][":project"][":id"].agents[":agentId"].$get({
-    param: { project, id, agentId },
+export async function fetchAgentSession(id: string, agentId: string): Promise<AgentJson> {
+  const res = await client.api.sessions["claude-code"][":id"].agents[":agentId"].$get({
+    param: { id, agentId },
   });
   if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
   const body = await res.json();

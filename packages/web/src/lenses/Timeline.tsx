@@ -64,7 +64,6 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
   // depend on its primitive parts instead so this effect doesn't re-fire
   // every render just because the caller re-rendered for an unrelated reason.
   const refSource = sessionRef.source;
-  const refProject = refSource === "claude-code" ? sessionRef.project : undefined;
   const refId = sessionRef.id;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: depend on sessionRef's primitive parts (see comment above), not the object itself.
@@ -74,7 +73,7 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
     fetchTimeline(sessionRef, agent)
       .then(setEntries)
       .catch((e: unknown) => setError(String(e)));
-  }, [refSource, refProject, refId, agent]);
+  }, [refSource, refId, agent]);
 
   const counts = useMemo(() => computeChipCounts(entries ?? []), [entries]);
 

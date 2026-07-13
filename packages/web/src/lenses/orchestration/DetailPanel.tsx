@@ -145,7 +145,7 @@ function AgentDetail({
   // rather than a separate agent route.
   const detailHref =
     session.source === "claude-code"
-      ? agentPath(session.projectDirName, session.sessionId, node.agentId)
+      ? agentPath(session.sessionId, node.agentId)
       : sessionPath({ source: "codex", id: node.agentId });
 
   return (

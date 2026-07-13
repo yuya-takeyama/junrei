@@ -9,6 +9,8 @@ import {
   CLAUDE_SESSION_ROUTE_PATH,
   CODEX_LENSES,
   CODEX_SESSION_ROUTE_PATH,
+  isLegacyClaudeProjectScopedUrl,
+  legacyClaudeSessionRedirectTarget,
   normalizeLens,
   parseListPage,
   parseRecordParam,
@@ -46,21 +48,19 @@ describe("CLAUDE_LENSES", () => {
 
 describe("sessionPath", () => {
   it("omits the lens segment for overview (default), Claude source", () => {
-    expect(sessionPath({ source: "claude-code", project: "proj", id: "abc123" })).toBe(
-      "/session/claude-code/proj/abc123",
+    expect(sessionPath({ source: "claude-code", id: "abc123" })).toBe(
+      "/session/claude-code/abc123",
     );
   });
 
   it("includes non-overview lens segments, Claude source", () => {
-    expect(sessionPath({ source: "claude-code", project: "proj", id: "abc123" }, "timeline")).toBe(
-      "/session/claude-code/proj/abc123/timeline",
+    expect(sessionPath({ source: "claude-code", id: "abc123" }, "timeline")).toBe(
+      "/session/claude-code/abc123/timeline",
     );
   });
 
-  it("percent-encodes project and id, Claude source", () => {
-    expect(sessionPath({ source: "claude-code", project: "a/b", id: "c d" })).toBe(
-      "/session/claude-code/a%2Fb/c%20d",
-    );
+  it("percent-encodes id, Claude source", () => {
+    expect(sessionPath({ source: "claude-code", id: "c d" })).toBe("/session/claude-code/c%20d");
   });
 
   it("has no :project segment for Codex source", () => {
@@ -76,10 +76,11 @@ describe("sessionPath", () => {
 });
 
 describe("sessionRefOf", () => {
-  it("builds a Claude ref from projectDirName/sessionId", () => {
-    expect(
-      sessionRefOf({ source: "claude-code", projectDirName: "-Users-proj", sessionId: "abc" }),
-    ).toEqual({ source: "claude-code", project: "-Users-proj", id: "abc" });
+  it("builds a Claude ref from sessionId alone (projectDirName is display-only now)", () => {
+    expect(sessionRefOf({ source: "claude-code", sessionId: "abc" })).toEqual({
+      source: "claude-code",
+      id: "abc",
+    });
   });
 
   it("builds a Codex ref from sessionId alone (no projectDirName)", () => {
@@ -92,9 +93,9 @@ describe("sessionRefOf", () => {
 
 describe("recordPath", () => {
   it("appends a record search param to the session path, Claude source", () => {
-    expect(
-      recordPath({ source: "claude-code", project: "proj", id: "abc123" }, "timeline", 42),
-    ).toBe("/session/claude-code/proj/abc123/timeline?record=42");
+    expect(recordPath({ source: "claude-code", id: "abc123" }, "timeline", 42)).toBe(
+      "/session/claude-code/abc123/timeline?record=42",
+    );
   });
 
   it("omits the lens segment for overview but keeps the record param, Codex source", () => {
@@ -106,32 +107,30 @@ describe("recordPath", () => {
 
 describe("agentPath", () => {
   it("omits the lens segment for overview (default)", () => {
-    expect(agentPath("proj", "abc123", "agentA")).toBe(
-      "/session/claude-code/proj/abc123/agent/agentA",
-    );
+    expect(agentPath("abc123", "agentA")).toBe("/session/claude-code/abc123/agent/agentA");
   });
 
   it("includes non-overview lens segments", () => {
-    expect(agentPath("proj", "abc123", "agentA", "timeline")).toBe(
-      "/session/claude-code/proj/abc123/agent/agentA/timeline",
+    expect(agentPath("abc123", "agentA", "timeline")).toBe(
+      "/session/claude-code/abc123/agent/agentA/timeline",
     );
   });
 
-  it("percent-encodes project, id, and agentId", () => {
-    expect(agentPath("a/b", "c d", "e f")).toBe("/session/claude-code/a%2Fb/c%20d/agent/e%20f");
+  it("percent-encodes id and agentId", () => {
+    expect(agentPath("c d", "e f")).toBe("/session/claude-code/c%20d/agent/e%20f");
   });
 });
 
 describe("agentRecordPath", () => {
   it("appends a record search param to the agent path", () => {
-    expect(agentRecordPath("proj", "abc123", "agentA", "timeline", 42)).toBe(
-      "/session/claude-code/proj/abc123/agent/agentA/timeline?record=42",
+    expect(agentRecordPath("abc123", "agentA", "timeline", 42)).toBe(
+      "/session/claude-code/abc123/agent/agentA/timeline?record=42",
     );
   });
 
   it("omits the lens segment for overview but keeps the record param", () => {
-    expect(agentRecordPath("proj", "abc123", "agentA", "overview", 7)).toBe(
-      "/session/claude-code/proj/abc123/agent/agentA?record=7",
+    expect(agentRecordPath("abc123", "agentA", "overview", 7)).toBe(
+      "/session/claude-code/abc123/agent/agentA?record=7",
     );
   });
 });
@@ -158,8 +157,8 @@ describe("route ranking: AGENT_ROUTE_PATH vs CLAUDE_SESSION_ROUTE_PATH", () => {
   }
 
   it("matches plain Claude session paths (with or without a lens) to CLAUDE_SESSION_ROUTE_PATH", () => {
-    expect(matchedRouteId("/session/claude-code/proj/id")).toBe("claude-session");
-    expect(matchedRouteId("/session/claude-code/proj/id/timeline")).toBe("claude-session");
+    expect(matchedRouteId("/session/claude-code/id")).toBe("claude-session");
+    expect(matchedRouteId("/session/claude-code/id/timeline")).toBe("claude-session");
   });
 
   it("matches plain Codex session paths (with or without a lens) to CODEX_SESSION_ROUTE_PATH", () => {
@@ -168,8 +167,91 @@ describe("route ranking: AGENT_ROUTE_PATH vs CLAUDE_SESSION_ROUTE_PATH", () => {
   });
 
   it("matches agent paths to AGENT_ROUTE_PATH, not CLAUDE_SESSION_ROUTE_PATH with lens='agent'", () => {
-    expect(matchedRouteId("/session/claude-code/proj/id/agent/abc")).toBe("agent");
-    expect(matchedRouteId("/session/claude-code/proj/id/agent/abc/timeline")).toBe("agent");
+    expect(matchedRouteId("/session/claude-code/id/agent/abc")).toBe("agent");
+    expect(matchedRouteId("/session/claude-code/id/agent/abc/timeline")).toBe("agent");
+  });
+
+  it("a legacy 2-segment URL (project/uuid, no lens) still matches CLAUDE_SESSION_ROUTE_PATH — SessionShell redirects it", () => {
+    expect(
+      matchedRouteId("/session/claude-code/-Users-proj/11111111-1111-1111-1111-111111111111"),
+    ).toBe("claude-session");
+  });
+
+  it("a legacy 3-segment URL (project/uuid/lens) falls through to the catch-all", () => {
+    expect(
+      matchedRouteId(
+        "/session/claude-code/-Users-proj/11111111-1111-1111-1111-111111111111/timeline",
+      ),
+    ).toBe("catchall");
+  });
+
+  it("a legacy agent-drilldown URL (project/uuid/agent/agentId) falls through to the catch-all", () => {
+    expect(
+      matchedRouteId(
+        "/session/claude-code/-Users-proj/11111111-1111-1111-1111-111111111111/agent/abc",
+      ),
+    ).toBe("catchall");
+  });
+});
+
+describe("isLegacyClaudeProjectScopedUrl", () => {
+  const UUID = "11111111-1111-1111-1111-111111111111";
+
+  it("is true when id is a non-UUID project dir and lens is a UUID", () => {
+    expect(isLegacyClaudeProjectScopedUrl("-Users-proj", UUID)).toBe(true);
+  });
+
+  it("is false for a current-shape URL (id is already a UUID)", () => {
+    expect(isLegacyClaudeProjectScopedUrl(UUID, undefined)).toBe(false);
+    expect(isLegacyClaudeProjectScopedUrl(UUID, "timeline")).toBe(false);
+  });
+
+  it("is false when lens is missing or not a UUID", () => {
+    expect(isLegacyClaudeProjectScopedUrl("-Users-proj", undefined)).toBe(false);
+    expect(isLegacyClaudeProjectScopedUrl("-Users-proj", "timeline")).toBe(false);
+  });
+
+  it("is false when id is missing", () => {
+    expect(isLegacyClaudeProjectScopedUrl(undefined, UUID)).toBe(false);
+  });
+});
+
+describe("legacyClaudeSessionRedirectTarget", () => {
+  const UUID = "11111111-1111-1111-1111-111111111111";
+
+  it("strips the project segment from a legacy URL with an explicit lens", () => {
+    expect(
+      legacyClaudeSessionRedirectTarget(`/session/claude-code/-Users-proj/${UUID}/timeline`, ""),
+    ).toBe(`/session/claude-code/${UUID}/timeline`);
+  });
+
+  it("strips the project segment from a legacy agent-drilldown URL", () => {
+    expect(
+      legacyClaudeSessionRedirectTarget(
+        `/session/claude-code/-Users-proj/${UUID}/agent/abc/context`,
+        "",
+      ),
+    ).toBe(`/session/claude-code/${UUID}/agent/abc/context`);
+  });
+
+  it("preserves the query string", () => {
+    expect(
+      legacyClaudeSessionRedirectTarget(
+        `/session/claude-code/-Users-proj/${UUID}/timeline`,
+        "?record=42",
+      ),
+    ).toBe(`/session/claude-code/${UUID}/timeline?record=42`);
+  });
+
+  it("returns undefined for a current-shape URL (id segment is already a UUID)", () => {
+    expect(
+      legacyClaudeSessionRedirectTarget(`/session/claude-code/${UUID}/timeline`, ""),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for a path that doesn't match the legacy shape at all", () => {
+    expect(legacyClaudeSessionRedirectTarget("/session/codex/abc/timeline", "")).toBeUndefined();
+    expect(legacyClaudeSessionRedirectTarget("/", "")).toBeUndefined();
   });
 });
 

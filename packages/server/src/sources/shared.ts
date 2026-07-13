@@ -121,8 +121,9 @@ export interface SessionListItemBase {
  * and `codexAdapter` (sources/codex.ts) are the two peer implementations
  * app.ts/sessions.ts dispatch to instead of scattering
  * `if (source === "claude-code")` checks. `Key` is that source's own lookup
- * key shape (`ClaudeSessionKey` scopes by `{project, id}`, `CodexSessionKey`
- * by `{id}` alone); `Item` its session-list item shape (must extend
+ * key shape (`ClaudeSessionKey` and `CodexSessionKey` are both `{id}` alone —
+ * see `ClaudeSessionKey`'s doc comment for why Claude no longer needs a
+ * project dir in the key); `Item` its session-list item shape (must extend
  * `SessionListItemBase`); `Detail` its full per-session analysis shape.
  * `getTimeline`/`getRecordDetail` take an optional `agentId` because only
  * Claude has sidecar subagent transcripts to scope into — Codex's

@@ -77,7 +77,13 @@ export interface SearchMatch {
 export interface SearchSessionResult {
   source: SessionSource;
   sessionId: string;
-  /** Claude only — feeds the other tools' `project` argument. */
+  /**
+   * Claude only, informational — the munged project dir this session lives
+   * under. No longer needed by the other session-scoped tools (they resolve
+   * by `sessionId` alone now — see `ClaudeSessionKey`'s doc comment in
+   * `sources/claude.ts`), but still useful for the `search_sessions`
+   * `project` filter and for display.
+   */
   project?: string;
   repoRoot?: string;
   worktreeName?: string;

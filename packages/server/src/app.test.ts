@@ -29,9 +29,9 @@ describe("Claude Code timeline + record routes", () => {
     }
   });
 
-  it("GET /api/sessions/claude-code/:project/:id returns { analysis: ClaudeSessionAnalysis }", async () => {
+  it("GET /api/sessions/claude-code/:id returns { analysis: ClaudeSessionAnalysis } via bare-id resolution", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}`);
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       analysis: {
@@ -52,9 +52,16 @@ describe("Claude Code timeline + record routes", () => {
     expect(Number.isNaN(Date.parse(body.lastActivityAt ?? ""))).toBe(false);
   });
 
-  it("GET /api/sessions/claude-code/:project/:id/timeline returns ordered entries", async () => {
+  it("GET /api/sessions/claude-code/:id 404s for an unknown session id", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/timeline`);
+    const res = await app.request("/api/sessions/claude-code/does-not-exist");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "session not found" });
+  });
+
+  it("GET /api/sessions/claude-code/:id/timeline returns ordered entries", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/timeline`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { entries: Array<{ kind: string; line: number }> };
     expect(body.entries[0]).toMatchObject({ kind: "user", line: 1 });
@@ -66,7 +73,7 @@ describe("Claude Code timeline + record routes", () => {
   it("GET .../timeline?agent=<id> scopes the timeline to that subagent", async () => {
     const app = createApp();
     const res = await app.request(
-      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/timeline?agent=${AGENT_ID}`,
+      `/api/sessions/claude-code/${SESSION_ID}/timeline?agent=${AGENT_ID}`,
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { entries: Array<{ kind: string }> };
@@ -80,14 +87,14 @@ describe("Claude Code timeline + record routes", () => {
 
   it("GET .../timeline 404s for an unknown session", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/does-not-exist/timeline`);
+    const res = await app.request("/api/sessions/claude-code/does-not-exist/timeline");
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "session not found" });
   });
 
-  it("GET /api/sessions/claude-code/:project/:id/record/:line returns full tool-call detail", async () => {
+  it("GET /api/sessions/claude-code/:id/record/:line returns full tool-call detail", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/record/3`);
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/record/3`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       kind: string;
@@ -103,9 +110,7 @@ describe("Claude Code timeline + record routes", () => {
 
   it("GET .../record/:line 404s for a non-numeric line", async () => {
     const app = createApp();
-    const res = await app.request(
-      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/record/not-a-number`,
-    );
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/record/not-a-number`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "record not found" });
   });
@@ -113,16 +118,14 @@ describe("Claude Code timeline + record routes", () => {
   it("GET .../record/:line 404s for a line with no addressable record", async () => {
     const app = createApp();
     // Line 4 is a tool_result-only carrier — not independently addressable.
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/record/4`);
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/record/4`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "record not found" });
   });
 
-  it("GET /api/sessions/claude-code/:project/:id/agents/:agentId returns { analysis } for the sidecar transcript", async () => {
+  it("GET /api/sessions/claude-code/:id/agents/:agentId returns { analysis } for the sidecar transcript", async () => {
     const app = createApp();
-    const res = await app.request(
-      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/agents/${AGENT_ID}`,
-    );
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/agents/${AGENT_ID}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       analysis: {
@@ -145,9 +148,7 @@ describe("Claude Code timeline + record routes", () => {
 
   it("GET .../agents/:agentId 404s for an unknown agent id", async () => {
     const app = createApp();
-    const res = await app.request(
-      `/api/sessions/claude-code/${PROJECT}/${SESSION_ID}/agents/does-not-exist`,
-    );
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/agents/does-not-exist`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "session not found" });
   });
@@ -181,7 +182,7 @@ describe("Claude Desktop title fallback", () => {
 
   it("detail: a session with no title records in its transcript gets the Desktop title", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${DESKTOP_TITLED_SESSION}`);
+    const res = await app.request(`/api/sessions/claude-code/${DESKTOP_TITLED_SESSION}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { analysis: { title?: string } };
     expect(body.analysis.title).toBe("Desktop-titled session");
@@ -189,7 +190,7 @@ describe("Claude Desktop title fallback", () => {
 
   it("detail: a transcript's own ai-title wins over a Desktop title", async () => {
     const app = createApp();
-    const res = await app.request(`/api/sessions/claude-code/${PROJECT}/${SESSION_ID}`);
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { analysis: { title?: string } };
     // The desktop fixture maps this session to "Desktop title must lose".
