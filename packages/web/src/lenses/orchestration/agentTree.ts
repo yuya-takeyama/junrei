@@ -61,6 +61,70 @@ export function activeModels(byModel: readonly ModelUsageSummary[]): ModelUsageS
     .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
 }
 
+/**
+ * Share of `total` that `part` represents, as a 0..1 fraction — the basis
+ * for the tree table's "%" column (share of the SESSION total, not of any
+ * subtree — see `formatPctShare` in format.ts for the display side).
+ * `undefined` when `total` isn't a real denominator (<= 0, i.e. no priced
+ * session cost at all) rather than dividing by zero or reporting a
+ * meaningless 0%.
+ */
+export function costShare(part: number, total: number): number | undefined {
+  return total > 0 ? part / total : undefined;
+}
+
+/**
+ * Liveness threshold for `isSessionLive` — 5 minutes. Liveness is inferred
+ * from file mtime (the log has no explicit "still running" marker), and a
+ * tool call that runs quietly for a long time (a slow build, a long-polling
+ * MCP call) can stall the mtime well past the point the agent is actually
+ * still working. This errs GENEROUS on purpose: a wider window occasionally
+ * shows "run" a little past the real finish, which is a far less confusing
+ * mistake than flagging a still-running agent as "done".
+ */
+export const SESSION_LIVE_THRESHOLD_MS = 5 * 60_000;
+
+/**
+ * Whether a session still looks "live" — its last on-disk activity
+ * (`lastActivityAt`, the max mtime across the main transcript and every
+ * subagent sidecar; see the server's `getClaudeLastActivityAt`/
+ * `getCodexLastActivityAt`) is within `SESSION_LIVE_THRESHOLD_MS` of `now`.
+ * `false` for an undefined or unparseable timestamp — no evidence of
+ * recent activity is treated the same as no activity, never "probably live".
+ */
+export function isSessionLive(lastActivityAt: string | undefined, nowMs: number): boolean {
+  if (lastActivityAt === undefined) return false;
+  const activityMs = Date.parse(lastActivityAt);
+  if (!Number.isFinite(activityMs)) return false;
+  return nowMs - activityMs < SESSION_LIVE_THRESHOLD_MS;
+}
+
+/**
+ * Tree/detail-panel "run"/"done"/"fail" status label for one subagent node,
+ * derived from its own `SubagentNode.status` (see that field's doc comment
+ * in `@junrei/core` for the completion-evidence rules) plus whether the
+ * SESSION itself still looks live:
+ *  - "completed" -> "done", "failed" -> "fail" — real evidence either way,
+ *    session liveness doesn't change the reading.
+ *  - "unresolved" (no completion evidence yet) -> "run" ONLY while the
+ *    session still looks live; in a long-finished session an unresolved
+ *    status just means the log never captured a completion, not that the
+ *    agent is still running — rendering "run" there would be actively
+ *    misleading, so it falls through to `undefined` instead.
+ *  - `status` undefined (Codex — no completion-evidence source exists at
+ *    all, see `codex/orchestration.ts`) -> `undefined`. Guessing from timing
+ *    here would be worse than the tree just showing "—".
+ */
+export function nodeStatus(
+  node: Pick<SubagentNodeJson, "status">,
+  sessionLive: boolean,
+): "run" | "done" | "fail" | undefined {
+  if (node.status === "completed") return "done";
+  if (node.status === "failed") return "fail";
+  if (node.status === "unresolved") return sessionLive ? "run" : undefined;
+  return undefined;
+}
+
 export interface FlatTreeRow {
   id: string;
   depth: number;

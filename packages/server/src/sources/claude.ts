@@ -8,6 +8,7 @@ import {
   type ClaudeSessionFileRef,
   getClaudeRecordDetail,
   listClaudeSessionFiles,
+  listSubagentRefs,
   loadClaudeDesktopTitles,
   loadSubagentSessionData,
   parseClaudeTranscriptFile,
@@ -187,6 +188,47 @@ export async function getSession(
     // Copy rather than mutate: analyzeCached shares one object per mtime, and
     // a later Desktop rename must not be baked into the cached analysis.
     return title === undefined ? analysis : { ...analysis, title };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Last on-disk activity for a session — the max mtime across the main
+ * transcript AND every subagent sidecar file, so a session with a quiet main
+ * transcript but a subagent still actively writing still reads as live. Fresh
+ * per request (never cached alongside `ClaudeSessionAnalysis`, which is keyed
+ * by the MAIN file's mtime alone — see `analyzeCached`'s doc comment); the
+ * web derives "still running" from this value (`isSessionLive` in
+ * `agentTree.ts`), so it must reflect the CURRENT filesystem state, not
+ * whatever mtime the analysis happened to be cached under.
+ *
+ * Never throws: a stat failure (race with the file disappearing, permission
+ * hiccup, ...) degrades to `undefined` rather than failing the whole session
+ * detail request over a liveness nicety.
+ */
+export async function getClaudeLastActivityAt(
+  projectDirName: string,
+  sessionId: string,
+): Promise<string | undefined> {
+  const ref = await findRef(projectDirName, sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    let latestMs = ref.mtimeMs;
+    const refs = await listSubagentRefs(ref.filePath);
+    const sidecarMtimes = await Promise.all(
+      refs.map(async (subagent) => {
+        try {
+          return (await stat(subagent.jsonlPath)).mtimeMs;
+        } catch {
+          return undefined;
+        }
+      }),
+    );
+    for (const mtimeMs of sidecarMtimes) {
+      if (mtimeMs !== undefined && mtimeMs > latestMs) latestMs = mtimeMs;
+    }
+    return new Date(latestMs).toISOString();
   } catch {
     return undefined;
   }

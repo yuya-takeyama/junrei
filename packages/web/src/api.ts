@@ -49,8 +49,26 @@ type ClaudeSessionResponse = InferResponseType<
 type CodexSessionResponse = InferResponseType<(typeof client.api.sessions.codex)[":id"]["$get"]>;
 type AnySessionResponseBody = ClaudeSessionResponse | CodexSessionResponse;
 
-export type SessionJson = Extract<ClaudeSessionResponse, { analysis: unknown }>["analysis"];
-export type CodexSessionJson = Extract<CodexSessionResponse, { analysis: unknown }>["analysis"];
+/**
+ * `lastActivityAt` lives on the ENVELOPE (`{ analysis, lastActivityAt }`),
+ * never inside the mtime-cached `analysis` object itself (see the server's
+ * `getClaudeLastActivityAt`/`getCodexLastActivityAt`) — intersected onto the
+ * session JSON type here rather than left off, so every session-level
+ * component (`isSessionLive`, the Orchestration tree's Status column, ...)
+ * can read `session.lastActivityAt` directly instead of threading the
+ * envelope separately. `unwrapSessionResponse` below is what actually merges
+ * it onto the returned object at runtime.
+ */
+export type SessionJson = Extract<ClaudeSessionResponse, { analysis: unknown }>["analysis"] & {
+  // `| undefined` explicit (not just `?:`) — `exactOptionalPropertyTypes`
+  // rejects assigning an explicit `undefined` value (the server's stat-failure
+  // case) to a bare `?:` field. Same pattern as `format.ts`'s
+  // `DelegationShareScope.costUsd`.
+  lastActivityAt?: string | undefined;
+};
+export type CodexSessionJson = Extract<CodexSessionResponse, { analysis: unknown }>["analysis"] & {
+  lastActivityAt?: string | undefined;
+};
 export type SubagentNodeJson = SessionJson["subagents"][number];
 export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
 
@@ -63,16 +81,19 @@ export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
 export type AnySessionJson = SessionJson | CodexSessionJson;
 
 /**
- * Unwraps the shared `{ analysis }` envelope both detail routes return, or
- * `undefined` for the `{ error }` shape. In practice a caller only ever sees
- * `{ error }` alongside a non-2xx status (already handled by the `res.ok`
- * check before this runs), but keeping the unwrap as its own pure function —
- * rather than inlining a property-presence check at the call site — makes it
- * independently testable and defends against a body that doesn't match the
- * expected shape.
+ * Unwraps the shared `{ analysis, lastActivityAt }` envelope both detail
+ * routes return, merging `lastActivityAt` onto the returned session object
+ * (see `SessionJson`'s doc comment for why it isn't already part of
+ * `analysis`) — or `undefined` for the `{ error }` shape. In practice a
+ * caller only ever sees `{ error }` alongside a non-2xx status (already
+ * handled by the `res.ok` check before this runs), but keeping the unwrap as
+ * its own pure function — rather than inlining a property-presence check at
+ * the call site — makes it independently testable and defends against a body
+ * that doesn't match the expected shape.
  */
 export function unwrapSessionResponse(body: AnySessionResponseBody): AnySessionJson | undefined {
-  return "analysis" in body ? body.analysis : undefined;
+  if (!("analysis" in body)) return undefined;
+  return { ...body.analysis, lastActivityAt: body.lastActivityAt };
 }
 
 /**

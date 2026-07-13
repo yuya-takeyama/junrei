@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { ModelUsageSummary, SubagentNodeJson } from "../../api.js";
 import {
   activeModels,
+  costShare,
   findAgentPath,
   flattenSubagents,
+  isSessionLive,
   mainDelegatedSplit,
   mainDelegatedTokenSplit,
+  nodeStatus,
+  SESSION_LIVE_THRESHOLD_MS,
   spawnedByLabel,
   subtreeCost,
 } from "./agentTree.js";
@@ -81,6 +85,59 @@ describe("subtreeCost", () => {
     const testWriter = node("test-writer", 1.86, [lintFixer]);
     expect(subtreeCost(testWriter)).toBeCloseTo(1.95, 6);
     expect(subtreeCost(lintFixer)).toBeCloseTo(0.09, 6);
+  });
+});
+
+describe("costShare", () => {
+  it("returns the part/total fraction", () => {
+    expect(costShare(25, 100)).toBeCloseTo(0.25, 6);
+    expect(costShare(100, 100)).toBeCloseTo(1, 6);
+  });
+
+  it("returns undefined rather than dividing by zero (or a negative) total", () => {
+    expect(costShare(5, 0)).toBeUndefined();
+    expect(costShare(5, -1)).toBeUndefined();
+  });
+});
+
+describe("isSessionLive", () => {
+  const NOW = Date.parse("2026-07-13T12:00:00.000Z");
+
+  it("is live just inside the threshold", () => {
+    const recent = new Date(NOW - (SESSION_LIVE_THRESHOLD_MS - 1000)).toISOString();
+    expect(isSessionLive(recent, NOW)).toBe(true);
+  });
+
+  it("is not live once the threshold has fully elapsed", () => {
+    const stale = new Date(NOW - SESSION_LIVE_THRESHOLD_MS - 1000).toISOString();
+    expect(isSessionLive(stale, NOW)).toBe(false);
+  });
+
+  it("is not live for an undefined lastActivityAt", () => {
+    expect(isSessionLive(undefined, NOW)).toBe(false);
+  });
+
+  it("is not live for an unparseable timestamp", () => {
+    expect(isSessionLive("not-a-date", NOW)).toBe(false);
+  });
+});
+
+describe("nodeStatus", () => {
+  it("maps completed/failed straight through regardless of session liveness", () => {
+    expect(nodeStatus({ status: "completed" }, true)).toBe("done");
+    expect(nodeStatus({ status: "completed" }, false)).toBe("done");
+    expect(nodeStatus({ status: "failed" }, true)).toBe("fail");
+    expect(nodeStatus({ status: "failed" }, false)).toBe("fail");
+  });
+
+  it("reads unresolved as run only while the session still looks live", () => {
+    expect(nodeStatus({ status: "unresolved" }, true)).toBe("run");
+    expect(nodeStatus({ status: "unresolved" }, false)).toBeUndefined();
+  });
+
+  it("returns undefined for a Codex node (status never set) regardless of liveness", () => {
+    expect(nodeStatus({ status: undefined }, true)).toBeUndefined();
+    expect(nodeStatus({ status: undefined }, false)).toBeUndefined();
   });
 });
 

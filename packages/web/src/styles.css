@@ -797,7 +797,8 @@ button.tool-hd {
 
 .tn {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 88px 108px 56px 56px;
+  /* Agent | Model | Status | Tokens·↩return | Cost | % | Dur */
+  grid-template-columns: minmax(200px, 1fr) 88px 56px 108px 64px 44px 56px;
   gap: 8px;
   align-items: center;
   min-width: 520px;
@@ -876,6 +877,52 @@ button.tn:hover {
 }
 .pan.f1 > .tn:last-child {
   border-bottom: 0;
+}
+
+/* Status cell — Tree view's Status column (TreeView.tsx) and the agent
+   detail panel's Status row (DetailPanel.tsx), both via `StatusCell.tsx`.
+   "run" reuses `--h` (haiku's teal-green — the palette's only green accent;
+   see tokens.css) as a stand-in "live" color rather than adding a new token;
+   "done" is muted; "fail" reuses `.errtx`'s `--err`. */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.st-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.st-run {
+  color: var(--h);
+}
+.st-run .st-dot {
+  background: var(--h);
+  animation: st-pulse 2s ease-in-out infinite;
+}
+.st-done {
+  color: var(--mut);
+}
+.st-done .st-dot {
+  background: var(--mut);
+}
+.st-fail {
+  color: var(--err);
+}
+.st-fail .st-dot {
+  background: var(--err);
+}
+@keyframes st-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .kv {

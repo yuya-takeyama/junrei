@@ -450,7 +450,13 @@ export function computeTaskExecutions(data: SessionData): TaskExecutionInfo[] {
   return tasks.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
 }
 
-function backgroundStatus(
+/**
+ * Exported (not just a `computeTaskExecutions` internal) so `analyze.ts` can
+ * reuse the SAME background-completion evidence rule for `SubagentNode.status`
+ * instead of re-deriving it — one background task-notification join, two
+ * presentations (the task-executions list here, the subagent tree there).
+ */
+export function backgroundStatus(
   notification: TaskNotificationEvent | undefined,
 ): TaskExecutionInfo["status"] {
   if (notification === undefined) return "unresolved";

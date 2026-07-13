@@ -17,6 +17,7 @@ export type {
   ToolStat,
 } from "./metrics.js";
 export {
+  backgroundStatus,
   classifyToolError,
   computeContextTimeline,
   computeExploration,

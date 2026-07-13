@@ -8,8 +8,14 @@ import { unwrapSessionResponse } from "./api.js";
 const analysis = { sessionId: "codex-1", source: "codex" } as unknown as CodexSessionJson;
 
 describe("unwrapSessionResponse", () => {
-  it("unwraps the shared { analysis } envelope both detail routes return on success", () => {
-    expect(unwrapSessionResponse({ analysis })).toBe(analysis);
+  it("unwraps the shared { analysis, lastActivityAt } envelope, merging lastActivityAt onto the session", () => {
+    const result = unwrapSessionResponse({ analysis, lastActivityAt: "2026-07-13T00:00:00.000Z" });
+    expect(result).toEqual({ ...analysis, lastActivityAt: "2026-07-13T00:00:00.000Z" });
+  });
+
+  it("carries lastActivityAt through as undefined when the server couldn't stat the file", () => {
+    const result = unwrapSessionResponse({ analysis, lastActivityAt: undefined });
+    expect(result?.lastActivityAt).toBeUndefined();
   });
 
   it("returns undefined for the { error } envelope (defense in depth — callers already gate on res.ok)", () => {

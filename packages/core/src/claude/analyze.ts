@@ -4,7 +4,7 @@ import type { FileAccessAgg, TokenTotals } from "../shared/metrics.js";
 import { foldFileAccess, mergeFileAccess, mergeUsageByModel } from "../shared/metrics.js";
 import { deriveRepoIdentity } from "../shared/repo.js";
 import type { SessionAnalysisCore } from "../shared/session-analysis.js";
-import type { SubagentNode } from "../shared/subagent-node.js";
+import type { SubagentNode, SubagentStatus } from "../shared/subagent-node.js";
 import type {
   ClaudeTurnUsage,
   ExplorationProfile,
@@ -13,6 +13,7 @@ import type {
   ToolStat,
 } from "./metrics.js";
 import {
+  backgroundStatus,
   computeContextTimeline,
   computeExploration,
   computeFileAccess,
@@ -24,7 +25,13 @@ import {
   computeUsage,
 } from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
-import type { ApiErrorLogEntry, SessionData, ToolCall } from "./session-data.js";
+import type {
+  ApiErrorLogEntry,
+  BackgroundLaunch,
+  SessionData,
+  TaskNotificationEvent,
+  ToolCall,
+} from "./session-data.js";
 import {
   agentLaunchToolUseIds,
   asyncAgentLaunchToolUseIds,
@@ -184,6 +191,13 @@ async function analyzeSubagents(
   /** agentId -> spawning tool_use id, recovered from parent-side `toolUseResult.agentId` —
    *  fallback linkage for sidecars whose meta.json lacks `toolUseId`. */
   const toolUseIdByAgentId = new Map<string, string>();
+  /** owner id -> that transcript's own background launches — the async-launch half of
+   *  `SubagentNode.status`'s evidence: joins a node's `toolUseId` to a `taskId`. */
+  const backgroundLaunchesByOwner = new Map<string, readonly BackgroundLaunch[]>();
+  /** owner id -> that transcript's own task-notifications — the OWNER's transcript is what
+   *  receives a background task's completion notice, not the child's own sidecar, so status
+   *  for an async launch is resolved from the SAME owner as the launch itself. */
+  const taskNotificationsByOwner = new Map<string, readonly TaskNotificationEvent[]>();
 
   const registerOwner = (ownerId: string, data: SessionData) => {
     toolCallsByOwner.set(ownerId, new Map(data.toolCalls.map((c) => [c.toolUseId, c])));
@@ -192,6 +206,8 @@ async function analyzeSubagents(
     for (const [agentId, toolUseId] of agentLaunchToolUseIds(data)) {
       if (!toolUseIdByAgentId.has(agentId)) toolUseIdByAgentId.set(agentId, toolUseId);
     }
+    backgroundLaunchesByOwner.set(ownerId, data.backgroundLaunches);
+    taskNotificationsByOwner.set(ownerId, data.taskNotifications);
   };
   registerOwner(MAIN_OWNER, mainData);
 
@@ -249,7 +265,17 @@ async function analyzeSubagents(
     } else {
       roots.push(node);
     }
-    Object.assign(node, launchLinkage(node, ownerId, toolCallsByOwner, asyncLaunchIds));
+    Object.assign(
+      node,
+      launchLinkage(
+        node,
+        ownerId,
+        toolCallsByOwner,
+        asyncLaunchIds,
+        backgroundLaunchesByOwner,
+        taskNotificationsByOwner,
+      ),
+    );
   }
   const byStart = (a: SubagentNode, b: SubagentNode) =>
     (a.startedAt ?? "").localeCompare(b.startedAt ?? "");
@@ -260,9 +286,56 @@ async function analyzeSubagents(
 }
 
 /**
+ * `SubagentNode.status`, resolved from the SAME launch evidence
+ * `launchLinkage` already located for this node (same owner transcript, same
+ * toolUseId) — see `SubagentStatus`'s doc comment for what counts as
+ * evidence. Nested subagents (spawned by another subagent) get this right
+ * for free: `spawnedBy`/`toolCallsByOwner` already resolve to whichever
+ * transcript actually issued the launch, so `backgroundLaunchesByOwner`/
+ * `taskNotificationsByOwner` looked up by that same `spawnedBy` key are the
+ * correct per-transcript data, not always the main transcript's.
+ *
+ *  - No `toolUseId` at all -> "unresolved" (nothing to look up).
+ *  - Async launch: join `toolUseId` -> that owner's matching `BackgroundLaunch`
+ *    -> its `taskId` -> the LAST task-notification for that taskId in the
+ *    SAME owner's transcript (the owner is who receives the notification,
+ *    never the child's own sidecar) -> `backgroundStatus` (shared with
+ *    `computeTaskExecutions`). No matching launch or notification ->
+ *    "unresolved".
+ *  - Sync launch: the launching call's `result` present -> `isError` picks
+ *    completed/failed; absent -> "unresolved".
+ */
+function resolveNodeStatus(
+  toolUseId: string | undefined,
+  asyncLaunch: boolean,
+  launchCall: ToolCall | undefined,
+  spawnedBy: string,
+  backgroundLaunchesByOwner: ReadonlyMap<string, readonly BackgroundLaunch[]>,
+  taskNotificationsByOwner: ReadonlyMap<string, readonly TaskNotificationEvent[]>,
+): SubagentStatus {
+  if (toolUseId === undefined) return "unresolved";
+  if (asyncLaunch) {
+    const launch = backgroundLaunchesByOwner
+      .get(spawnedBy)
+      ?.find((candidate) => candidate.toolUseId === toolUseId);
+    if (launch === undefined) return "unresolved";
+    // Last notification for that taskId wins (an agent can notify more than
+    // once) — same rule `computeTaskExecutions` applies.
+    let lastNotification: TaskNotificationEvent | undefined;
+    for (const notification of taskNotificationsByOwner.get(spawnedBy) ?? []) {
+      if (notification.taskId === launch.taskId) lastNotification = notification;
+    }
+    const status = backgroundStatus(lastNotification);
+    return status === "completed" || status === "failed" ? status : "unresolved";
+  }
+  if (launchCall?.result === undefined) return "unresolved";
+  return launchCall.result.isError ? "failed" : "completed";
+}
+
+/**
  * Resolve a node's launch-side metadata (returnedChars/asyncLaunch/launchLine/
- * launchedAt/spawnedBy) from the launching Agent/Task tool call, found in
- * whichever transcript owns it (main, or a parent subagent). Falls back to
+ * launchedAt/spawnedBy/status) from the launching Agent/Task tool call, found
+ * in whichever transcript owns it (main, or a parent subagent). Falls back to
  * `spawnedBy: "main"` when the owner or launching call can't be resolved —
  * the node still renders as a root in the tree either way. For async
  * launches, `returnedChars` is deliberately left undefined: the launch's
@@ -273,16 +346,32 @@ function launchLinkage(
   ownerId: string | undefined,
   toolCallsByOwner: ReadonlyMap<string, ReadonlyMap<string, ToolCall>>,
   asyncLaunchIds: ReadonlySet<string>,
+  backgroundLaunchesByOwner: ReadonlyMap<string, readonly BackgroundLaunch[]>,
+  taskNotificationsByOwner: ReadonlyMap<string, readonly TaskNotificationEvent[]>,
 ): Pick<
   SubagentNode,
-  "returnedChars" | "returnedPreview" | "asyncLaunch" | "launchLine" | "launchedAt" | "spawnedBy"
+  | "returnedChars"
+  | "returnedPreview"
+  | "asyncLaunch"
+  | "launchLine"
+  | "launchedAt"
+  | "spawnedBy"
+  | "status"
 > {
   const spawnedBy = ownerId ?? MAIN_OWNER;
   const asyncLaunch = node.toolUseId !== undefined && asyncLaunchIds.has(node.toolUseId);
   const launchCall =
     node.toolUseId !== undefined ? toolCallsByOwner.get(spawnedBy)?.get(node.toolUseId) : undefined;
+  const status = resolveNodeStatus(
+    node.toolUseId,
+    asyncLaunch,
+    launchCall,
+    spawnedBy,
+    backgroundLaunchesByOwner,
+    taskNotificationsByOwner,
+  );
   if (launchCall === undefined) {
-    return { spawnedBy, ...(asyncLaunch && { asyncLaunch }) };
+    return { spawnedBy, status, ...(asyncLaunch && { asyncLaunch }) };
   }
   const returnedChars = asyncLaunch ? undefined : toolResultLength(launchCall);
   const returnedPreview = asyncLaunch
@@ -290,6 +379,7 @@ function launchLinkage(
     : launchCall.result?.text.slice(0, RETURNED_PREVIEW_LIMIT);
   return {
     spawnedBy,
+    status,
     launchLine: launchCall.line,
     ...(asyncLaunch && { asyncLaunch }),
     ...(returnedChars !== undefined && { returnedChars }),

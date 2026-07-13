@@ -344,6 +344,42 @@ async function findCodexRef(sessionId: string): Promise<CodexSessionFileRef | un
 }
 
 /**
+ * Last on-disk activity for a Codex session — the rollout file's own mtime,
+ * plus every child sub-agent rollout's mtime IF this session has any (a
+ * parent session is still "live" while a sub-agent it spawned keeps writing,
+ * same rationale as Claude's sidecar mtimes in `getClaudeLastActivityAt`).
+ * Child refs come from `listCodexAnalyzed`'s already-cached pool (mtime-keyed
+ * via `analyzeCodexCached`) — the SAME pool `getCodexSession` builds its
+ * forest from, so this reuses cheap, already-resolved data rather than
+ * issuing extra stats per child. Never throws — a stat/lookup failure
+ * degrades to `undefined` rather than failing the whole detail request.
+ */
+export async function getCodexLastActivityAt(sessionId: string): Promise<string | undefined> {
+  const pool = await listCodexAnalyzed();
+  const found = pool.find((p) => p.analysis.sessionId === sessionId);
+  if (found === undefined) return undefined;
+  try {
+    const forest = buildCodexSubagentForest(
+      pool.map((p) => p.analysis),
+      sessionId,
+    );
+    const refBySessionId = new Map(pool.map((p) => [p.analysis.sessionId, p.ref] as const));
+    let latestMs = found.ref.mtimeMs;
+    const visit = (nodes: readonly SubagentNode[]) => {
+      for (const node of nodes) {
+        const childRef = refBySessionId.get(node.agentId);
+        if (childRef !== undefined && childRef.mtimeMs > latestMs) latestMs = childRef.mtimeMs;
+        visit(node.children);
+      }
+    };
+    visit(forest);
+    return new Date(latestMs).toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * `CodexSessionAnalysis` plus its sub-agent tree — Claude parity: putting
  * `subagents`/`subagentCount` directly on the analysis mirrors
  * `ClaudeSessionAnalysis` (see `@junrei/core`'s `analyze.ts`), so the web's
