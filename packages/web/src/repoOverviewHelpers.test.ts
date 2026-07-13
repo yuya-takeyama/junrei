@@ -41,7 +41,7 @@ describe("topModelShare", () => {
         },
       ],
     });
-    expect(result?.shortLabel).toBe("fable");
+    expect(result?.shortLabel).toBe("fable 5");
   });
 
   it("ignores unpriced models when picking the top one", () => {

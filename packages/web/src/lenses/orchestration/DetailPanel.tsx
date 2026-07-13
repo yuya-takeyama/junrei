@@ -45,7 +45,7 @@ function ModelBreakdown({ models }: { models: readonly ModelUsageSummary[] }) {
       </div>
       {models.map((m) => (
         <div className="mbk" key={m.model}>
-          <span className="fx ac gap6">
+          <span className="fx ac gap6" title={m.model}>
             <span className={`mdot c-${classifyModel(m.model)}`} />
             <span className="mono fs11">{modelShortLabel(m.model)}</span>
           </span>

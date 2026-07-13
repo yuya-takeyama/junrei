@@ -409,6 +409,21 @@ a.l0g:hover {
 .c-h {
   background: var(--h);
 }
+.c-sol {
+  background: var(--sol);
+}
+.c-terra {
+  background: var(--terra);
+}
+.c-luna {
+  background: var(--luna);
+}
+.c-rev {
+  background: var(--rev);
+}
+.c-gpt {
+  background: var(--gpt);
+}
 .c-mut {
   background: var(--mut);
 }
@@ -496,7 +511,9 @@ a.l0g:hover {
   border-radius: 3px;
 }
 .bn {
-  width: 52px;
+  /* Fits derived GPT/Codex labels like "gpt-5.3-codex"; longer ids ellipsize
+     and carry the raw id as a tooltip. */
+  width: 104px;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--mut);

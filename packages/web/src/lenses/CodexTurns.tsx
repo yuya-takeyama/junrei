@@ -101,7 +101,7 @@ export function CodexTurns({ session }: Props) {
                 style={{ gridTemplateColumns: "36px 1fr 96px 72px repeat(4, 84px)" }}
               >
                 <span className="mono fs11 mut">{i + 1}</span>
-                <span className="fx ac gap6">
+                <span className="fx ac gap6" title={turn.model}>
                   {turn.model !== undefined ? (
                     <>
                       <span className={`mdot c-${classifyModel(turn.model)}`} />

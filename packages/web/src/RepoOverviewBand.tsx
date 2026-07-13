@@ -78,7 +78,9 @@ export function RepoOverviewBand({ repo }: Props) {
       </div>
       <div className="rob-cell">
         <div className="lbl">Top model</div>
-        <div className="big mt8">{topModel?.shortLabel ?? "—"}</div>
+        <div className="big mt8 nowrap" title={topModel?.model}>
+          {topModel?.shortLabel ?? "—"}
+        </div>
         <div className="sub">
           {topModel !== undefined
             ? `${String(topModel.pct)}% of cost · ${formatUsd(topModel.costUsd)}`

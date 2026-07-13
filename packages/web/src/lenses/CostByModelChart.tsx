@@ -51,7 +51,9 @@ export function CostByModelChart({ session }: Props) {
               const pct = totalCost > 0 ? Math.round((cost / totalCost) * 100) : 0;
               return (
                 <div className="brow" key={m.model}>
-                  <span className="bn">{modelShortLabel(m.model)}</span>
+                  <span className="bn" title={m.model}>
+                    {modelShortLabel(m.model)}
+                  </span>
                   <div className="btrk" style={{ borderRadius: 0 }}>
                     <div
                       className={`bfill c-${classifyModel(m.model)}`}

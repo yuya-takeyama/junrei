@@ -3,7 +3,7 @@ import { classifyModel, modelShortLabel } from "../../modelClass.js";
 
 function Badge({ model }: { model: string }) {
   return (
-    <span className="mbdg">
+    <span className="mbdg" title={model}>
       <span className={`mdot c-${classifyModel(model)}`} />
       {modelShortLabel(model)}
     </span>

@@ -51,7 +51,7 @@ export function CostByModelTable({ session }: Props) {
         <>
           {rows.map((m) => (
             <div className="cmg" key={m.model}>
-              <span className="fx ac gap6">
+              <span className="fx ac gap6" title={m.model}>
                 <span className={`mdot c-${classifyModel(m.model)}`} />
                 <span className="mono fs11">{modelShortLabel(m.model)}</span>
               </span>
