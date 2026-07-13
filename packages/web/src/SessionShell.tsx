@@ -245,7 +245,7 @@ export function SessionShell({ source }: Props) {
           </div>
         )}
         {error === null && session !== null && lens === "overview" && (
-          <Overview session={session} />
+          <Overview session={session} sessionRef={ref} />
         )}
         {error === null && session !== null && lens === "timeline" && (
           <Timeline

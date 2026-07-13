@@ -204,6 +204,7 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
                   key={`${entry.kind}-${entry.line}-${String(i)}`}
                   entry={entry}
                   sessionRef={sessionRef}
+                  agent={agent}
                   expanded={expandedLines.has(entry.line)}
                   onToggleExpand={onToggleExpand}
                   registerRef={registerRef}

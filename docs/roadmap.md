@@ -130,6 +130,11 @@ extract — so the missing signals shipped as one same-day PR series instead.
   transcripts to fill the requested page (file-birthtime start proxy picks
   the candidates), so first paint stops parsing every session on disk; web
   list loads 50/page (was 200 in one shot) with a `?page=` pager — this PR
+- ✅ Full-text expansion for truncated prompts — Timeline's truncated
+  user/assistant-text/thinking blocks (700-char cap) get an inline "show
+  full text" toggle, and the Overview/agent-detail first-prompt strip
+  (500-char preview) fetches the untruncated text on first expand; both
+  lazily fetch via the existing record API and cache the result — this PR
 
 ## Codex CLI sessions
 
