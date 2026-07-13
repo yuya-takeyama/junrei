@@ -39,12 +39,17 @@ describe("Claude Code timeline + record routes", () => {
         source?: string;
         delegation?: { main: { tokens: number }; subagents: { tokens: number } };
       };
+      lastActivityAt?: string;
     };
     expect(body.analysis.sessionId).toBe(SESSION_ID);
     expect(body.analysis.source).toBe("claude-code");
     // The fixture session has one subagent — both slices carry real tokens.
     expect(body.analysis.delegation?.main.tokens).toBeGreaterThan(0);
     expect(body.analysis.delegation?.subagents.tokens).toBeGreaterThan(0);
+    // Computed fresh per request from the fixture files' real mtimes — never
+    // baked into the cached `analysis` object (see `getClaudeLastActivityAt`).
+    expect(typeof body.lastActivityAt).toBe("string");
+    expect(Number.isNaN(Date.parse(body.lastActivityAt ?? ""))).toBe(false);
   });
 
   it("GET /api/sessions/claude-code/:project/:id/timeline returns ordered entries", async () => {
@@ -241,6 +246,7 @@ describe("Codex routes", () => {
         sessionId: string;
         delegation?: { subagents: { tokens: number; outputTokens: number; costUsd?: number } };
       };
+      lastActivityAt?: string;
     };
     expect(body.analysis.source).toBe("codex");
     expect(body.analysis.sessionId).toBe(CODEX_SESSION_ID);
@@ -251,6 +257,9 @@ describe("Codex routes", () => {
       costUsd: 0,
       messageCount: 0,
     });
+    // Computed fresh per request from the rollout file's real mtime.
+    expect(typeof body.lastActivityAt).toBe("string");
+    expect(Number.isNaN(Date.parse(body.lastActivityAt ?? ""))).toBe(false);
   });
 
   it("GET /api/sessions/codex/:id 404s for an unknown id", async () => {

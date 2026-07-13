@@ -87,6 +87,7 @@ describe("buildCodexSubagentForest", () => {
     expect(childNode.returnedChars).toBeUndefined();
     expect(childNode.returnedPreview).toBeUndefined();
     expect(childNode.asyncLaunch).toBeUndefined();
+    expect(childNode.status).toBeUndefined();
   });
 
   it("falls back to recursion depth for spawnDepth when session_meta carried none (grandchild)", async () => {

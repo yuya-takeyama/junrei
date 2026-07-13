@@ -96,9 +96,12 @@ export function buildCodexSubagentForest(
       ...(spawnRecord?.timestamp !== undefined &&
         spawnRecord.timestamp !== analysis.startedAt && { launchedAt: spawnRecord.timestamp }),
       spawnedBy,
-      // No Codex equivalent of a parent-side tool_result to measure — these
-      // stay honestly undefined rather than fabricated:
-      // returnedChars/returnedPreview/asyncLaunch.
+      // No Codex equivalent of a parent-side tool_result (or a background
+      // task-notification) to measure — these stay honestly undefined rather
+      // than fabricated: returnedChars/returnedPreview/asyncLaunch/status
+      // (see `SubagentStatus`'s doc comment — Codex has no completion
+      // evidence source to read, so the Orchestration lens's Status column
+      // renders "—" for every Codex node rather than guessing from timing).
     };
   };
 

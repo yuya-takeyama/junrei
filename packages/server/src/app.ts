@@ -6,6 +6,8 @@ import {
   claudeAdapter,
   codexAdapter,
   getAgentSession,
+  getClaudeLastActivityAt,
+  getCodexLastActivityAt,
   listSessions,
   MAX_LIST_LIMIT,
   type SessionSourceFilter,
@@ -63,14 +65,20 @@ export function createApp() {
       // unprefixed routes this replaces — there's no registration-order
       // collision to guard against.
       .get("/api/sessions/claude-code/:project/:id", async (c) => {
-        const analysis = await claudeAdapter.getDetail({
-          project: c.req.param("project"),
-          id: c.req.param("id"),
-        });
+        const project = c.req.param("project");
+        const id = c.req.param("id");
+        // `lastActivityAt` is computed fresh per request (never baked into the
+        // mtime-cached `analysis` object — see `getClaudeLastActivityAt`'s doc
+        // comment) so it always reflects the CURRENT filesystem state, even
+        // when `analysis` itself is served from cache.
+        const [analysis, lastActivityAt] = await Promise.all([
+          claudeAdapter.getDetail({ project, id }),
+          getClaudeLastActivityAt(project, id),
+        ]);
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
-        return c.json({ analysis });
+        return c.json({ analysis, lastActivityAt });
       })
       .get("/api/sessions/claude-code/:project/:id/timeline", async (c) => {
         const entries = await claudeAdapter.getTimeline(
@@ -112,11 +120,15 @@ export function createApp() {
         return c.json({ analysis });
       })
       .get("/api/sessions/codex/:id", async (c) => {
-        const analysis = await codexAdapter.getDetail({ id: c.req.param("id") });
+        const id = c.req.param("id");
+        const [analysis, lastActivityAt] = await Promise.all([
+          codexAdapter.getDetail({ id }),
+          getCodexLastActivityAt(id),
+        ]);
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
-        return c.json({ analysis });
+        return c.json({ analysis, lastActivityAt });
       })
       .get("/api/sessions/codex/:id/timeline", async (c) => {
         const entries = await codexAdapter.getTimeline({ id: c.req.param("id") });

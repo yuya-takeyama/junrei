@@ -17,7 +17,28 @@ export function formatDurationCompact(ms: number): string {
   return `${seconds}s`;
 }
 
-/** "self/total" cost cell, e.g. "$0.94/$0.94", "$17.29/$23.41". */
-export function formatCostPair(self: number, total: number): string {
-  return `$${self.toFixed(2)}/$${total.toFixed(2)}`;
+/**
+ * "$X.XX" cost cell — always 2 decimals, unlike the shared `formatUsd` in
+ * ../../format.ts (which drops to 0 decimals at $100+ for the L1 stat tiles).
+ * The Orchestration lens's dense `.tn` table keeps 2 decimals at every
+ * magnitude, matching what the retired `formatCostPair` rendered for its
+ * self/total pair.
+ */
+export function formatCostCell(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+/**
+ * Percent-of-session-total cost share cell, e.g. "34%", "<1%", "—" — the
+ * `.tn` table's "%" column. `share` is the 0..1 fraction `costShare` (in
+ * agentTree.ts) computes; `undefined` (no priced session total to divide by)
+ * renders as "—". A nonzero share that rounds to 0% still reflects real
+ * spend, not nothing — flooring it to a bare "0%" would read as "this agent
+ * cost nothing", so it renders "<1%" instead.
+ */
+export function formatPctShare(share: number | undefined): string {
+  if (share === undefined) return "—";
+  const pct = share * 100;
+  if (pct > 0 && Math.round(pct) === 0) return "<1%";
+  return `${Math.round(pct)}%`;
 }

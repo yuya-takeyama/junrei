@@ -2,16 +2,19 @@ import type { AnySessionJson } from "../../api.js";
 import { formatTokens } from "../../format.js";
 import {
   activeModels,
+  costShare,
   flattenSubagents,
+  isSessionLive,
   MAIN_ID,
   nodeDurationMs,
+  nodeStatus,
   type SelectedId,
-  subtreeCost,
   totalTokensOf,
 } from "./agentTree.js";
 import { DetailPanel } from "./DetailPanel.js";
-import { formatCostPair, formatDurationCompact } from "./format.js";
+import { formatCostCell, formatDurationCompact, formatPctShare } from "./format.js";
 import { ModelBadges } from "./ModelBadges.js";
+import { StatusCell } from "./StatusCell.js";
 
 interface Props {
   session: AnySessionJson;
@@ -27,6 +30,10 @@ interface Props {
 export function TreeView({ session, selected, onSelect }: Props) {
   const rows = flattenSubagents(session.subagents);
   const mainModels = activeModels(session.usage.byModel);
+  // Computed once per render (not per row) — every row's Status cell reads
+  // off the SAME "is this session live right now" snapshot, so a render
+  // never shows two rows disagreeing about liveness a few ms apart.
+  const sessionLive = isSessionLive(session.lastActivityAt, Date.now());
 
   return (
     <div className="hpad fx gap16 mt16" style={{ alignItems: "flex-start" }}>
@@ -34,8 +41,10 @@ export function TreeView({ session, selected, onSelect }: Props) {
         <div className="tn hdr">
           <span className="lbl">Agent</span>
           <span className="lbl">Model</span>
+          <span className="lbl">Status</span>
           <span className="lbl cellr">Tokens · ↩ return</span>
-          <span className="lbl cellr">Cost s/t</span>
+          <span className="lbl cellr">Cost</span>
+          <span className="lbl cellr">%</span>
           <span className="lbl cellr">Dur</span>
         </div>
         <button
@@ -49,9 +58,14 @@ export function TreeView({ session, selected, onSelect }: Props) {
           ) : (
             <span className="mut fs11">—</span>
           )}
+          {/* The main transcript has no `SubagentNode.status` of its own (it
+              IS the session) — "run" while the session still looks live,
+              "done" once activity has gone quiet. */}
+          <StatusCell status={sessionLive ? "run" : "done"} />
           <span className="num fs11 cellr">{formatTokens(totalTokensOf(session.usage.total))}</span>
+          <span className="num fs11 cellr">{formatCostCell(session.usage.total.costUsd)}</span>
           <span className="num fs11 cellr">
-            {formatCostPair(session.usage.total.costUsd, session.totalUsage.costUsd)}
+            {formatPctShare(costShare(session.usage.total.costUsd, session.totalUsage.costUsd))}
           </span>
           <span className="num fs11 cellr">
             {session.durationMs !== undefined ? formatDurationCompact(session.durationMs) : "—"}
@@ -65,6 +79,7 @@ export function TreeView({ session, selected, onSelect }: Props) {
               ? ` · ↩${formatTokens(row.node.returnedChars)}`
               : "";
           const models = activeModels(row.node.usage.byModel);
+          const share = costShare(row.node.usage.total.costUsd, session.totalUsage.costUsd);
           return (
             <button
               type="button"
@@ -97,13 +112,13 @@ export function TreeView({ session, selected, onSelect }: Props) {
               ) : (
                 <span className="mut fs11">—</span>
               )}
+              <StatusCell status={nodeStatus(row.node, sessionLive)} />
               <span className="num fs11 cellr">
                 {tokens}
                 {returned}
               </span>
-              <span className="num fs11 cellr">
-                {formatCostPair(row.node.usage.total.costUsd, subtreeCost(row.node))}
-              </span>
+              <span className="num fs11 cellr">{formatCostCell(row.node.usage.total.costUsd)}</span>
+              <span className="num fs11 cellr">{formatPctShare(share)}</span>
               <span className="num fs11 cellr">
                 {durationMs !== undefined ? formatDurationCompact(durationMs) : "—"}
               </span>
@@ -111,7 +126,7 @@ export function TreeView({ session, selected, onSelect }: Props) {
           );
         })}
       </div>
-      <DetailPanel session={session} selected={selected} />
+      <DetailPanel session={session} selected={selected} sessionLive={sessionLive} />
     </div>
   );
 }

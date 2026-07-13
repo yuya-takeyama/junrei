@@ -8,6 +8,26 @@
  */
 import type { UsageSummary } from "./metrics.js";
 
+/**
+ * Completion status for a subagent's launch, from EVIDENCE only — never
+ * guessed from timing:
+ *  - "completed"/"failed": a sync launch's parent-side `tool_result` resolved
+ *    (`result.isError` picks completed vs. failed), OR an async launch's
+ *    harness task-notification resolved (same join `computeTaskExecutions`
+ *    uses: launch toolUseId -> taskId -> last notification for that taskId).
+ *  - "unresolved": no completion evidence in the log at all — the launching
+ *    tool_use couldn't be matched, the sync result never arrived, or the
+ *    async notification never arrived (the task outlived the session, or is
+ *    still running).
+ *
+ * `endedAt` (the sidecar transcript's last record timestamp) is deliberately
+ * NEVER used as a completion signal here: a still-running agent's sidecar
+ * keeps getting appended to, so `endedAt` just tracks "most recent record
+ * observed so far", not "the agent finished". Only the two evidence sources
+ * above count.
+ */
+export type SubagentStatus = "completed" | "failed" | "unresolved";
+
 export interface SubagentNode {
   agentId: string;
   agentType?: string;
@@ -59,5 +79,7 @@ export interface SubagentNode {
   launchedAt?: string;
   /** "main" when launched directly from the main transcript, otherwise the parent subagent's `agentId`. */
   spawnedBy?: string;
+  /** See `SubagentStatus`'s doc comment for the evidence rules. Codex never sets this — no parent-side completion signal exists to read (see `codex/orchestration.ts`). */
+  status?: SubagentStatus;
   children: SubagentNode[];
 }

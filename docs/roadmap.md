@@ -142,6 +142,22 @@ extract — so the missing signals shipped as one same-day PR series instead.
   mtime-cached) as a title fallback on list items, session detail, and MCP
   (`JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR` overrides the store location) — this
   PR
+- ✅ Orchestration Tree view cost/status rework (2026-07-13): the old
+  self/subtree "Cost s/t" pair is gone, replaced by a self-cost-only "Cost"
+  column plus a new "%" column (each agent's share of the SESSION total, not
+  its own subtree); new "Status" column (run/done/fail/—). Status comes from
+  a new `SubagentNode.status` field, computed in `analyze.ts` from
+  completion EVIDENCE only — a sync launch's parent-side `tool_result`, or an
+  async launch's harness task-notification (same join `computeTaskExecutions`
+  already used, now shared via the exported `backgroundStatus`) —
+  deliberately never from `endedAt` (a still-running agent's sidecar keeps a
+  current `endedAt`, so it can't signal completion). Both session-detail
+  routes now also return `lastActivityAt` (max mtime across the main
+  transcript + every subagent sidecar for Claude, the rollout + child rollout
+  mtimes for Codex), computed fresh per request outside the mtime-keyed
+  analysis cache, so the web can infer "still running" (`isSessionLive`,
+  5-minute generous window) without a live socket. Codex nodes keep `status`
+  honestly undefined — no parent-side completion evidence exists to read
 
 ## Codex CLI sessions
 

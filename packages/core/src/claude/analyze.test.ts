@@ -134,6 +134,9 @@ describe("analyzeClaudeSession", () => {
     expect(agent?.returnedPreview).toBeUndefined();
     expect(agent?.startedAt).toBe("2026-07-09T01:02:32.000Z");
     expect(agent?.launchedAt).toBe("2026-07-09T01:02:05.000Z");
+    // Async status, resolved from the "aaaa111122223333f" task-notification
+    // (line 26, status "completed") — NOT from the ack-only tool_result.
+    expect(agent?.status).toBe("completed");
 
     // Total usage = main + subagent.
     expect(analysis.totalUsage.inputTokens).toBe(1805 + 155);
@@ -420,6 +423,8 @@ describe("analyzeClaudeSession with out-of-order tool results", () => {
     expect(agent?.returnedPreview).toBe("Both edits failed because the files were never read.");
     expect(agent?.spawnedBy).toBe("main");
     expect(agent?.launchLine).toBe(6);
+    // Sync status from the launching tool_result's isError (false here).
+    expect(agent?.status).toBe("completed");
   });
 });
 
@@ -444,6 +449,7 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
     expect(agent?.returnedPreview).toBe("The sync agent finished its work and returned this text.");
     expect(agent?.spawnedBy).toBe("main");
     expect(agent?.launchLine).toBe(4);
+    expect(agent?.status).toBe("completed");
   });
 
   it("recovers async-launch linkage and does NOT measure the ack as a return", async () => {
@@ -457,6 +463,10 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
     expect(agent?.returnedPreview).toBeUndefined();
     expect(agent?.spawnedBy).toBe("main");
     expect(agent?.launchLine).toBe(2);
+    // No task-notification exists anywhere in this fixture for taskId
+    // "dddd000011112222c" — an async launch with no completion evidence yet
+    // must read as "unresolved", never guessed as completed/failed.
+    expect(agent?.status).toBe("unresolved");
   });
 });
 

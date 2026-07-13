@@ -5,19 +5,25 @@ import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import { agentPath, sessionPath } from "../../router.js";
 import {
   activeModels,
+  costShare,
   displayName,
   findSubagent,
   MAIN_ID,
   nodeDurationMs,
+  nodeStatus,
   type SelectedId,
   spawnedByLabel,
   totalTokensOf,
 } from "./agentTree.js";
+import { formatPctShare } from "./format.js";
 import { ModelBadges } from "./ModelBadges.js";
+import { StatusCell } from "./StatusCell.js";
 
 interface Props {
   session: AnySessionJson;
   selected: SelectedId;
+  /** See `TreeView`'s doc comment — computed once per render there, threaded down so the Status row and Cost share here read off the same snapshot as the tree cells. */
+  sessionLive: boolean;
 }
 
 /**
@@ -52,7 +58,7 @@ function ModelBreakdown({ models }: { models: readonly ModelUsageSummary[] }) {
   );
 }
 
-function MainDetail({ session }: { session: AnySessionJson }) {
+function MainDetail({ session, sessionLive }: { session: AnySessionJson; sessionLive: boolean }) {
   const models = activeModels(session.usage.byModel);
   // Claude: per-tool-call stats (toolStats). Codex has no such breakdown —
   // codex.toolCallCount/toolErrorCount already covers the whole main turn.
@@ -64,6 +70,7 @@ function MainDetail({ session }: { session: AnySessionJson }) {
     session.source === "claude-code"
       ? session.toolStats.reduce((sum, s) => sum + s.errorCount, 0)
       : session.codex.toolErrorCount;
+  const mainShare = costShare(session.usage.total.costUsd, session.totalUsage.costUsd);
 
   return (
     <>
@@ -80,10 +87,21 @@ function MainDetail({ session }: { session: AnySessionJson }) {
         <span className="lbl">Tokens</span>
         <span className="num fs12">{totalTokensOf(session.usage.total).toLocaleString()}</span>
         <span className="lbl">Cost</span>
-        <span className="num fs12">{formatUsd(session.usage.total.costUsd)}</span>
+        <span className="num fs12">
+          {formatUsd(session.usage.total.costUsd)}
+          {mainShare !== undefined && (
+            <span className="mut"> · {formatPctShare(mainShare)} of session</span>
+          )}
+        </span>
         <span className="lbl">Duration</span>
         <span className="num fs12">
           {session.durationMs !== undefined ? formatDuration(session.durationMs) : "—"}
+        </span>
+        <span className="lbl">Status</span>
+        <span className="num fs12">
+          {/* Same rule as the tree's main row: the root has no launch-side
+              completion evidence, so liveness alone decides run vs done. */}
+          <StatusCell status={sessionLive ? "run" : "done"} />
         </span>
         <span className="lbl">Tool calls</span>
         <span className="num fs12">
@@ -100,9 +118,18 @@ function MainDetail({ session }: { session: AnySessionJson }) {
   );
 }
 
-function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySessionJson }) {
+function AgentDetail({
+  node,
+  session,
+  sessionLive,
+}: {
+  node: SubagentNodeJson;
+  session: AnySessionJson;
+  sessionLive: boolean;
+}) {
   const durationMs = nodeDurationMs(node);
   const models = activeModels(node.usage.byModel);
+  const nodeShare = costShare(node.usage.total.costUsd, session.totalUsage.costUsd);
   const spawnedAt = node.launchedAt ?? node.startedAt;
   const spawnMeta = [
     `spawned by ${spawnedByLabel(node, session.subagents)}`,
@@ -139,10 +166,19 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySe
         <span className="lbl">Tokens</span>
         <span className="num fs12">{totalTokensOf(node.usage.total).toLocaleString()}</span>
         <span className="lbl">Cost</span>
-        <span className="num fs12">{formatUsd(node.usage.total.costUsd)}</span>
+        <span className="num fs12">
+          {formatUsd(node.usage.total.costUsd)}
+          {nodeShare !== undefined && (
+            <span className="mut"> · {formatPctShare(nodeShare)} of session</span>
+          )}
+        </span>
         <span className="lbl">Duration</span>
         <span className="num fs12">
           {durationMs !== undefined ? formatDuration(durationMs) : "—"}
+        </span>
+        <span className="lbl">Status</span>
+        <span className="num fs12">
+          <StatusCell status={nodeStatus(node, sessionLive)} />
         </span>
         <span className="lbl">Returned</span>
         <span className="num fs12">
@@ -182,7 +218,7 @@ function AgentDetail({ node, session }: { node: SubagentNodeJson; session: AnySe
  * selected subagent's launch/usage detail. See
  * design-spec/13-orchestration.md's selected-agent panel.
  */
-export function DetailPanel({ session, selected }: Props) {
+export function DetailPanel({ session, selected, sessionLive }: Props) {
   const node = selected === MAIN_ID ? undefined : findSubagent(session.subagents, selected);
   return (
     <div
@@ -190,9 +226,9 @@ export function DetailPanel({ session, selected }: Props) {
       style={{ width: "400px", flex: "none", padding: "18px 20px", boxSizing: "border-box" }}
     >
       {node === undefined ? (
-        <MainDetail session={session} />
+        <MainDetail session={session} sessionLive={sessionLive} />
       ) : (
-        <AgentDetail node={node} session={session} />
+        <AgentDetail node={node} session={session} sessionLive={sessionLive} />
       )}
     </div>
   );
