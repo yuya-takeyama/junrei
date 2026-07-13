@@ -295,7 +295,25 @@ extract — so the missing signals shipped as one same-day PR series instead.
   unambiguous); a longer legacy URL (explicit lens, or the agent-drilldown
   route) falls through to react-router's catch-all, which strips the
   `:project` segment and redirects — this PR
-- ⬜ Fork lineage (`forked_from_id`): parsed and retained on
+- ✅ Nested agent drill-down for Codex sub-agents, matching Claude Code's URL/
+  breadcrumb shape: new `session/codex/:id/agent/:agentId/:lens?` route
+  (`CODEX_AGENT_ROUTE_PATH`), `agentPath`/`agentRecordPath` generalized to
+  take a `SessionRef`, and `AgentShell` takes a `source` prop like
+  `SessionShell`. A Codex agent page fetches the parent session (breadcrumb
+  chain via `findAgentPath`, "% of session", tree-node launch metadata) plus
+  the sub-agent's own session analysis (`fetchSessionDetail` on the agent id
+  — a Codex sub-agent is a full session, so timeline/records/launch-prompt
+  fetches are all keyed by its own session id, no `agent` param). Source
+  asymmetries in the agent KPI strip mirror the session `StatStrip` (Turns
+  cell instead of API msgs, `EstBadge` on cost, honest "return not in log"
+  copy — Codex rollouts capture no parent-side return). Codex agent pages
+  additionally get the real Orchestration lens (their own analysis carries a
+  `subagents` forest, so nesting stays visible at any depth) and the
+  Codex-only Turns lens. Orchestration's "open full detail →" now links both
+  sources to the nested agent route instead of sending Codex to the
+  sub-agent's own top-level session page (that page still works for deep
+  links, unchanged). No server changes — `getCodexSession` already resolved
+  any session id with its own descendant forest — this PR
   `CodexSessionExtras.forkedFromId`, but not yet surfaced in any lens — no
   fork-tree UI exists, unlike the sub-agent forest above
 - ⬜ Legacy-format rollout support: pre-2026-02-25 Codex transcripts parse as

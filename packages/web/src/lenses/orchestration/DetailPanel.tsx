@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import type { AnySessionJson, ModelUsageSummary, SubagentNodeJson } from "../../api.js";
 import { formatDuration, formatTime, formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
-import { agentPath, sessionPath } from "../../router.js";
+import { agentPath, sessionRefOf } from "../../router.js";
 import {
   activeModels,
   costShare,
@@ -138,15 +138,11 @@ function AgentDetail({
   ]
     .filter((p): p is string => p !== undefined)
     .join(" · ");
-  // Claude subagents get their own dedicated shell (agent/:agentId — a
-  // sidecar transcript, not a session in its own right). A Codex sub-agent
-  // IS a full session (its own rollout file), so its "full detail" is just
-  // its own session page — `sessionPath({source: "codex", id: agentId})` —
-  // rather than a separate agent route.
-  const detailHref =
-    session.source === "claude-code"
-      ? agentPath(session.sessionId, node.agentId)
-      : sessionPath({ source: "codex", id: node.agentId });
+  // Both sources get the same nested agent shell (agent/:agentId under the
+  // session being viewed) — breadcrumb and URL keep the node's place in this
+  // tree, instead of a Codex sub-agent escaping to its own top-level session
+  // page and losing the parent chain (see AgentShell.tsx).
+  const detailHref = agentPath(sessionRefOf(session), node.agentId);
 
   return (
     <>

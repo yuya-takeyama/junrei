@@ -9,8 +9,8 @@ import type { AnySessionJson, SessionListItem } from "./api.js";
  *
  * Only covers capabilities that were previously expressed as inline
  * `session.source === ...` conditionals in more than one place, or whose
- * name clarifies non-obvious asymmetry (Codex's estimated-cost marker,
- * Claude's agent-detail route). Purely local one-off branches (e.g.
+ * name clarifies non-obvious asymmetry (Codex's estimated-cost marker).
+ * Purely local one-off branches (e.g.
  * `SessionShell`'s "turns" lens gate, which already reads `CODEX_LENSES`)
  * are left as direct `source` checks — routing them through this module too
  * would just be indirection with no shared meaning.
@@ -26,8 +26,6 @@ export interface SourceCaps {
   hasApiErrors: boolean;
   /** Per-turn cache-write cost composition chart — Claude only (Codex has no cache-write cost). */
   hasTurnCompositionChart: boolean;
-  /** Dedicated subagent sidecar detail route (`agent/:agentId`) — Claude only; a Codex sub-agent is its own full session instead. */
-  hasAgentDetailRoute: boolean;
   /** True when the session's cost is a Codex API-list-price estimate rather than a billed Claude Code amount. */
   costIsEstimated: boolean;
 }
@@ -38,7 +36,6 @@ const CLAUDE_CAPS: SourceCaps = {
   hasTaskExecutions: true,
   hasApiErrors: true,
   hasTurnCompositionChart: true,
-  hasAgentDetailRoute: true,
   costIsEstimated: false,
 };
 
@@ -48,7 +45,6 @@ const CODEX_CAPS: SourceCaps = {
   hasTaskExecutions: false,
   hasApiErrors: false,
   hasTurnCompositionChart: false,
-  hasAgentDetailRoute: false,
   costIsEstimated: true,
 };
 
