@@ -103,4 +103,17 @@ describe("findModelPricing (OpenAI Codex model ids)", () => {
       expect(pricing?.output_cost_per_token).toBeGreaterThan(0);
     }
   });
+
+  it("prices codex-auto-review (Codex's auto-review turns) at gpt-5.4 rates", () => {
+    // Codex rollouts stamp `turn_context.model: "codex-auto-review"` on
+    // auto-review ("guardian") turns. LiteLLM has no key for that slug, so
+    // update-pricing.mjs aliases it to gpt-5.4 — the model OpenAI documents
+    // the feature as running (https://alignment.openai.com/auto-review/) and
+    // bills API-key usage under. Without this entry those turns silently
+    // summed as $0.00 with costIsComplete=false.
+    const pricing = findModelPricing("codex-auto-review");
+    expect(pricing).toBeDefined();
+    expect(pricing).toEqual(findModelPricing("gpt-5.4"));
+    expect(estimateCostUsd("codex-auto-review", USAGE)).toBeGreaterThan(0);
+  });
 });
