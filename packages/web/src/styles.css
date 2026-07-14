@@ -626,16 +626,17 @@ a.l0g:hover {
   gap: 10px;
   font-size: 11px;
 }
-/* Tool headers carry wrappable inline command text; keep the caret, label,
-   and source-line button on the first text line instead of the wrapped
-   block's vertical center. */
+/* Tool headers stack label row + command line inside the toggle button;
+   keep the source-line button on the header's first line, not the
+   stacked block's vertical center. */
 .bhd-top {
   align-items: baseline;
 }
 button.tool-hd {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   min-width: 0;
   flex: 1;
   background: transparent;
@@ -645,6 +646,12 @@ button.tool-hd {
   font: inherit;
   color: inherit;
   cursor: pointer;
+}
+.tool-hd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 .btxt {
   font-size: 13px;

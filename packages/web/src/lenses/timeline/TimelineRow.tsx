@@ -188,18 +188,20 @@ function ToolBlock({
           onClick={() => onToggleExpand(entry.line)}
           aria-expanded={expanded}
         >
-          <span className={isError ? "errtx" : expanded ? "amb" : "mut"}>
-            {expanded ? "▾" : "▸"}
-          </span>
-          <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
-            {isError ? "Tool · error" : "Tool"}
+          <span className="tool-hd-row">
+            <span className={isError ? "errtx" : expanded ? "amb" : "mut"}>
+              {expanded ? "▾" : "▸"}
+            </span>
+            <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
+              {isError ? "Tool · error" : "Tool"}
+            </span>
+            {meta !== undefined && (
+              <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
+            )}
           </span>
           <span className="mono fs12">
             {entry.name} {entry.inputSummary}
           </span>
-          {meta !== undefined && (
-            <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
-          )}
         </button>
         <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>
