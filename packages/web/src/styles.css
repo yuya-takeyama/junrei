@@ -626,9 +626,15 @@ a.l0g:hover {
   gap: 10px;
   font-size: 11px;
 }
+/* Tool headers carry wrappable inline command text; keep the caret, label,
+   and source-line button on the first text line instead of the wrapped
+   block's vertical center. */
+.bhd-top {
+  align-items: baseline;
+}
 button.tool-hd {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
   min-width: 0;
   flex: 1;

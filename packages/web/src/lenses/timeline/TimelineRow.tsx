@@ -181,7 +181,7 @@ function ToolBlock({
 
   return (
     <div className="blk" style={isError ? { borderColor: "var(--err)" } : undefined}>
-      <div className="bhd">
+      <div className="bhd bhd-top">
         <button
           type="button"
           className="tool-hd"
