@@ -97,7 +97,9 @@ const TURN_COLUMNS: readonly TurnColumn[] = [
     label: "Reasoning",
     width: "82px",
     render: (g) => (g.reasoningTokens !== undefined ? formatTokens(g.reasoningTokens) : EM_DASH),
-    className: STAT,
+    // Zero-reasoning turns read as muted — matches the old (pre-unification)
+    // Codex Turns table, which dimmed the cell rather than showing a bare 0.
+    className: (g) => (g.reasoningTokens === 0 ? "stat mut" : "stat"),
     present: (groups) => groups.some((g) => g.reasoningTokens !== undefined),
   },
   {

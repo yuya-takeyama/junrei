@@ -70,6 +70,24 @@ describe("visibleTurnColumns", () => {
   });
 });
 
+describe("reasoning column", () => {
+  function reasoningColumn(groups: readonly TurnGroup[]) {
+    const col = visibleTurnColumns(groups).find((c) => c.key === "reasoning");
+    if (col === undefined) throw new Error("reasoning column not present");
+    return col;
+  }
+
+  it("mutes the cell when reasoningTokens is exactly 0 (matches the old Codex Turns table)", () => {
+    const groups = [group({ reasoningTokens: 0 })];
+    expect(reasoningColumn(groups).className(groups[0] as TurnGroup, false)).toBe("stat mut");
+  });
+
+  it("does not mute a non-zero reasoning cell", () => {
+    const groups = [group({ reasoningTokens: 120 })];
+    expect(reasoningColumn(groups).className(groups[0] as TurnGroup, false)).toBe("stat");
+  });
+});
+
 describe("turnGridTemplate", () => {
   it("matches the Claude-full-presence template exactly (no visual change from the prior fixed grid)", () => {
     const groups = [group({ stepCount: 1, cacheCreationTokens: 2, costUsd: 4 })];

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type AnySessionJson, fetchTimeline, type SessionRef, type TimelineEntry } from "../api.js";
 import { MiniMap } from "./timeline/MiniMap.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
+import { TurnMiniMap } from "./timeline/TurnMiniMap.js";
 import { TurnGroupHeaderRow, TurnRow } from "./timeline/TurnRow.js";
 import {
   type ChipState,
@@ -100,8 +101,21 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   const [turnOverrides, setTurnOverrides] = useState<ReadonlySet<number>>(new Set());
   const [visibleCount, setVisibleCount] = useState(CHUNK_SIZE);
   const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
+  // Mirrors `pendingScrollLine`, but for a turn header's `anchorLine` rather
+  // than an entry's own line — see `handleTurnMiniMapSelect` below.
+  const [pendingScrollTurnLine, setPendingScrollTurnLine] = useState<number | null>(null);
 
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
+  // Turn header buttons, keyed by `anchorLine` — always mounted regardless of
+  // expand state, unlike `rowRefs` above (entries only mount once their turn
+  // is expanded). This is what lets the turn-aware minimap scroll into a
+  // *collapsed* turn instead of silently no-op'ing (the Phase-1 gap).
+  const turnRowRefs = useRef(new Map<number, HTMLButtonElement>());
+  // The turn-grouped rows' own wrapper — the turn-aware minimap's viewport
+  // indicator measures this element's real rendered height (see
+  // TurnMiniMap.tsx), which changes as turns expand/collapse or "show more
+  // turns" loads another chunk. Unused (stays null) on the flat path.
+  const turnColumnRef = useRef<HTMLDivElement>(null);
   // Root wrapper (holds `--tctl-h`, read by `.exh` in styles.css) and the
   // controls bar whose real height feeds it — see the ResizeObserver effect
   // below.
@@ -194,6 +208,44 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
       setPendingScrollLine(null);
     }
   }, [pendingScrollLine]);
+
+  const registerTurnRef = useCallback((line: number, el: HTMLButtonElement | null) => {
+    if (el === null) turnRowRefs.current.delete(line);
+    else turnRowRefs.current.set(line, el);
+  }, []);
+
+  // Mirrors `handleMiniMapSelect` above for the turn-aware minimap: a turn
+  // not yet in the rendered chunk gets pulled in (budgeted by
+  // `turnsUpToBudget` so the boundary still lands on a whole turn, not
+  // mid-turn) before scrolling, once its header mounts.
+  const handleTurnMiniMapSelect = useCallback(
+    (anchorLine: number) => {
+      const groupIndex = turnGroups.findIndex((g) => g.anchorLine === anchorLine);
+      if (groupIndex === -1) return;
+      const visibleTurns = turnsUpToBudget(turnGroups, visibleCount);
+      if (groupIndex >= visibleTurns) {
+        const entriesThroughTarget = turnGroups
+          .slice(0, groupIndex + 1)
+          .reduce((sum, g) => sum + g.entries.length, 0);
+        setVisibleCount((v) => Math.max(v, entriesThroughTarget));
+        setPendingScrollTurnLine(anchorLine);
+      } else {
+        turnRowRefs.current
+          .get(anchorLine)
+          ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    },
+    [turnGroups, visibleCount],
+  );
+
+  useEffect(() => {
+    if (pendingScrollTurnLine === null) return;
+    const el = turnRowRefs.current.get(pendingScrollTurnLine);
+    if (el !== undefined) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      setPendingScrollTurnLine(null);
+    }
+  }, [pendingScrollTurnLine]);
 
   // "turns" is only ever offered when the turn-grouped path is active — the
   // flat (Codex / subagent) path keeps its pre-existing 3-stop dial exactly
@@ -366,7 +418,11 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
         {/* Turn-grouped rows form a dense table (flush `.trow`s, separated only
             by their own border-bottom, like `.cmg`/`.tn` elsewhere) — no inter-row
             gap, unlike the flat path's spaced-out `.tlrow` blocks. */}
-        <div className="col f1" style={{ gap: turnGroupable ? 0 : "10px", minWidth: 0 }}>
+        <div
+          className="col f1"
+          style={{ gap: turnGroupable ? 0 : "10px", minWidth: 0 }}
+          ref={turnGroupable ? turnColumnRef : undefined}
+        >
           {turnGroupable ? (
             <>
               <TurnGroupHeaderRow columns={turnColumns} gridTemplate={turnGridTemplateColumns} />
@@ -393,6 +449,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
                       expanded={expanded}
                       isOutlier={isOutlier}
                       onToggle={toggleTurn}
+                      registerRef={registerTurnRef}
                     />
                     {collapsedCompactions.map((entry, i) => (
                       <TimelineRow
@@ -476,7 +533,16 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
             </>
           )}
         </div>
-        <MiniMap entries={filteredEntries} onSelect={handleMiniMapSelect} />
+        {turnGroupable ? (
+          <TurnMiniMap
+            groups={turnGroups}
+            totalCostUsd={totalTurnCostUsd}
+            containerRef={turnColumnRef}
+            onSelectTurn={handleTurnMiniMapSelect}
+          />
+        ) : (
+          <MiniMap entries={filteredEntries} onSelect={handleMiniMapSelect} />
+        )}
       </div>
     </div>
   );

@@ -482,8 +482,16 @@ the events underneath, in place. Six phases, static mock in
    Codex-only role/nickname/session-total-reasoning meta chips `CodexTurns`
    used to show had no other home and were dropped rather than ported
    (origin/CLI version were already duplicated in the session header).
-3. ⬜ Mini-map rewrite: one tick per turn boundary, amber dashes for
-   compactions, tick spacing ∝ event count, click-to-scroll viewport box.
+3. ✅ Mini-map rewrite — this PR. `TurnMiniMap.tsx` replaces the flat rail for
+   grouped views only (flat/subagent views keep `MiniMap.tsx` unchanged): one
+   band per turn sized by entry count with a min-height clamp
+   (`layoutTurnBandHeights`, `turnMiniMapLayout.ts`), a tick per turn
+   boundary, amber outlier fill, amber dashed compaction marks, a thin error
+   edge, and an amber viewport box that tracks real DOM heights via
+   ResizeObserver + a throttled scroll listener (correct across
+   expand/collapse and chunk growth) and drags via pointer capture. Clicking
+   a band scrolls the turn's header into view even when collapsed, fixing
+   the Phase-1 gap.
 4. ⬜ Per-step (per-API-call) sub-rows inside an expanded turn — collapsed by
    default.
 5. ⬜ Long-turn elision — first/last 2 events always render, middle events

@@ -767,12 +767,58 @@ button.tool-hd {
 }
 
 /* ---------------------------------------------------------------------
-   Turn-grouped Timeline spine (Claude Code main transcript only) — the
-   dense turns table `.trg`/`.trow` renders collapsed by default; expanding
-   a turn (`.exh` header + `.ex` wrapper) reveals its `.tlrow` event rows
-   above, unchanged. See turnGroups.ts/TurnRow.tsx and docs/roadmap.md's
-   "Unified Timeline" phase 1.
+   Turn-grouped Timeline spine (Claude Code and Codex, whenever the session
+   carries per-turn data — see Timeline.tsx's `turnGroupable`) — the dense
+   turns table `.trg`/`.trow` renders collapsed by default; expanding a turn
+   (`.exh` header + `.ex` wrapper) reveals its `.tlrow` event rows above,
+   unchanged. See turnGroups.ts/TurnRow.tsx and docs/roadmap.md's "Unified
+   Timeline" phases 1-2.
    --------------------------------------------------------------------- */
+
+/* Turn-aware minimap (`TurnMiniMap.tsx`, phase 3) — reuses the flat rail's
+   `.mmap` shell but swaps in one band per turn. Band heights come from
+   `layoutTurnBandHeights` (TS), not flexbox growth like `.mmap-band` above,
+   since they need a real min-height clamp; the `+` selector below draws one
+   tick per turn boundary, naturally skipping the very first band. */
+.mmap-tband {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  background: var(--mut);
+  opacity: 0.3;
+}
+.mmap-tband + .mmap-tband {
+  border-top: 1px dotted var(--bd);
+}
+.mmap-tband-outlier {
+  background: var(--amb);
+  opacity: 0.4;
+}
+/* Thin edge rather than a full recolor — a turn can be an error AND an
+   outlier, and the two accents need to stay visually distinct at 16px wide. */
+.mmap-tband-error {
+  box-shadow: inset 2px 0 0 var(--err);
+}
+.mmap-tband-compaction {
+  border-bottom: 2px dashed var(--amb);
+}
+/* Amber viewport indicator — absolutely positioned within `.mmap` (already a
+   positioning context via `position: sticky`), top/height set inline from
+   real scroll measurements (see TurnMiniMap.tsx). */
+.mmap-vp {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 1px solid var(--amb);
+  cursor: grab;
+  touch-action: none;
+}
+.mmap-vp:active {
+  cursor: grabbing;
+}
 
 /* Sticky controls bar the expanded turn header (`.exh`) parks below — see
    `--tctl-h` on `.exh`. Only applied in the turn-grouped path; the flat
