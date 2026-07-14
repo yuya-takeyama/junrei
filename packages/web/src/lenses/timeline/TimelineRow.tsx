@@ -181,22 +181,24 @@ function ToolBlock({
 
   return (
     <div className="blk" style={isError ? { borderColor: "var(--err)" } : undefined}>
-      <div className="bhd">
+      <div className="bhd bhd-top">
         <button
           type="button"
           className="tool-hd"
           onClick={() => onToggleExpand(entry.line)}
           aria-expanded={expanded}
         >
-          <span className={isError ? "errtx" : expanded ? "amb" : "mut"}>
-            {expanded ? "▾" : "▸"}
+          <span className="tool-hd-row">
+            <span className={isError ? "errtx" : expanded ? "amb" : "mut"}>
+              {expanded ? "▾" : "▸"}
+            </span>
+            <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
+              {isError ? `Tool: ${entry.name} · error` : `Tool: ${entry.name}`}
+            </span>
           </span>
-          <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
-            {isError ? "Tool · error" : "Tool"}
-          </span>
-          <span className="mono fs12">
-            {entry.name} {entry.inputSummary}
-          </span>
+          {entry.inputSummary !== "" && (
+            <span className="tool-args mono fs12">{entry.inputSummary}</span>
+          )}
           {meta !== undefined && (
             <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
           )}
