@@ -10,7 +10,6 @@ import {
   type SubagentNodeJson,
 } from "./api.js";
 import { cacheHitRate, formatDuration, formatTime, formatTokens, formatUsd } from "./format.js";
-import { CodexTurns } from "./lenses/CodexTurns.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
@@ -333,8 +332,7 @@ interface Props {
  * own — its analysis, timeline, and records are all fetched by its own
  * session id (`agentScopedRef`), no agent param anywhere. Codex agents also
  * get the real Orchestration lens (their own analysis carries a `subagents`
- * forest, so nested delegation is visible at any depth) and the Codex-only
- * "turns" lens, matching the Codex session shell's tab lineup.
+ * forest, so nested delegation is visible at any depth).
  */
 export function AgentShell({ source }: Props) {
   const {
@@ -501,11 +499,6 @@ export function AgentShell({ source }: Props) {
               </div>
             </div>
           ))}
-        {session !== null &&
-          agent !== null &&
-          node !== undefined &&
-          agent.source === "codex" &&
-          lens === "turns" && <CodexTurns session={agent} />}
       </div>
       {record !== undefined && (
         <RecordDetail

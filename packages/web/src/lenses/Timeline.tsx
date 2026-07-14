@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { fetchTimeline, type SessionJson, type SessionRef, type TimelineEntry } from "../api.js";
+import { type AnySessionJson, fetchTimeline, type SessionRef, type TimelineEntry } from "../api.js";
 import { MiniMap } from "./timeline/MiniMap.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
 import { TurnGroupHeaderRow, TurnRow } from "./timeline/TurnRow.js";
@@ -15,6 +15,7 @@ import {
 import { turnGridTemplate, visibleTurnColumns } from "./timeline/turnColumns.js";
 import {
   buildClaudeTurnGroups,
+  buildCodexTurnGroups,
   isOutlierTurn,
   sumTurnCosts,
   type TurnGroup,
@@ -26,13 +27,15 @@ interface Props {
   /** Scopes the timeline to one subagent's own transcript, when set (see AgentShell.tsx). Claude-only. */
   agent?: string;
   /**
-   * Claude Code's own full session analysis — passed by SessionShell for the
-   * main-transcript view only (AgentShell never passes it). Enables the
-   * turn-grouped spine (see `turnGroups.ts` and docs/roadmap.md's "Unified
-   * Timeline" phase 1) whenever `turnUsage` is non-empty; Codex sessions and
-   * subagent views always keep the flat rendering below unchanged.
+   * The full session analysis, either source — passed by SessionShell for the
+   * main-transcript view only (AgentShell never passes it, so subagent views
+   * always keep the flat rendering below). Enables the turn-grouped spine
+   * (see `turnGroups.ts` and docs/roadmap.md's "Unified Timeline") whenever
+   * the session's own per-turn data is non-empty: Claude's `turnUsage` or
+   * Codex's `codex.turns`, picked by presence, not by `source ===` (see
+   * `turnGroupable`/`turnGroups` below).
    */
-  session?: SessionJson;
+  session?: AnySessionJson;
   /** Opens the record slide-over (L3, screen 8) for a given source line. */
   onOpenRecord: (line: number) => void;
 }
@@ -60,13 +63,16 @@ const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "e
 /**
  * Timeline lens (L2) — the full-transcript view. See design-spec/12-timeline.md.
  *
- * Claude Code's main transcript (not a `?agent=` subagent view) renders as a
- * turn-grouped spine when `session` carries `turnUsage` — see
- * `turnGroups.ts`/`TurnRow.tsx` and docs/roadmap.md's "Unified Timeline"
- * phase 1. Every other case (Codex sessions, subagent views) renders the
- * original flat list unchanged, reusing `TimelineRow` either way so tool
- * expansion / the time gutter / record-detail links never diverge between
- * the two paths.
+ * The main transcript (not a `?agent=` subagent view) renders as a
+ * turn-grouped spine whenever the session carries per-turn data for its own
+ * source — Claude's `turnUsage` or Codex's `codex.turns` — see
+ * `turnGroups.ts`/`TurnRow.tsx` and docs/roadmap.md's "Unified Timeline".
+ * `turnGroupable` is presence-driven, not a `source ===` branch: it narrows
+ * the discriminated `session` union to pick whichever field its own source
+ * actually populates. Subagent views render the original flat list unchanged
+ * for the same reason (no per-turn data is ever passed in — see `Props`),
+ * reusing `TimelineRow` either way so tool expansion / the time gutter /
+ * record-detail links never diverge between the two paths.
  *
  * Perf: no virtualization — collapsed-by-default blocks plus chunked
  * rendering (500 entries at a time, "show more" to extend, landing on a
@@ -80,8 +86,8 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   const turnGroupable =
     agent === undefined &&
     session !== undefined &&
-    sessionRef.source === "claude-code" &&
-    session.turnUsage.length > 0;
+    ((session.source === "claude-code" && session.turnUsage.length > 0) ||
+      (session.source === "codex" && session.codex.turns.length > 0));
 
   const [entries, setEntries] = useState<TimelineEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -127,9 +133,14 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
 
   const turnGroups = useMemo<TurnGroup[]>(() => {
     if (!turnGroupable || entries === null || session === undefined) return [];
-    return buildClaudeTurnGroups(entries, session.turnUsage, {
-      costIsComplete: session.totalUsage.costIsComplete,
-    });
+    // Discriminated-union narrow, not a capability lookup: which adapter
+    // runs follows directly from which field `turnGroupable` above found
+    // non-empty.
+    return session.source === "claude-code"
+      ? buildClaudeTurnGroups(entries, session.turnUsage, {
+          costIsComplete: session.totalUsage.costIsComplete,
+        })
+      : buildCodexTurnGroups(entries, session.codex.turns);
   }, [entries, turnGroupable, session]);
 
   // Presence-driven: which numeric columns actually show for this group set,

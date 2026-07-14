@@ -74,13 +74,14 @@ filters leave visible. Results are paginated.
 **Session detail** opens into a set of lenses:
 
 - **Overview** — top-line usage, cost, and delegation numbers for the session.
-- **Timeline** — the record-by-record transcript with filters and a mini-map.
+- **Timeline** — the record-by-record transcript with filters and a mini-map;
+  the main session view groups events into a per-turn table (model, duration,
+  tokens) that expands in place to reveal the events underneath.
 - **Orchestration** — the subagent tree, as a tree, waterfall, or flame view.
 - **Context & cost** — context growth over time, compactions, and per-model
   cost breakdown.
 - **Files & skills** — file access, skill invocations, tool stats, repetition
   findings, and task executions.
-- **Turns** (Codex sessions only) — per-turn model, duration, and token table.
 
 Subagents are drillable: opening one reuses the same lens set, scoped to that
 subagent's own transcript.

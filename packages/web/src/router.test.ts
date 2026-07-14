@@ -23,15 +23,8 @@ import {
 } from "./router.js";
 
 describe("CODEX_LENSES", () => {
-  it("offers overview/timeline/orchestration/context/files/turns, in that order — Claude's tab order plus Codex-only 'turns' appended last", () => {
-    expect(CODEX_LENSES).toEqual([
-      "overview",
-      "timeline",
-      "orchestration",
-      "context",
-      "files",
-      "turns",
-    ]);
+  it("offers overview/timeline/orchestration/context/files, in that order — identical to CLAUDE_LENSES now that the Codex-only 'turns' tab folded into Timeline", () => {
+    expect(CODEX_LENSES).toEqual(["overview", "timeline", "orchestration", "context", "files"]);
   });
 
   it("includes 'files', now shared with Claude (fileAccess/skillInvocations are SessionAnalysisCore fields)", () => {
@@ -66,8 +59,8 @@ describe("sessionPath", () => {
 
   it("has no :project segment for Codex source", () => {
     expect(sessionPath({ source: "codex", id: "abc123" })).toBe("/session/codex/abc123");
-    expect(sessionPath({ source: "codex", id: "abc123" }, "turns")).toBe(
-      "/session/codex/abc123/turns",
+    expect(sessionPath({ source: "codex", id: "abc123" }, "files")).toBe(
+      "/session/codex/abc123/files",
     );
   });
 
@@ -129,8 +122,8 @@ describe("agentPath", () => {
     expect(agentPath({ source: "codex", id: "abc123" }, "agentA")).toBe(
       "/session/codex/abc123/agent/agentA",
     );
-    expect(agentPath({ source: "codex", id: "abc123" }, "agentA", "turns")).toBe(
-      "/session/codex/abc123/agent/agentA/turns",
+    expect(agentPath({ source: "codex", id: "abc123" }, "agentA", "files")).toBe(
+      "/session/codex/abc123/agent/agentA/files",
     );
   });
 });
@@ -286,6 +279,10 @@ describe("normalizeLens", () => {
     for (const lens of ["overview", "timeline", "orchestration", "context", "files"] as const) {
       expect(normalizeLens(lens)).toBe(lens);
     }
+  });
+
+  it("redirects the removed 'turns' lens to 'timeline' — old Codex Turns-tab bookmarks must not 404 or fall to a broken state", () => {
+    expect(normalizeLens("turns")).toBe("timeline");
   });
 
   it("falls back to overview for unknown or missing values", () => {

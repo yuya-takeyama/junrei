@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { SessionJson, TimelineEntry } from "../../api.js";
+import type { CodexSessionJson, SessionJson, TimelineEntry } from "../../api.js";
+import { visibleTurnColumns } from "./turnColumns.js";
 import {
   buildClaudeTurnGroups,
+  buildCodexTurnGroups,
   isOutlierTurn,
   sumTurnCosts,
   turnsUpToBudget,
 } from "./turnGroups.js";
 
 type TurnUsage = SessionJson["turnUsage"][number];
+type CodexTurn = CodexSessionJson["codex"]["turns"][number];
 
 function turn(line: number, overrides: Partial<TurnUsage> = {}): TurnUsage {
   return {
@@ -51,6 +54,16 @@ function toolCall(line: number, status: "ok" | "error" | "missing-result" = "ok"
 
 function compaction(line: number): TimelineEntry {
   return { kind: "compaction", line };
+}
+
+function codexTurn(overrides: Partial<CodexTurn> = {}): CodexTurn {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    reasoningOutputTokens: 0,
+    ...overrides,
+  };
 }
 
 describe("buildClaudeTurnGroups", () => {
@@ -194,6 +207,144 @@ describe("buildClaudeTurnGroups", () => {
     ];
     const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true });
     expect(groups[0]?.toolErrorCount).toBe(2);
+  });
+});
+
+describe("buildCodexTurnGroups", () => {
+  it("returns an empty array when there are no turns", () => {
+    expect(buildCodexTurnGroups([user(1)], [])).toEqual([]);
+  });
+
+  it("sorts turns by startedAt and assigns 1-based display indices in that order, regardless of input order", () => {
+    const turns = [
+      codexTurn({ startedAt: "2026-01-01T00:10:00.000Z" }),
+      codexTurn({ startedAt: "2026-01-01T00:00:00.000Z" }),
+    ];
+    const groups = buildCodexTurnGroups([], turns);
+    expect(groups.map((g) => g.startedAt)).toEqual([
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:10:00.000Z",
+    ]);
+    expect(groups.map((g) => g.index)).toEqual([1, 2]);
+  });
+
+  it("attributes an entry to the last turn whose startedAt is <= the entry's timestamp", () => {
+    const turns = [
+      codexTurn({ startedAt: "2026-01-01T00:00:00.000Z" }),
+      codexTurn({ startedAt: "2026-01-01T00:10:00.000Z" }),
+    ];
+    const entries: TimelineEntry[] = [
+      user(1, "hi", "2026-01-01T00:00:00.000Z"),
+      assistantText(2, { timestamp: "2026-01-01T00:05:00.000Z" }),
+      user(3, "next", "2026-01-01T00:10:00.000Z"),
+    ];
+    const groups = buildCodexTurnGroups(entries, turns);
+    expect(groups[0]?.entries.map((e) => e.line)).toEqual([1, 2]);
+    expect(groups[1]?.entries.map((e) => e.line)).toEqual([3]);
+  });
+
+  it("folds an entry with no timestamp into the current bucket rather than advancing", () => {
+    const turns = [
+      codexTurn({ startedAt: "2026-01-01T00:00:00.000Z" }),
+      codexTurn({ startedAt: "2026-01-01T00:10:00.000Z" }),
+    ];
+    const entries: TimelineEntry[] = [
+      user(1, "hi", "2026-01-01T00:00:00.000Z"),
+      assistantText(2), // no timestamp — must not push the pointer into turn 2
+      user(3, "next", "2026-01-01T00:10:00.000Z"),
+    ];
+    const groups = buildCodexTurnGroups(entries, turns);
+    expect(groups[0]?.entries.map((e) => e.line)).toEqual([1, 2]);
+    expect(groups[1]?.entries.map((e) => e.line)).toEqual([3]);
+  });
+
+  it("folds entries before the first turn's startedAt into the first turn's bucket", () => {
+    const turns = [codexTurn({ startedAt: "2026-01-01T00:05:00.000Z" })];
+    const entries: TimelineEntry[] = [
+      assistantText(1, { timestamp: "2026-01-01T00:00:00.000Z" }),
+      user(2, "hi", "2026-01-01T00:05:00.000Z"),
+    ];
+    const groups = buildCodexTurnGroups(entries, turns);
+    expect(groups[0]?.entries.map((e) => e.line)).toEqual([1, 2]);
+  });
+
+  it("leaves userEntry undefined for an agent-initiated turn with no user-kind entry", () => {
+    const turns = [codexTurn({ startedAt: "2026-01-01T00:00:00.000Z" })];
+    const entries: TimelineEntry[] = [
+      assistantText(1, { timestamp: "2026-01-01T00:00:00.000Z" }),
+      toolCall(2),
+    ];
+    const groups = buildCodexTurnGroups(entries, turns);
+    expect(groups[0]?.userEntry).toBeUndefined();
+  });
+
+  it("falls back to a unique negative anchorLine per turn when a turn's bucket is empty", () => {
+    const turns = [
+      codexTurn({ startedAt: "2026-01-01T00:00:00.000Z" }),
+      codexTurn({ startedAt: "2026-01-01T00:10:00.000Z" }),
+      codexTurn({ startedAt: "2026-01-01T00:20:00.000Z" }),
+    ];
+    // Only one entry, timestamped at turn 1 — turns 2 and 3 never receive
+    // anything (the pointer never advances into them).
+    const entries: TimelineEntry[] = [user(1, "hi", "2026-01-01T00:00:00.000Z")];
+    const groups = buildCodexTurnGroups(entries, turns);
+    expect(groups[1]?.entries).toEqual([]);
+    expect(groups[2]?.entries).toEqual([]);
+    const anchors = groups.map((g) => g.anchorLine);
+    expect(new Set(anchors).size).toBe(anchors.length);
+    expect(groups[1]?.anchorLine).toBeLessThan(0);
+    expect(groups[2]?.anchorLine).toBeLessThan(0);
+  });
+
+  it("dedupes models with turn.model first, then assistant-entry models in first-seen order", () => {
+    const turns = [codexTurn({ startedAt: "2026-01-01T00:00:00.000Z", model: "gpt-5.6-sol" })];
+    const entries: TimelineEntry[] = [
+      user(1, "hi", "2026-01-01T00:00:00.000Z"),
+      assistantText(2, { timestamp: "2026-01-01T00:00:01.000Z", model: "gpt-5.6-sol" }),
+      assistantText(3, { timestamp: "2026-01-01T00:00:02.000Z", model: "gpt-5.6-terra" }),
+    ];
+    const groups = buildCodexTurnGroups(entries, turns);
+    expect(groups[0]?.models).toEqual(["gpt-5.6-sol", "gpt-5.6-terra"]);
+  });
+
+  it("maps native duration/token fields and leaves the Claude-only fields (cacheCreationTokens/stepCount/costUsd) undefined", () => {
+    const turns = [
+      codexTurn({
+        startedAt: "2026-01-01T00:00:00.000Z",
+        durationMs: 42_000,
+        inputTokens: 100,
+        cacheReadTokens: 200,
+        outputTokens: 300,
+        reasoningOutputTokens: 400,
+      }),
+    ];
+    const groups = buildCodexTurnGroups([user(1, "hi", "2026-01-01T00:00:00.000Z")], turns);
+    expect(groups[0]).toMatchObject({
+      durationMs: 42_000,
+      inputTokens: 100,
+      cacheReadTokens: 200,
+      outputTokens: 300,
+      reasoningTokens: 400,
+      costIncomplete: false,
+    });
+    expect(groups[0]?.cacheCreationTokens).toBeUndefined();
+    expect(groups[0]?.stepCount).toBeUndefined();
+    expect(groups[0]?.costUsd).toBeUndefined();
+  });
+
+  it("produces exactly the 2c column set (Started/Dur/Input/C·Read/Output/Reasoning) — reasoning visible, steps/c·write/cost hidden", () => {
+    const turns = [
+      codexTurn({ startedAt: "2026-01-01T00:00:00.000Z", reasoningOutputTokens: 100 }),
+    ];
+    const groups = buildCodexTurnGroups([user(1, "hi", "2026-01-01T00:00:00.000Z")], turns);
+    expect(visibleTurnColumns(groups).map((c) => c.key)).toEqual([
+      "started",
+      "dur",
+      "input",
+      "cread",
+      "output",
+      "reasoning",
+    ]);
   });
 });
 

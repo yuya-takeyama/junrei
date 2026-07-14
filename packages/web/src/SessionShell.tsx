@@ -3,7 +3,6 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { type AnySessionJson, fetchSessionDetail, type SessionRef } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
-import { CodexTurns } from "./lenses/CodexTurns.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
 import { Orchestration } from "./lenses/Orchestration.js";
@@ -132,17 +131,21 @@ interface Props {
  * slide-over is a plain navigation and never remounts this component or its
  * active lens.
  *
- * Every lens except "turns" renders the exact same component for both
- * sources — `FilesSkills` included, now that `fileAccess`/`skillInvocations`
- * live on `SessionAnalysisCore` and Codex populates them too (see
+ * Every lens renders the exact same component for both sources —
+ * `FilesSkills` included, now that `fileAccess`/`skillInvocations` live on
+ * `SessionAnalysisCore` and Codex populates them too (see
  * `codex/files-skills.ts` in `@junrei/core`); Orchestration likewise renders
  * unchanged (a Codex sub-agent is its own rollout file, not a sidecar, but
  * `getCodexSession` on the server attaches the same `subagents`/
  * `subagentCount` shape — see `codex/orchestration.ts`); Timeline and the
  * record slide-over fetch through `fetchTimeline`/`fetchRecordDetail`
  * (api.ts), which dispatch to each source's own route shape internally — no
- * per-source branching needed here. "turns" stays Codex-only (no Claude
- * equivalent) — see `CLAUDE_LENSES`/`CODEX_LENSES`.
+ * per-source branching needed here. The formerly Codex-only "turns" lens is
+ * gone (see `CLAUDE_LENSES`/`CODEX_LENSES`, now identical) — its per-turn
+ * table folded into Timeline's own turn-grouped spine, picked by data
+ * presence (see `Timeline.tsx`'s `turnGroupable`), and `normalizeLens`
+ * redirects the old `"turns"` URL segment to `"timeline"` so bookmarks keep
+ * working.
  */
 export function SessionShell({ source }: Props) {
   const { id: idParam, lens: lensParam } = useParams<"id" | "lens">();
@@ -247,7 +250,7 @@ export function SessionShell({ source }: Props) {
         {error === null && session !== null && lens === "timeline" && (
           <Timeline
             sessionRef={ref}
-            {...(session.source === "claude-code" && { session })}
+            session={session}
             onOpenRecord={(line) => {
               navigate(recordPath(ref, lens, line));
             }}
@@ -261,9 +264,6 @@ export function SessionShell({ source }: Props) {
         )}
         {error === null && session !== null && lens === "files" && (
           <FilesSkills session={session} />
-        )}
-        {error === null && session !== null && session.source === "codex" && lens === "turns" && (
-          <CodexTurns session={session} />
         )}
       </div>
       {record !== undefined && (

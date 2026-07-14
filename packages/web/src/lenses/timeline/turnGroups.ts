@@ -1,6 +1,7 @@
-import type { SessionJson, TimelineEntry } from "../../api.js";
+import type { CodexSessionJson, SessionJson, TimelineEntry } from "../../api.js";
 
 type TurnUsage = SessionJson["turnUsage"][number];
+type CodexTurn = CodexSessionJson["codex"]["turns"][number];
 type UserEntry = Extract<TimelineEntry, { kind: "user" }>;
 
 /**
@@ -11,12 +12,12 @@ type UserEntry = Extract<TimelineEntry, { kind: "user" }>;
  * one both harnesses can honestly populate; a field left optional means
  * "this harness doesn't expose the concept" rather than "unknown source".
  * No field is typed against a harness's own usage shape (`ClaudeTurnUsage`,
- * a future `CodexTurnUsage`) — that detail stays inside the adapter that
- * builds the group.
+ * `CodexTurnUsage`) — that detail stays inside the adapter that builds the
+ * group.
  *
- * Built by `buildClaudeTurnGroups` below for Claude Code's main transcript;
- * Phase 2 adds a `buildCodexTurnGroups` beside it producing this same shape
- * from Codex's own per-turn data.
+ * Built by `buildClaudeTurnGroups` for Claude Code's main transcript, or
+ * `buildCodexTurnGroups` for a Codex rollout's own per-turn data — both
+ * below.
  */
 export interface TurnGroup {
   /** 1-based display number (turn order), not a source line. */
@@ -36,7 +37,7 @@ export interface TurnGroup {
   outputTokens: number;
   /** Claude only — absent means the harness has no cache-write concept (Codex). The Claude adapter always sets it. */
   cacheCreationTokens?: number;
-  /** Codex only — absent for every Claude turn; set by Phase 2's `buildCodexTurnGroups`. */
+  /** Codex only — absent for every Claude turn; set by `buildCodexTurnGroups`. */
   reasoningTokens?: number;
   /** Claude only (`ClaudeTurnUsage.apiMessageCount`) — absent for Codex turns, which are flat. */
   stepCount?: number;
@@ -139,6 +140,93 @@ export function buildClaudeTurnGroups(
       costIncomplete: costMissing || !opts.costIsComplete,
       toolErrorCount,
       anchorLine: usage.line,
+    };
+  });
+}
+
+/**
+ * Codex adapter: groups a flat rollout timeline into per-turn buckets, one
+ * per `session.codex.turns` entry, and flattens each into the source-neutral
+ * `TurnGroup` shape above.
+ *
+ * Codex turns carry no source line (unlike Claude's `turnUsage`, which is
+ * line-anchored), so attribution mirrors `buildClaudeTurnGroups`'s line rule
+ * with `startedAt` standing in for `line`: an entry belongs to the last turn
+ * whose `startedAt <= entry.timestamp`, walking entries in source order.
+ * Turns aren't trusted to already be sorted (nothing about the type
+ * guarantees it), so they're sorted by `startedAt` first — a turn missing
+ * `startedAt` has no timestamp to compare, so it reads as tied with its
+ * neighbors and keeps its original position (`Array.sort` is stable). An
+ * entry with no timestamp of its own, or one preceding the first turn's
+ * `startedAt`, folds into whichever bucket is current rather than advancing
+ * or being dropped.
+ */
+export function buildCodexTurnGroups(
+  entries: readonly TimelineEntry[],
+  turns: readonly CodexTurn[],
+): TurnGroup[] {
+  if (turns.length === 0) return [];
+
+  const sortedTurns = turns.slice().sort((a, b) => {
+    if (a.startedAt === undefined || b.startedAt === undefined) return 0;
+    return Date.parse(a.startedAt) - Date.parse(b.startedAt);
+  });
+
+  const buckets: TimelineEntry[][] = sortedTurns.map(() => []);
+  let turnIndex = 0;
+  for (const entry of entries) {
+    while (
+      turnIndex + 1 < sortedTurns.length &&
+      entry.timestamp !== undefined &&
+      (sortedTurns[turnIndex + 1] as CodexTurn).startedAt !== undefined &&
+      ((sortedTurns[turnIndex + 1] as CodexTurn).startedAt as string) <= entry.timestamp
+    ) {
+      turnIndex += 1;
+    }
+    (buckets[turnIndex] as TimelineEntry[]).push(entry);
+  }
+
+  return sortedTurns.map((turn, i) => {
+    const bucket = buckets[i] as TimelineEntry[];
+    // Unlike Claude's userEntry (matched by exact line), a Codex turn has no
+    // owning line to match against — the first user-kind entry in its bucket
+    // is the best available signal. Agent-initiated turns (e.g. a follow-up
+    // the model kicks off on its own) legitimately have none.
+    const userEntry = bucket.find((e): e is UserEntry => e.kind === "user");
+
+    const models: string[] = [];
+    if (turn.model !== undefined) models.push(turn.model);
+    let toolErrorCount = 0;
+    for (const entry of bucket) {
+      if (entry.kind === "assistant-text") {
+        if (entry.model !== undefined && !models.includes(entry.model)) models.push(entry.model);
+      } else if (entry.kind === "tool-call" && entry.status === "error") {
+        toolErrorCount += 1;
+      }
+    }
+
+    const index = i + 1;
+    // An empty bucket (an agent-initiated turn folded no entries, or a
+    // degenerate zero-event turn) has no real line to anchor on. The
+    // negative, index-derived fallback is unique per turn and never
+    // collides with a real (always >= 1) source line, so expand-override
+    // keys and React `key`s stay collision-free.
+    const anchorLine = bucket[0]?.line ?? -(index + 1);
+
+    return {
+      index,
+      ...(userEntry !== undefined && { userEntry }),
+      entries: bucket,
+      models,
+      ...(turn.startedAt !== undefined && { startedAt: turn.startedAt }),
+      ...(turn.durationMs !== undefined && { durationMs: turn.durationMs }),
+      inputTokens: turn.inputTokens,
+      cacheReadTokens: turn.cacheReadTokens,
+      outputTokens: turn.outputTokens,
+      reasoningTokens: turn.reasoningOutputTokens,
+      costIncomplete: false,
+      toolErrorCount,
+      anchorLine,
     };
   });
 }
