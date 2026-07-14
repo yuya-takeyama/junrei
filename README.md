@@ -11,6 +11,11 @@ subagent orchestration, repetition detection, and more. There is no LLM
 judgment or scoring anywhere in the pipeline; interpreting the numbers is left
 to humans, or to agents consuming them over MCP.
 
+![Orchestration lens for a live Junrei session, showing the delegation tree from a main agent to six subagents with per-agent model, cost, and duration](docs/images/session-orchestration.png)
+
+*A real Junrei session, viewed in Junrei — the orchestration lens breaking
+down cost and delegation across a main agent and its subagents.*
+
 ## Features
 
 - **Two sources, one model** — Claude Code and Codex CLI sessions (including
@@ -78,6 +83,16 @@ filters leave visible. Results are paginated.
 
 Subagents are drillable: opening one reuses the same lens set, scoped to that
 subagent's own transcript.
+
+![Overview lens showing total cost, turns, cache hit rate, output tokens, and a context-growth chart for a session](docs/images/session-overview.png)
+
+*Overview lens — top-line cost, cache hit rate, and context growth at a
+glance.*
+
+![Context and cost lens showing a context-growth chart, cache hit/write stats, and per-turn token composition](docs/images/session-context.png)
+
+*Context & cost lens — context growth over time plus cache economics and
+per-turn token composition.*
 
 ## MCP server
 
