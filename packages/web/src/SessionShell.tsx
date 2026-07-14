@@ -247,6 +247,7 @@ export function SessionShell({ source }: Props) {
         {error === null && session !== null && lens === "timeline" && (
           <Timeline
             sessionRef={ref}
+            {...(session.source === "claude-code" && { session })}
             onOpenRecord={(line) => {
               navigate(recordPath(ref, lens, line));
             }}

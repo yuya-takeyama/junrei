@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchTimeline, type SessionRef, type TimelineEntry } from "../api.js";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { fetchTimeline, type SessionJson, type SessionRef, type TimelineEntry } from "../api.js";
 import { MiniMap } from "./timeline/MiniMap.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
+import { TurnGroupHeaderRow, TurnRow } from "./timeline/TurnRow.js";
 import {
   type ChipState,
   computeChipCounts,
@@ -11,11 +12,27 @@ import {
   isEntryVisible,
   toggleChip,
 } from "./timeline/timelineFilters.js";
+import { turnGridTemplate, visibleTurnColumns } from "./timeline/turnColumns.js";
+import {
+  buildClaudeTurnGroups,
+  isOutlierTurn,
+  sumTurnCosts,
+  type TurnGroup,
+  turnsUpToBudget,
+} from "./timeline/turnGroups.js";
 
 interface Props {
   sessionRef: SessionRef;
   /** Scopes the timeline to one subagent's own transcript, when set (see AgentShell.tsx). Claude-only. */
   agent?: string;
+  /**
+   * Claude Code's own full session analysis — passed by SessionShell for the
+   * main-transcript view only (AgentShell never passes it). Enables the
+   * turn-grouped spine (see `turnGroups.ts` and docs/roadmap.md's "Unified
+   * Timeline" phase 1) whenever `turnUsage` is non-empty; Codex sessions and
+   * subagent views always keep the flat rendering below unchanged.
+   */
+  session?: SessionJson;
   /** Opens the record slide-over (L3, screen 8) for a given source line. */
   onOpenRecord: (line: number) => void;
 }
@@ -24,6 +41,7 @@ interface Props {
 const CHUNK_SIZE = 500;
 
 const DIAL_LABEL: Record<DetailDial, string> = {
+  turns: "turns",
   "user-only": "user-only",
   minimal: "minimal",
   full: "full",
@@ -42,23 +60,47 @@ const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "e
 /**
  * Timeline lens (L2) — the full-transcript view. See design-spec/12-timeline.md.
  *
+ * Claude Code's main transcript (not a `?agent=` subagent view) renders as a
+ * turn-grouped spine when `session` carries `turnUsage` — see
+ * `turnGroups.ts`/`TurnRow.tsx` and docs/roadmap.md's "Unified Timeline"
+ * phase 1. Every other case (Codex sessions, subagent views) renders the
+ * original flat list unchanged, reusing `TimelineRow` either way so tool
+ * expansion / the time gutter / record-detail links never diverge between
+ * the two paths.
+ *
  * Perf: no virtualization — collapsed-by-default blocks plus chunked
- * rendering (500 entries at a time, "show more" to extend) keep the DOM
- * light even for 2000+-entry sessions; hover reveals the source line via
+ * rendering (500 entries at a time, "show more" to extend, landing on a
+ * whole-turn boundary in the grouped path — see `turnsUpToBudget`) keep the
+ * DOM light even for 2000+-entry sessions; hover reveals the source line via
  * pure CSS (`.blk:hover .ln`) so it never touches React state, and each row
  * is wrapped in `memo` so toggling one tool-call's expansion doesn't
  * re-render its siblings.
  */
-export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
+export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
+  const turnGroupable =
+    agent === undefined &&
+    session !== undefined &&
+    sessionRef.source === "claude-code" &&
+    session.turnUsage.length > 0;
+
   const [entries, setEntries] = useState<TimelineEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dial, setDial] = useState<DetailDial>("full");
+  const [dial, setDial] = useState<DetailDial>(() => (turnGroupable ? "turns" : "full"));
   const [chips, setChips] = useState<ChipState>(DEFAULT_CHIPS);
   const [expandedLines, setExpandedLines] = useState<ReadonlySet<number>>(new Set());
+  // Per-turn expand/collapse overrides against the dial's own default (see
+  // `isTurnExpanded` below) — keyed by turn line, cleared whenever the dial
+  // changes so switching stops always starts from that stop's own default.
+  const [turnOverrides, setTurnOverrides] = useState<ReadonlySet<number>>(new Set());
   const [visibleCount, setVisibleCount] = useState(CHUNK_SIZE);
   const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
 
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
+  // Root wrapper (holds `--tctl-h`, read by `.exh` in styles.css) and the
+  // controls bar whose real height feeds it — see the ResizeObserver effect
+  // below.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const tctlRef = useRef<HTMLDivElement>(null);
 
   // `sessionRef` is rebuilt fresh (a new object) on every caller render —
   // depend on its primitive parts instead so this effect doesn't re-fire
@@ -70,6 +112,7 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
   useEffect(() => {
     setEntries(null);
     setError(null);
+    setTurnOverrides(new Set());
     fetchTimeline(sessionRef, agent)
       .then(setEntries)
       .catch((e: unknown) => setError(String(e)));
@@ -81,6 +124,19 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
     if (entries === null) return [];
     return entries.filter((e) => isEntryVisible(e, dial, chips));
   }, [entries, dial, chips]);
+
+  const turnGroups = useMemo<TurnGroup[]>(() => {
+    if (!turnGroupable || entries === null || session === undefined) return [];
+    return buildClaudeTurnGroups(entries, session.turnUsage, {
+      costIsComplete: session.totalUsage.costIsComplete,
+    });
+  }, [entries, turnGroupable, session]);
+
+  // Presence-driven: which numeric columns actually show for this group set,
+  // and the grid template derived from them — computed once here rather than
+  // per row (see turnColumns.ts).
+  const turnColumns = useMemo(() => visibleTurnColumns(turnGroups), [turnGroups]);
+  const turnGridTemplateColumns = useMemo(() => turnGridTemplate(turnColumns), [turnColumns]);
 
   // Dial/chip changes reshape the visible set — restart chunking from the top. dial/chips
   // only need to *trigger* this; their values aren't read in the effect body.
@@ -128,18 +184,95 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
     }
   }, [pendingScrollLine]);
 
+  // "turns" is only ever offered when the turn-grouped path is active — the
+  // flat (Codex / subagent) path keeps its pre-existing 3-stop dial exactly
+  // as before, both in the UI and in what keys 1-3 map to.
+  const dialStopsForView = useMemo(
+    () => (turnGroupable ? DIAL_STOPS : DIAL_STOPS.filter((stop) => stop !== "turns")),
+    [turnGroupable],
+  );
+
+  const handleDialChange = useCallback((next: DetailDial) => {
+    setDial(next);
+    setTurnOverrides(new Set());
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target;
       if (target instanceof HTMLElement && /^(input|textarea)$/i.test(target.tagName)) return;
-      if (e.key === "1") setDial("user-only");
-      else if (e.key === "2") setDial("minimal");
-      else if (e.key === "3") setDial("full");
+      const idx = Number.parseInt(e.key, 10) - 1;
+      if (Number.isNaN(idx) || idx < 0 || idx >= dialStopsForView.length) return;
+      const stop = dialStopsForView[idx];
+      if (stop !== undefined) handleDialChange(stop);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dialStopsForView, handleDialChange]);
+
+  // `.exh` (the expanded turn's sticky header) parks just below the controls
+  // bar via `--tctl-h` — measured here rather than hardcoded, since the bar's
+  // height changes when its chips wrap (narrow widths) or the "turns"-only
+  // dial note appears/disappears. ResizeObserver (not a one-off measurement)
+  // because both of those can happen without an unmount/remount. Also
+  // retriggers on `entries`: while `entries === null` the component returns
+  // the loading-state div below, so the refs are still null the first time
+  // `turnGroupable` goes true — this needs a second pass once the real tree
+  // (and its refs) mount.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: entries is a retrigger, not read below
+  useLayoutEffect(() => {
+    if (!turnGroupable) return;
+    const bar = tctlRef.current;
+    const root = rootRef.current;
+    if (bar === null || root === null) return;
+    const applyHeight = () => {
+      root.style.setProperty(
+        "--tctl-h",
+        `${String(Math.round(bar.getBoundingClientRect().height))}px`,
+      );
+    };
+    applyHeight();
+    const observer = new ResizeObserver(applyHeight);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [turnGroupable, entries]);
+
+  // "turns" collapses every turn to its header by default; every other stop
+  // expands every turn by default. A row click/Enter toggles that one turn
+  // AGAINST the current default, tracked in `turnOverrides` rather than a
+  // plain "expanded" set, so a dial change can reset every turn to its new
+  // default by simply clearing the override map.
+  const defaultTurnExpanded = dial !== "turns";
+  const isTurnExpanded = useCallback(
+    (line: number) => (turnOverrides.has(line) ? !defaultTurnExpanded : defaultTurnExpanded),
+    [turnOverrides, defaultTurnExpanded],
+  );
+  const toggleTurn = useCallback((line: number) => {
+    setTurnOverrides((prev) => {
+      const next = new Set(prev);
+      if (next.has(line)) next.delete(line);
+      else next.add(line);
+      return next;
+    });
   }, []);
+
+  const anyTurnCollapsed = turnGroups.some((g) => !isTurnExpanded(g.anchorLine));
+  const expandAll = useCallback(() => {
+    setTurnOverrides(
+      defaultTurnExpanded ? new Set() : new Set(turnGroups.map((g) => g.anchorLine)),
+    );
+  }, [defaultTurnExpanded, turnGroups]);
+  const collapseAll = useCallback(() => {
+    setTurnOverrides(
+      defaultTurnExpanded ? new Set(turnGroups.map((g) => g.anchorLine)) : new Set(),
+    );
+  }, [defaultTurnExpanded, turnGroups]);
+
+  // Chips only act inside expanded turns (collapsed rows show nothing to
+  // filter) — once every turn reads as collapsed, the chip row itself would
+  // be inert, so it's replaced by a note explaining why (mock panel 2b).
+  const allTurnsCollapsed = turnGroupable && dial === "turns" && turnOverrides.size === 0;
 
   if (error !== null) {
     return <div className="hpad mt16 mut">Failed to load timeline: {error}</div>;
@@ -148,52 +281,157 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
     return <div className="hpad mt16 mut">Loading timeline…</div>;
   }
 
+  const totalTurnCostUsd = sumTurnCosts(turnGroups);
+  const visibleTurnCount = turnGroupable ? turnsUpToBudget(turnGroups, visibleCount) : 0;
+  const displayedTurnGroups = turnGroups.slice(0, visibleTurnCount);
+  const remainingTurns = turnGroups.length - displayedTurnGroups.length;
+  const totalTurnEntries = turnGroups.reduce((sum, g) => sum + g.entries.length, 0);
+
   const displayedEntries = filteredEntries.slice(0, visibleCount);
-  const remaining = filteredEntries.length - displayedEntries.length;
+  const remainingFlatEntries = filteredEntries.length - displayedEntries.length;
 
   return (
-    <div>
-      <div className="hpad fx ac jb mt12" style={{ flexWrap: "wrap", gap: "10px" }}>
+    <div ref={rootRef}>
+      <div
+        ref={tctlRef}
+        className={turnGroupable ? "hpad fx ac jb mt12 tctl" : "hpad fx ac jb mt12"}
+        style={{ flexWrap: "wrap", gap: "10px" }}
+      >
         <div className="fx ac gap12">
           <span className="lbl">Detail</span>
           <div className="dial">
-            {DIAL_STOPS.map((stop) => (
+            {dialStopsForView.map((stop) => (
               <button
                 key={stop}
                 type="button"
                 className={stop === dial ? "dseg on" : "dseg"}
-                onClick={() => setDial(stop)}
+                onClick={() => handleDialChange(stop)}
               >
                 {DIAL_LABEL[stop]}
               </button>
             ))}
           </div>
+          {turnGroupable && <span className="ann">keys 1–4 · click a row to toggle one turn</span>}
         </div>
         <div className="fx ac gap8" style={{ flexWrap: "wrap" }}>
-          {CHIP_ORDER.map(({ key, label, tone }) => (
+          {allTurnsCollapsed ? (
+            <span className="chip mut" style={{ opacity: 0.55 }}>
+              chips apply inside expanded turns
+            </span>
+          ) : (
+            CHIP_ORDER.map(({ key, label, tone }) => (
+              <button
+                key={key}
+                type="button"
+                className={chips[key] ? "chip on" : "chip"}
+                onClick={() => setChips((prev) => toggleChip(prev, key))}
+              >
+                {tone === undefined ? (
+                  <span>
+                    {label} {counts[key]}
+                  </span>
+                ) : (
+                  <span className={tone === "err" ? "errtx" : "amb"}>
+                    {label} {counts[key]}
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+          {turnGroupable && (
             <button
-              key={key}
               type="button"
-              className={chips[key] ? "chip on" : "chip"}
-              onClick={() => setChips((prev) => toggleChip(prev, key))}
+              className="chip amb"
+              style={{ borderStyle: "solid", borderColor: "var(--amb)" }}
+              onClick={anyTurnCollapsed ? expandAll : collapseAll}
             >
-              {tone === undefined ? (
-                <span>
-                  {label} {counts[key]}
-                </span>
-              ) : (
-                <span className={tone === "err" ? "errtx" : "amb"}>
-                  {label} {counts[key]}
-                </span>
-              )}
+              {anyTurnCollapsed ? "expand all ▾" : "collapse all ▴"}
             </button>
-          ))}
+          )}
         </div>
       </div>
 
       <div className="hpad fx gap16 mt16">
-        <div className="col f1" style={{ gap: "10px", minWidth: 0 }}>
-          {filteredEntries.length === 0 ? (
+        {/* Turn-grouped rows form a dense table (flush `.trow`s, separated only
+            by their own border-bottom, like `.cmg`/`.tn` elsewhere) — no inter-row
+            gap, unlike the flat path's spaced-out `.tlrow` blocks. */}
+        <div className="col f1" style={{ gap: turnGroupable ? 0 : "10px", minWidth: 0 }}>
+          {turnGroupable ? (
+            <>
+              <TurnGroupHeaderRow columns={turnColumns} gridTemplate={turnGridTemplateColumns} />
+              {displayedTurnGroups.map((group) => {
+                const expanded = isTurnExpanded(group.anchorLine);
+                const isOutlier = isOutlierTurn(group.costUsd, totalTurnCostUsd);
+                // Collapsed turns still surface their compactions as a
+                // full-width sibling row right after the header — a
+                // compaction must never silently disappear just because its
+                // turn is collapsed (mock panel 2b).
+                const collapsedCompactions = expanded
+                  ? []
+                  : group.entries.filter((e) => e.kind === "compaction");
+                const visibleTurnEntries = expanded
+                  ? group.entries.filter((e) => isEntryVisible(e, dial, chips))
+                  : [];
+
+                return (
+                  <div key={`turn-${String(group.anchorLine)}`}>
+                    <TurnRow
+                      group={group}
+                      columns={turnColumns}
+                      gridTemplate={turnGridTemplateColumns}
+                      expanded={expanded}
+                      isOutlier={isOutlier}
+                      onToggle={toggleTurn}
+                    />
+                    {collapsedCompactions.map((entry, i) => (
+                      <TimelineRow
+                        key={`${entry.kind}-${String(entry.line)}-${String(i)}`}
+                        entry={entry}
+                        sessionRef={sessionRef}
+                        agent={agent}
+                        expanded={false}
+                        onToggleExpand={onToggleExpand}
+                        registerRef={registerRef}
+                        onOpenRecord={onOpenRecord}
+                      />
+                    ))}
+                    {expanded && (
+                      <div className="ex">
+                        {visibleTurnEntries.length === 0 ? (
+                          <div className="mut fs12" style={{ padding: "8px 0" }}>
+                            No entries match the current filters.
+                          </div>
+                        ) : (
+                          visibleTurnEntries.map((entry, i) => (
+                            <TimelineRow
+                              key={`${entry.kind}-${String(entry.line)}-${String(i)}`}
+                              entry={entry}
+                              sessionRef={sessionRef}
+                              agent={agent}
+                              expanded={expandedLines.has(entry.line)}
+                              onToggleExpand={onToggleExpand}
+                              registerRef={registerRef}
+                              onOpenRecord={onOpenRecord}
+                            />
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {remainingTurns > 0 && (
+                <button
+                  type="button"
+                  className="chip"
+                  style={{ alignSelf: "flex-start", marginTop: "10px" }}
+                  onClick={() => setVisibleCount((v) => Math.min(totalTurnEntries, v + CHUNK_SIZE))}
+                >
+                  Show more turns ({remainingTurns} remaining)
+                </button>
+              )}
+            </>
+          ) : filteredEntries.length === 0 ? (
             <div className="mut">No entries match the current filters.</div>
           ) : (
             <>
@@ -211,7 +449,7 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
                   onOpenRecord={onOpenRecord}
                 />
               ))}
-              {remaining > 0 && (
+              {remainingFlatEntries > 0 && (
                 <button
                   type="button"
                   className="chip"
@@ -220,7 +458,8 @@ export function Timeline({ sessionRef, agent, onOpenRecord }: Props) {
                     setVisibleCount((v) => Math.min(filteredEntries.length, v + CHUNK_SIZE))
                   }
                 >
-                  Show {Math.min(remaining, CHUNK_SIZE)} more ({remaining} remaining)
+                  Show {Math.min(remainingFlatEntries, CHUNK_SIZE)} more ({remainingFlatEntries}{" "}
+                  remaining)
                 </button>
               )}
             </>

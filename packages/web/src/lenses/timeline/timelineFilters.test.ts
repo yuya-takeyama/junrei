@@ -76,6 +76,11 @@ describe("isEntryVisible", () => {
     expect(visible).toEqual(ALL);
   });
 
+  it("turns dial allows every kind, same as full — collapsing is a per-turn render decision, not a kind filter", () => {
+    const visible = ALL.filter((e) => isEntryVisible(e, "turns", DEFAULT_CHIPS));
+    expect(visible).toEqual(ALL);
+  });
+
   it("turning off the tool chip hides ok tool calls but keeps error tool calls", () => {
     const chips: ChipState = { ...DEFAULT_CHIPS, tool: false };
     const visible = ALL.filter((e) => isEntryVisible(e, "full", chips));
