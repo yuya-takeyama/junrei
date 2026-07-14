@@ -9,15 +9,30 @@
  * Codex has no `Read`/`Edit` tool concept to key off of the way Claude does,
  * so the two halves are derived very differently:
  *
- *  - Edits are DETERMINISTIC: every `custom_tool_call` named `apply_patch`
- *    carries a patch envelope whose `*** Update/Add/Delete File: <path>`
- *    header lines name every touched file exactly.
+ *  - Edits are DETERMINISTIC: every apply_patch invocation carries a patch
+ *    envelope whose `*** Update/Add/Delete File: <path>` header lines name
+ *    every touched file exactly.
  *  - Reads are a HEURISTIC, and deliberately a conservative one: Codex has
  *    no read-only file tool, only a general-purpose shell. We recognize a
  *    short list of read-oriented commands (cat/head/tail/.../rg/grep) and
  *    pull path-looking tokens out of their arguments. This under-reports
  *    (e.g. a script that reads a file internally is invisible to us) rather
  *    than risk over-reporting by guessing at arbitrary shell invocations.
+ *
+ * Both signals exist on two wire surfaces, because Codex 0.144 replaced the
+ * per-tool calls with a "unified exec" tool:
+ *
+ *  - Pre-0.144: a `custom_tool_call` named `apply_patch` whose input IS the
+ *    raw patch envelope, and a `function_call` named `exec_command`/`shell`
+ *    whose JSON arguments carry the command (`cmd` string or `command`
+ *    argv array) plus an optional `workdir`.
+ *  - 0.144+: a single `custom_tool_call` named `exec` whose input is a JS
+ *    program; shell commands appear as `tools.exec_command({cmd, workdir})`
+ *    call-site object literals (see `extractUnifiedExecCommands`) and patch
+ *    envelopes as JS string literals passed to `tools.apply_patch(...)`,
+ *    where the envelope's newlines are two-character `\n` escapes (see
+ *    `EMBEDDED_PATCH_HEADER_PATTERN`). MCP calls (`tools.mcp__*`) in the
+ *    same program carry no file signal and are ignored.
  *
  * Unlike Claude (see `metrics.ts#computeFileAccess`), NO context-injection
  * tracking (`injectedCount`/`injectedChars`) is derived for Codex, on
@@ -67,8 +82,18 @@ const READ_COMMANDS = new Set([
 /** A bare filename's extension, e.g. `foo.spec.ts` with no `/` in it — still counts as path-looking. */
 const FILE_EXTENSION_PATTERN = /\.[A-Za-z0-9]{1,10}$/;
 
+/**
+ * Characters that essentially never appear in an honest, unquoted file-path
+ * argument but are common in the OTHER slash-bearing tokens read commands
+ * take — quoted awk programs (`'/^resource/{print $3}'`), regex patterns
+ * (`/akira\./`), globs (`src/*.ts`, `'!archives/**'`), URLs — any hit
+ * disqualifies the token.
+ */
+const NON_PATH_CHARS_PATTERN = /['"`{}()[\]*?$\\!]|:\/\//;
+
 function isPathLooking(token: string): boolean {
   if (token === "" || token.startsWith("-")) return false;
+  if (NON_PATH_CHARS_PATTERN.test(token)) return false;
   return token.includes("/") || FILE_EXTENSION_PATTERN.test(token);
 }
 
@@ -83,12 +108,20 @@ function tokenize(command: string): string[] {
   return command.split(/\s+/).filter((t) => t !== "");
 }
 
+/** A shell command call normalized off either wire surface: its tokens plus the per-call `workdir`, when one was given. */
+interface ShellCommandCall {
+  tokens: string[];
+  workdir?: string;
+}
+
 /**
  * `exec_command`/`shell` function-call arguments carry the command as either
  * a single string (`cmd`) or a pre-split argv array (`command`, or newer
- * `cmd` as an array) — normalize whichever shape shows up to a token list.
+ * `cmd` as an array) — normalize whichever shape shows up to a token list,
+ * keeping the per-call `workdir` (it wins over the session cwd when
+ * resolving relative paths — the two can genuinely differ).
  */
-function commandTokens(argumentsJson: string): string[] | undefined {
+function commandTokens(argumentsJson: string): ShellCommandCall | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(argumentsJson);
@@ -97,24 +130,251 @@ function commandTokens(argumentsJson: string): string[] | undefined {
   }
   if (typeof parsed !== "object" || parsed === null) return undefined;
   const obj = parsed as Record<string, unknown>;
+  const workdir = typeof obj.workdir === "string" ? obj.workdir : undefined;
   const raw = obj.cmd ?? obj.command;
-  if (typeof raw === "string") return tokenize(raw);
-  if (Array.isArray(raw) && raw.every((t): t is string => typeof t === "string")) return raw;
+  if (typeof raw === "string") {
+    return { tokens: tokenize(raw), ...(workdir !== undefined && { workdir }) };
+  }
+  if (Array.isArray(raw) && raw.every((t): t is string => typeof t === "string")) {
+    return { tokens: raw, ...(workdir !== undefined && { workdir }) };
+  }
   return undefined;
 }
 
+/** Tokens that separate commands in a compound command line (`a && b | c`). Only exact whitespace-delimited matches count — a `|` INSIDE a quoted rg/grep pattern is part of its token and never splits. */
+const SHELL_OPERATOR_TOKENS = new Set(["&&", "||", ";", "|", "&"]);
+
 /**
- * Path-looking arguments of a recognized read command, or `[]` when the
+ * Path-looking arguments of one recognized read command, or `[]` when the
  * command isn't one we treat as a read (or carries no path-looking args).
  * `sed` is only counted when invoked with `-n` (print-selected-lines mode) —
  * plain `sed` is at least as often used to transform a stream as to inspect
  * a file, and `sed -i` edits in place, so neither should be counted as a read.
+ * Redirect targets (`> out.txt`, `2>err.log`) are writes, not reads, so they
+ * are skipped; a heredoc marker (`<<EOF`) ends the scan outright since
+ * everything after it is content being WRITTEN, not file arguments.
  */
-function readPathsFromCommand(tokens: readonly string[]): string[] {
+function readPathsFromSegment(tokens: readonly string[]): string[] {
   const [name, ...args] = tokens;
   if (name === undefined || !READ_COMMANDS.has(name)) return [];
   if (name === "sed" && !args.includes("-n")) return [];
-  return args.filter(isPathLooking);
+  const paths: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i];
+    if (token === undefined) continue;
+    if (token.startsWith("<<")) break;
+    if (token === ">" || token === ">>") {
+      i += 1; // the next token is the redirect target
+      continue;
+    }
+    if (token.includes(">")) continue; // attached form: ">out.txt", "2>&1", "2>err.log"
+    if (token === "<") continue; // `< in.txt` — in.txt itself still counts as the next token
+    if (isPathLooking(token)) paths.push(token);
+  }
+  return paths;
+}
+
+/**
+ * Path-looking read arguments across a whole (possibly compound) command
+ * line: the token list is split on shell operator tokens and each segment is
+ * judged independently, so `pwd && cat a.ts | head` still credits `cat` its
+ * read even though the line doesn't START with a read command.
+ */
+function readPathsFromCommand(tokens: readonly string[]): string[] {
+  const paths: string[] = [];
+  let segment: string[] = [];
+  for (const token of tokens) {
+    if (SHELL_OPERATOR_TOKENS.has(token)) {
+      paths.push(...readPathsFromSegment(segment));
+      segment = [];
+    } else {
+      segment.push(token);
+    }
+  }
+  paths.push(...readPathsFromSegment(segment));
+  return paths;
+}
+
+// ---------------------------------------------------------------------------
+// Unified exec (Codex 0.144+) — lifting file signals out of the JS program
+// ---------------------------------------------------------------------------
+
+/**
+ * Patch-envelope file headers as they appear EMBEDDED IN JS SOURCE: the
+ * envelope is a JS string literal (`"*** Begin Patch\n*** Update File: ..."`),
+ * so the newline ending a header line is the two-character `\n` escape and
+ * the path capture must stop at a backslash — as well as at a real newline
+ * or a quote, which covers a patch written as a template literal instead.
+ */
+const EMBEDDED_PATCH_HEADER_PATTERN = /\*\*\* (?:Update|Add|Delete) File: ([^\\\n"'`]+)/g;
+
+/** One `tools.exec_command({...})` call site lifted out of a unified-exec JS program — the raw command string plus its per-call `workdir`. */
+interface UnifiedExecCommand {
+  cmd: string;
+  workdir?: string;
+}
+
+const UNIFIED_EXEC_MARKER = "tools.exec_command(";
+
+const SIMPLE_JS_ESCAPES: Record<string, string> = {
+  n: "\n",
+  t: "\t",
+  r: "\r",
+  b: "\b",
+  f: "\f",
+  v: "\v",
+  "0": "\0",
+};
+
+function skipWhitespace(source: string, index: number): number {
+  let i = index;
+  while (i < source.length && /\s/.test(source.charAt(i))) i += 1;
+  return i;
+}
+
+/**
+ * Scan one JS string literal (double-, single-, or backtick-quoted) starting
+ * at `start`, decoding standard escapes (`\n`, `\t`, `\xNN`, `\uNNNN`,
+ * `\u{...}`; anything unrecognized keeps the escaped character literally).
+ * Template-literal `${...}` interpolation is NOT evaluated — its source text
+ * lands in the value as-is, which is harmless downstream since interpolated
+ * fragments never look path-like. Returns `undefined` on an unterminated
+ * literal so the caller can abandon the surrounding call site.
+ */
+function scanStringLiteral(
+  source: string,
+  start: number,
+): { value: string; end: number } | undefined {
+  const quote = source.charAt(start);
+  if (quote !== '"' && quote !== "'" && quote !== "`") return undefined;
+  let value = "";
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source.charAt(i);
+    if (ch === quote) return { value, end: i + 1 };
+    if (ch !== "\\") {
+      value += ch;
+      i += 1;
+      continue;
+    }
+    const next = source.charAt(i + 1);
+    if (next === "") return undefined;
+    if (next === "x") {
+      const hex = source.slice(i + 2, i + 4);
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        value += String.fromCharCode(Number.parseInt(hex, 16));
+        i += 4;
+        continue;
+      }
+    }
+    if (next === "u") {
+      if (source.charAt(i + 2) === "{") {
+        const close = source.indexOf("}", i + 3);
+        const hex = close === -1 ? "" : source.slice(i + 3, close);
+        if (/^[0-9A-Fa-f]{1,6}$/.test(hex)) {
+          value += String.fromCodePoint(Number.parseInt(hex, 16));
+          i = close + 1;
+          continue;
+        }
+      } else {
+        const hex = source.slice(i + 2, i + 6);
+        if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
+          value += String.fromCharCode(Number.parseInt(hex, 16));
+          i += 6;
+          continue;
+        }
+      }
+    }
+    value += SIMPLE_JS_ESCAPES[next] ?? next;
+    i += 2;
+  }
+  return undefined;
+}
+
+/**
+ * Every `tools.exec_command({...})` call site in a unified-exec JS program
+ * whose argument is an inline object literal, with its `cmd` and `workdir`
+ * string values decoded. This is a tolerant single-pass scanner, not a JS
+ * parser: it walks the object literal tracking brace/bracket depth and
+ * string literals, and only harvests top-level `cmd:`/`workdir:` properties
+ * (bare or quoted keys — both spellings occur in real rollouts). A call
+ * whose argument is a variable reference is skipped — the conservative
+ * under-report the read heuristic already accepts everywhere else.
+ */
+function extractUnifiedExecCommands(source: string): UnifiedExecCommand[] {
+  const calls: UnifiedExecCommand[] = [];
+  let from = 0;
+  for (;;) {
+    const at = source.indexOf(UNIFIED_EXEC_MARKER, from);
+    if (at === -1) break;
+    from = at + UNIFIED_EXEC_MARKER.length;
+    let i = skipWhitespace(source, from);
+    if (source.charAt(i) !== "{") continue;
+    let depth = 0;
+    let pendingKey: string | undefined;
+    let cmd: string | undefined;
+    let workdir: string | undefined;
+    scan: while (i < source.length) {
+      const ch = source.charAt(i);
+      switch (ch) {
+        case "{":
+        case "[":
+          depth += 1;
+          i += 1;
+          break;
+        case "}":
+        case "]":
+          depth -= 1;
+          i += 1;
+          if (depth === 0) break scan;
+          break;
+        case ",":
+          if (depth === 1) pendingKey = undefined;
+          i += 1;
+          break;
+        case '"':
+        case "'":
+        case "`": {
+          const literal = scanStringLiteral(source, i);
+          if (literal === undefined) break scan;
+          if (depth === 1) {
+            if (pendingKey !== undefined) {
+              if (pendingKey === "cmd") cmd ??= literal.value;
+              else if (pendingKey === "workdir") workdir ??= literal.value;
+              pendingKey = undefined;
+            } else {
+              const after = skipWhitespace(source, literal.end);
+              if (source.charAt(after) === ":") {
+                pendingKey = literal.value;
+                i = after + 1;
+                continue;
+              }
+            }
+          }
+          i = literal.end;
+          break;
+        }
+        default: {
+          if (depth === 1 && /[A-Za-z_$]/.test(ch)) {
+            let j = i + 1;
+            while (j < source.length && /[\w$]/.test(source.charAt(j))) j += 1;
+            const after = skipWhitespace(source, j);
+            if (source.charAt(after) === ":") {
+              pendingKey = source.slice(i, j);
+              i = after + 1;
+              continue;
+            }
+            i = j;
+            break;
+          }
+          i += 1;
+        }
+      }
+    }
+    if (cmd !== undefined) calls.push({ cmd, ...(workdir !== undefined && { workdir }) });
+    from = Math.max(from, i);
+  }
+  return calls;
 }
 
 /**
@@ -184,15 +444,37 @@ export function computeCodexFileAccess(transcript: CodexTranscript): Map<string,
       continue;
     }
 
+    if (item.kind === "customToolCall" && item.name === "exec" && item.input !== undefined) {
+      // Unified exec (0.144+): one JS program may carry several exec_command
+      // calls AND a patch envelope — harvest both. The `apply_patch` guard
+      // keeps stray `*** ... File:` prose in an unrelated command (say, a
+      // heredoc discussing patches) from being misread as an edit.
+      if (item.input.includes("apply_patch")) {
+        for (const match of item.input.matchAll(EMBEDDED_PATCH_HEADER_PATTERN)) {
+          const rawPath = match[1]?.trim();
+          if (rawPath === undefined || rawPath === "") continue;
+          touch(resolveAgainstCwd(rawPath, cwd), "edit", record.line, record.timestamp);
+        }
+      }
+      for (const call of extractUnifiedExecCommands(item.input)) {
+        const base = call.workdir ?? cwd;
+        for (const rawPath of readPathsFromCommand(tokenize(call.cmd))) {
+          touch(resolveAgainstCwd(rawPath, base), "read", record.line, record.timestamp);
+        }
+      }
+      continue;
+    }
+
     if (
       item.kind === "functionCall" &&
       (item.name === "exec_command" || item.name === "shell") &&
       item.argumentsJson !== undefined
     ) {
-      const tokens = commandTokens(item.argumentsJson);
-      if (tokens === undefined) continue;
-      for (const rawPath of readPathsFromCommand(tokens)) {
-        touch(resolveAgainstCwd(rawPath, cwd), "read", record.line, record.timestamp);
+      const call = commandTokens(item.argumentsJson);
+      if (call === undefined) continue;
+      const base = call.workdir ?? cwd;
+      for (const rawPath of readPathsFromCommand(call.tokens)) {
+        touch(resolveAgainstCwd(rawPath, base), "read", record.line, record.timestamp);
       }
     }
   }

@@ -14,8 +14,19 @@ const FIXTURE = join(
   "../../test/fixtures/codex/files-skills/rollout-2026-07-04T09-00-00-dddddddd-dddd-dddd-dddd-dddddddddddd.jsonl",
 );
 
+const UNIFIED_EXEC_FIXTURE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/codex/files-skills/rollout-2026-07-14T09-00-00-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee.jsonl",
+);
+
 async function loadFixture() {
   const transcript = await parseCodexTranscriptFile(FIXTURE);
+  expect(transcript.format).toBe("current");
+  return transcript;
+}
+
+async function loadUnifiedExecFixture() {
+  const transcript = await parseCodexTranscriptFile(UNIFIED_EXEC_FIXTURE);
   expect(transcript.format).toBe("current");
   return transcript;
 }
@@ -82,6 +93,72 @@ describe("computeCodexFileAccess", () => {
       warnings: [],
     });
     expect(map.size).toBe(0);
+  });
+});
+
+describe("computeCodexFileAccess — unified exec (Codex 0.144+)", () => {
+  it("extracts reads from tools.exec_command call sites, splitting compound commands and resolving against the per-call workdir", async () => {
+    const transcript = await loadUnifiedExecFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Line 4: `pwd && sed -n '1,40p' src/foo.ts && rg -n 'alpha|beta' src/bar.ts | sed -n '1,20p'`
+    // — the leading `pwd` segment must not swallow the later read segments,
+    // and the quoted 'alpha|beta' pattern must stay one token (no split on
+    // the | inside it). Relative paths resolve against the call's workdir
+    // (…/sub), not the session cwd.
+    expect(map.get("/Users/test/unified-proj/sub/src/foo.ts")?.reads).toBe(1);
+    expect(map.get("/Users/test/unified-proj/sub/src/bar.ts")?.reads).toBe(1);
+  });
+
+  it("accepts the inline JSON-style call form and skips redirect targets", async () => {
+    const transcript = await loadUnifiedExecFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Line 6: `cat notes.md > /tmp/out.txt && cat README.md 2>err.log`
+    expect(map.get("/Users/test/unified-proj/notes.md")?.reads).toBe(1);
+    expect(map.get("/Users/test/unified-proj/README.md")?.reads).toBe(1);
+    expect(map.has("/tmp/out.txt")).toBe(false);
+    expect([...map.keys()].some((p) => p.endsWith("err.log"))).toBe(false);
+  });
+
+  it("counts edits from a patch envelope embedded as a JS string literal (\\n-escaped headers)", async () => {
+    const transcript = await loadUnifiedExecFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Line 8: apply_patch with a relative Update header (cwd-resolved) and
+    // an absolute Add header.
+    const updated = map.get("/Users/test/unified-proj/src/foo.ts");
+    expect(updated?.edits).toBe(1);
+    expect(updated?.reads).toBe(0); // the earlier read went to …/sub/src/foo.ts, a different path
+    expect(map.get("/Users/test/unified-proj/src/new.ts")?.edits).toBe(1);
+  });
+
+  it("ignores variable-argument exec_command calls, MCP tool calls, and heredoc bodies", async () => {
+    const transcript = await loadUnifiedExecFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Line 10: `tools.exec_command(args)` (nothing extractable), an MCP call
+    // whose arguments merely mention cmd-like strings, and a heredoc that
+    // WRITES src/gen.ts (its body mentioning ./inner.js is content, not a
+    // read).
+    for (const absent of ["hidden.ts", "zap.ts", "mcp.ts", "gen.ts", "inner.js"]) {
+      expect([...map.keys()].some((p) => p.endsWith(absent))).toBe(false);
+    }
+    // Exactly the six paths asserted above — nothing else leaked in.
+    expect(map.size).toBe(6);
+  });
+
+  it("anchors firstLine/firstTimestamp to the exec call's own record", async () => {
+    const transcript = await loadUnifiedExecFixture();
+    const map = computeCodexFileAccess(transcript);
+    const foo = map.get("/Users/test/unified-proj/sub/src/foo.ts");
+    expect(foo?.firstLine).toBe(4);
+    expect(foo?.firstTimestamp).toBe("2026-07-14T09:00:03.000Z");
+  });
+
+  it("finds no skill invocations in a session whose user messages carry no markers", async () => {
+    const transcript = await loadUnifiedExecFixture();
+    expect(computeCodexSkillInvocations(transcript)).toEqual([]);
   });
 });
 

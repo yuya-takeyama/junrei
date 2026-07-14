@@ -72,6 +72,31 @@ describe("buildFileTreeRows", () => {
     expect(fileRows.find((r) => r.label === "root.ts")?.indent).toBe(false);
   });
 
+  it("flags an entry as a directory when another entry's path lies beneath it", () => {
+    // The corp-dev case: rg took the directory as its search root, and files
+    // under it were also read individually — the co-listed children prove
+    // the entry is a directory.
+    const entries: FileAccessEntryLike[] = [
+      entry({ path: "/proj/terraform/aws/corp-dev", reads: 6 }),
+      entry({ path: "/proj/terraform/aws/corp-dev/jobs-site/dns.tf", reads: 1 }),
+    ];
+    const rows = buildFileTreeRows(entries, "/proj");
+    const fileRows = rows.filter((r) => r.kind === "file");
+    expect(fileRows.find((r) => r.label === "corp-dev")?.isDirectory).toBe(true);
+    expect(fileRows.find((r) => r.label === "dns.tf")?.isDirectory).toBe(false);
+  });
+
+  it("does not flag a sibling that merely shares a string prefix (src/foo vs src/foobar.ts)", () => {
+    const entries: FileAccessEntryLike[] = [
+      entry({ path: "/proj/src/foo", reads: 1 }),
+      entry({ path: "/proj/src/foobar.ts", reads: 1 }),
+    ];
+    const rows = buildFileTreeRows(entries, "/proj");
+    const fileRows = rows.filter((r) => r.kind === "file");
+    expect(fileRows.find((r) => r.label === "foo")?.isDirectory).toBe(false);
+    expect(fileRows.find((r) => r.label === "foobar.ts")?.isDirectory).toBe(false);
+  });
+
   it("handles an injected-only entry (reads/edits both 0) without crashing, carrying injectedCount/injectedChars through", () => {
     const entries: FileAccessEntryLike[] = [
       entry({

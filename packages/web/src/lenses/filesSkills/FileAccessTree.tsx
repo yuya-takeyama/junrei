@@ -34,7 +34,15 @@ function injectedTitle(entry: FileAccessEntryLike): string {
  * `SKILL.md` — gets a muted `· inj N` marker next to its name; the Reads/Edits
  * cells stay numeric-only (already muted at 0 by the existing rule below), the
  * injected char count only surfaces in the marker's tooltip.
+ *
+ * A row proven to be a DIRECTORY (see `buildFileTreeRows`' `isDirectory`) —
+ * typically an rg/grep search root the shell-read heuristic counted whole —
+ * renders with a trailing `/` and a muted `· dir` marker so it can't be
+ * mistaken for a file named like one.
  */
+const DIR_MARKER_TITLE =
+  "directory — other listed paths lie beneath it; its reads are search/list commands (rg, grep, …) that took the whole directory as their root";
+
 export function FileAccessTree({ session }: Props) {
   const rows = buildFileTreeRows(session.fileAccess, session.cwd);
 
@@ -77,7 +85,12 @@ export function FileAccessTree({ session }: Props) {
                 className={`mono fs11${reread ? " rere" : ""}`}
                 style={row.indent ? { paddingLeft: "16px" } : undefined}
               >
-                {row.label}
+                {row.isDirectory ? `${row.label}/` : row.label}
+                {row.isDirectory && (
+                  <span className="fs10 mut" style={{ marginLeft: "6px" }} title={DIR_MARKER_TITLE}>
+                    · dir
+                  </span>
+                )}
                 {entry.injectedCount !== undefined && (
                   <span
                     className="fs10 mut"
