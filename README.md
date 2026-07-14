@@ -20,7 +20,7 @@ Tooling is managed with [aqua](https://aquaproj.github.io/):
 ```sh
 aqua i -l
 pnpm install
-pnpm dev        # starts the API server and Vite on incrementally selected free ports
+pnpm start        # starts the API server and Vite on incrementally selected free ports
 ```
 
 `pnpm dev` starts from API port 7868 and Web port 5874, incrementing each until
