@@ -1,22 +1,23 @@
 /**
  * Lens tabs shown inside a session shell (the persistent "band" + tab bar).
- * "turns" is Codex-only (per-turn model/duration/token table). Codex gets
- * the same tab order as Claude (overview/timeline/orchestration/context/
- * files — see `codex/orchestration.ts` / `codex/files-skills.ts` in
- * `@junrei/core` for how a Codex sub-agent forest and file access/skill
- * invocations are derived), with "turns" appended last as its one extra,
- * Codex-only tab — see `CLAUDE_LENSES`/`CODEX_LENSES` below.
+ * Codex gets the same tab order as Claude
+ * (overview/timeline/orchestration/context/files — see
+ * `codex/orchestration.ts` / `codex/files-skills.ts` in `@junrei/core` for
+ * how a Codex sub-agent forest and file access/skill invocations are
+ * derived) — see `CLAUDE_LENSES`/`CODEX_LENSES` below.
+ *
+ * A former Codex-only "turns" lens (per-turn model/duration/token table)
+ * existed here through Phase 1 of docs/roadmap.md's "Unified Timeline"; it's
+ * gone from this union now that Phase 2 folded its table into the Timeline
+ * lens's own turn-grouped spine (see `Timeline.tsx`'s `turnGroupable`).
+ * `normalizeLens` still accepts the literal string `"turns"` as an input and
+ * redirects it to `"timeline"` (see below) so old bookmarks/links keep
+ * working — that redirect is what lets it be dropped from the `Lens` union
+ * itself rather than kept as a dead tab value.
  */
-export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "turns";
+export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files";
 
-const LENSES: readonly Lens[] = [
-  "overview",
-  "timeline",
-  "orchestration",
-  "context",
-  "files",
-  "turns",
-];
+const LENSES: readonly Lens[] = ["overview", "timeline", "orchestration", "context", "files"];
 
 /** Human label per lens — shared by SessionShell (L1) and AgentShell (L3) for the tab bar and placeholders. */
 export const LENS_LABEL: Record<Lens, string> = {
@@ -25,7 +26,6 @@ export const LENS_LABEL: Record<Lens, string> = {
   orchestration: "Orchestration",
   context: "Context & cost",
   files: "Files & skills",
-  turns: "Turns",
 };
 
 /** Tab bar for a Claude Code session shell — unchanged from the pre-Codex lineup. */
@@ -37,14 +37,20 @@ export const CLAUDE_LENSES: readonly Lens[] = [
   "files",
 ];
 
-/** Tab bar for a Codex session shell — Claude's tab order, plus "turns" (Codex-only) appended last. */
+/**
+ * Tab bar for a Codex session shell — identical to `CLAUDE_LENSES` now that
+ * the Codex-only "turns" tab folded into Timeline (see `Lens`'s doc comment
+ * above). Kept as its own export, rather than collapsed into a single
+ * constant, since the two lineups are independent facts that happened to
+ * converge — a future Codex-only or Claude-only lens should be free to
+ * diverge them again without an unrelated rename.
+ */
 export const CODEX_LENSES: readonly Lens[] = [
   "overview",
   "timeline",
   "orchestration",
   "context",
   "files",
-  "turns",
 ];
 
 /**
@@ -61,14 +67,32 @@ function isLens(value: string | undefined): value is Lens {
 }
 
 /**
- * Normalizes an optional lens URL segment to a valid `Lens`, defaulting to
- * "overview" for anything unrecognized. Normalization happens only in the
- * rendered component — the URL itself is never rewritten, so a stale or
- * invalid lens segment stays exactly as typed (matches the pre-react-router
- * `parseRoute` fallback behavior).
+ * Legacy lens URL segments that no longer name a current `Lens`, mapped to
+ * where that content now lives — checked by `normalizeLens` before the
+ * `isLens` union check, so the alias can resolve even though the target
+ * string was deliberately dropped from `Lens` itself (see its doc comment).
+ * "turns" is the only entry today: the Codex-only Turns tab folded into
+ * Timeline's own turn-grouped spine in docs/roadmap.md's "Unified Timeline"
+ * Phase 2.
+ */
+const LEGACY_LENS_ALIASES: Record<string, Lens> = {
+  turns: "timeline",
+};
+
+/**
+ * Normalizes an optional lens URL segment to a valid `Lens`: a known legacy
+ * alias redirects to its replacement (see `LEGACY_LENS_ALIASES`), a current
+ * lens passes through, and anything else falls back to "overview".
+ * Normalization happens only in the rendered component — the URL itself is
+ * never rewritten, so a stale or invalid lens segment stays exactly as typed
+ * (matches the pre-react-router `parseRoute` fallback behavior).
  */
 export function normalizeLens(value: string | undefined): Lens {
-  return isLens(value) ? value : "overview";
+  if (isLens(value)) return value;
+  if (value !== undefined && value in LEGACY_LENS_ALIASES) {
+    return LEGACY_LENS_ALIASES[value] as Lens;
+  }
+  return "overview";
 }
 
 /**

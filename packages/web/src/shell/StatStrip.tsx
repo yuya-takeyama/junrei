@@ -55,7 +55,10 @@ export function StatStrip({ session }: Props) {
           <div className="sub">user / API</div>
         </Cell>
       ) : (
-        <Cell label="Turns" href={sessionPath(ref, "turns")}>
+        // No standalone Turns lens exists anymore (folded into Timeline's
+        // turn-grouped spine — docs/roadmap.md's "Unified Timeline" Phase 2),
+        // so this cell now opens the same place its Claude sibling above does.
+        <Cell label="Turns" href={sessionPath(ref, "timeline")}>
           <div className="big mt8">{session.userTurnCount}</div>
           <div className="sub">user turns</div>
         </Cell>

@@ -8,11 +8,11 @@ import type { AnySessionJson, SessionListItem } from "./api.js";
  * caller reads intent (`caps.hasApiErrors`) rather than re-deriving it.
  *
  * Only covers capabilities that were previously expressed as inline
- * `session.source === ...` conditionals in more than one place.
- * Purely local one-off branches (e.g.
- * `SessionShell`'s "turns" lens gate, which already reads `CODEX_LENSES`)
- * are left as direct `source` checks — routing them through this module too
- * would just be indirection with no shared meaning.
+ * `session.source === ...` conditionals in more than one place. Purely local
+ * one-off branches (e.g. `Timeline.tsx`'s `turnGroupable` narrow, which picks
+ * `buildClaudeTurnGroups` vs. `buildCodexTurnGroups` off which per-turn field
+ * is non-empty) are left as direct `source` checks — routing them through
+ * this module too would just be indirection with no shared meaning.
  */
 export interface SourceCaps {
   /** Per-tool-call breakdown (`toolStats`) — Claude only, no Codex equivalent. */

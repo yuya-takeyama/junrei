@@ -50,8 +50,9 @@ function StatTile({ label, big, sub }: { label: string; big: ReactNode; sub: Rea
  * The per-turn cache-write chart and API-errors panel are Claude-only
  * concepts (Codex has no cache-write cost and no "API error" log — see
  * `SourceCaps`'s `hasTurnCompositionChart`/`hasApiErrors` in `sourceCaps.ts`)
- * and are skipped for Codex; its own per-turn detail lives in the dedicated
- * Turns lens instead. Narrowed once here (rather than at each panel) since
+ * and are skipped for Codex; its own per-turn detail lives in the unified
+ * Timeline lens's turn-grouped spine instead (`buildCodexTurnGroups` in
+ * `turnGroups.ts`). Narrowed once here (rather than at each panel) since
  * `TurnCompositionChart`/`ApiErrorsPanel` take a Claude-only `SessionJson`
  * prop, not the `AnySessionJson` union.
  */

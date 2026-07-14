@@ -462,9 +462,26 @@ the events underneath, in place. Six phases, static mock in
    per-turn cost AND ≥$0.10) gets an amber tint; compactions stay visible as
    a sibling row even when their turn is collapsed. Codex sessions and
    subagent (`?agent=`) views are unchanged — flat rendering, 3-stop dial.
-2. ⬜ Codex turn spine + Turns tab removal (Codex reasoning column, no
-   step layer since Codex turns are flat) — the standalone Turns lens folds
-   into Timeline for both sources.
+2. ✅ Codex turn spine + Turns tab removal — this PR. `buildCodexTurnGroups`
+   (`turnGroups.ts`) attributes entries to `session.codex.turns` by timestamp
+   (mirrors Phase 1's line rule with `startedAt` standing in for `line`, since
+   Codex turns carry no source line): sort turns by `startedAt` (stable for
+   turns missing one), advance the bucket pointer only when the next turn's
+   `startedAt` is `<=` the entry's own timestamp, folding pre-first-turn and
+   timestamp-less entries into whatever bucket is current rather than
+   dropping them. Reuses `TurnRow`/`turnColumns.ts` unchanged — the Codex
+   column set (Started/Dur/Input/C·Read/Output/Reasoning, matching mock panel
+   2c) falls out of the same presence-driven `visibleTurnColumns` Phase 1
+   built, no new grid. `Timeline.tsx`'s grouped-vs-flat gate and adapter
+   choice are now presence-driven across both sources (`session.turnUsage` or
+   `session.codex.turns` non-empty), not a `source ===` branch, and
+   `SessionShell` passes `session` through for both. The standalone Turns
+   lens is gone: `CodexTurns.tsx` deleted, `Lens` drops `"turns"`
+   (`CODEX_LENSES` now equals `CLAUDE_LENSES`), `normalizeLens` redirects the
+   literal string `"turns"` to `"timeline"` so old bookmarks don't 404. The
+   Codex-only role/nickname/session-total-reasoning meta chips `CodexTurns`
+   used to show had no other home and were dropped rather than ported
+   (origin/CLI version were already duplicated in the session header).
 3. ⬜ Mini-map rewrite: one tick per turn boundary, amber dashes for
    compactions, tick spacing ∝ event count, click-to-scroll viewport box.
 4. ⬜ Per-step (per-API-call) sub-rows inside an expanded turn — collapsed by
