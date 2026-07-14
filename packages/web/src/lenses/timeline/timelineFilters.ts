@@ -1,9 +1,17 @@
 import type { TimelineEntry } from "../../api.js";
 
-/** The three fixed detail-dial stops — see design-spec/12-timeline.md. */
-export type DetailDial = "user-only" | "minimal" | "full";
+/**
+ * The four fixed detail-dial stops. "turns" is the turn-grouped Timeline
+ * spine's all-collapsed default (Claude Code main transcript only — see
+ * `turnGroups.ts` and docs/roadmap.md's "Unified Timeline" phase 1); for kind
+ * filtering it behaves exactly like "full" (see `kindAllowedByDial` below) —
+ * collapsing rows is a per-turn expand/override state Timeline.tsx tracks
+ * separately, not a kind restriction. The flat (Codex / subagent) rendering
+ * path never offers this stop.
+ */
+export type DetailDial = "turns" | "user-only" | "minimal" | "full";
 
-export const DIAL_STOPS: readonly DetailDial[] = ["user-only", "minimal", "full"];
+export const DIAL_STOPS: readonly DetailDial[] = ["turns", "user-only", "minimal", "full"];
 
 /** One toggle per filter chip; chips further narrow whatever the dial already allows. */
 export interface ChipState {
@@ -62,7 +70,9 @@ export function toggleChip(chips: ChipState, key: keyof ChipState): ChipState {
  * Kinds included at the "minimal" dial stop — narrative-only: user turns,
  * assistant prose, subagent launches, and compaction breaks. Tool calls and
  * thinking are hidden. "user-only" further restricts to just `user`; "full"
- * lifts every kind-level restriction (chips still apply).
+ * and "turns" both lift every kind-level restriction (chips still apply) —
+ * "turns" only differs from "full" in Timeline.tsx's per-turn expand state,
+ * never in which kinds are allowed through once a turn IS expanded.
  */
 const MINIMAL_KINDS = new Set<TimelineEntry["kind"]>([
   "user",

@@ -442,6 +442,38 @@ extract — so the missing signals shipped as one same-day PR series instead.
   fallback itself, `appType` defaults to `"spa"`, no config change needed) —
   this PR
 
+## Unified Timeline (Turns × Timeline)
+
+Dogfooding kept surfacing the same friction: the Timeline lens (per-event
+transcript) and the Turns lens (per-turn table, Codex-only) show the same
+session at two different altitudes with no bridge between them. The fix is a
+single lens — the Timeline groups its existing event blocks by user turn, so
+a turn header row reads as a dense table (Codex-parity) and expands to reveal
+the events underneath, in place. Six phases, static mock in
+`design/turns-timeline.dc.html`:
+
+1. ✅ Claude turn spine — this PR. Claude Code main-transcript Timeline groups
+   entries into `TurnGroup`s (`turnGroups.ts`, attribution mirrors
+   `computeTurnUsage`'s "greatest `turn.line <= entry.line`" rule); turns
+   render as a dense `.trg` table (`TurnRow.tsx`) collapsed by default (new
+   "turns" detail-dial stop, 4 stops total — `user-only`/`minimal`/`full`
+   still expand every turn, same kind subsets as before); a row click toggles
+   one turn against the dial's default; an outlier turn (>25% of summed
+   per-turn cost AND ≥$0.10) gets an amber tint; compactions stay visible as
+   a sibling row even when their turn is collapsed. Codex sessions and
+   subagent (`?agent=`) views are unchanged — flat rendering, 3-stop dial.
+2. ⬜ Codex turn spine + Turns tab removal (Codex reasoning column, no
+   step layer since Codex turns are flat) — the standalone Turns lens folds
+   into Timeline for both sources.
+3. ⬜ Mini-map rewrite: one tick per turn boundary, amber dashes for
+   compactions, tick spacing ∝ event count, click-to-scroll viewport box.
+4. ⬜ Per-step (per-API-call) sub-rows inside an expanded turn — collapsed by
+   default.
+5. ⬜ Long-turn elision — first/last 2 events always render, middle events
+   collapse behind a count + "show all"/"show N more" affordance.
+6. ⬜ Interaction polish (hover attribution for mixed-model clusters, capped
+   dot cluster + "+n" overflow, incomplete-cost tooltips).
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

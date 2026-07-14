@@ -767,6 +767,149 @@ button.tool-hd {
 }
 
 /* ---------------------------------------------------------------------
+   Turn-grouped Timeline spine (Claude Code main transcript only) — the
+   dense turns table `.trg`/`.trow` renders collapsed by default; expanding
+   a turn (`.exh` header + `.ex` wrapper) reveals its `.tlrow` event rows
+   above, unchanged. See turnGroups.ts/TurnRow.tsx and docs/roadmap.md's
+   "Unified Timeline" phase 1.
+   --------------------------------------------------------------------- */
+
+/* Sticky controls bar the expanded turn header (`.exh`) parks below — see
+   `--tctl-h` on `.exh`. Only applied in the turn-grouped path; the flat
+   rendering's controls bar is unchanged. */
+.tctl {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg);
+}
+
+.ann {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mut);
+  line-height: 1.6;
+}
+
+/* grid-template-columns is set inline per render (see turnColumns.ts's
+   `turnGridTemplate` and TurnRow.tsx) — the visible numeric columns are
+   presence-driven, not a fixed count. */
+.trg {
+  display: grid;
+  gap: 10px;
+}
+.trow {
+  align-items: center;
+  padding: 7px 20px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12.5px;
+  min-height: 44px;
+}
+.trow.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+button.trow {
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button.trow:hover {
+  background: var(--pan);
+}
+.tnum {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+.car {
+  color: var(--mut);
+  font-size: 9px;
+  display: inline-block;
+  width: 10px;
+  flex: none;
+}
+.mrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dcl {
+  display: inline-flex;
+  align-items: center;
+}
+.dcl .mdot {
+  margin-right: -2px;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+.pv {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pvq {
+  color: var(--tx);
+}
+.stat {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* Outlier turn — eats an outsized share of session cost (see `isOutlierTurn`).
+   Selector specificity matches `button.trow:hover` (both a type + 2 classes/
+   pseudo-class) and sits after it in source order, so the tint/expanded
+   background stays visible through hover instead of the plain `.pan` hover
+   fill winning the cascade tie. */
+button.trow.tint {
+  background: rgba(240, 166, 60, 0.06);
+}
+:root[data-theme="light"] button.trow.tint {
+  background: rgba(168, 110, 20, 0.07);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) button.trow.tint {
+    background: rgba(168, 110, 20, 0.07);
+  }
+}
+.approx {
+  opacity: 0.55;
+}
+/* Expanded turn's own header row — sticks just below the controls bar while open. */
+button.trow.exh {
+  position: sticky;
+  top: var(--tctl-h, 92px);
+  z-index: 2;
+  background: var(--pan);
+  box-shadow: inset 2px 0 0 var(--amb);
+}
+.ex {
+  display: flex;
+  flex-direction: column;
+  /* Matches the flat path's own `.col` row gap (Timeline.tsx) — `.tlrow`
+     itself carries no vertical margin, relying on its container for spacing
+     either way. */
+  gap: 10px;
+  border-bottom: 1px dotted var(--bd);
+  background: rgba(0, 0, 0, 0.14);
+  padding: 10px 20px 14px;
+}
+:root[data-theme="light"] .ex {
+  background: rgba(0, 0, 0, 0.03);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .ex {
+    background: rgba(0, 0, 0, 0.03);
+  }
+}
+
+/* ---------------------------------------------------------------------
    Record-detail slide-over (L3, screen 8). See design-spec/17-record-detail.md
    and 99-components.md's `.so`/`.kv`/`.cp`/`.code` component specs.
    --------------------------------------------------------------------- */
