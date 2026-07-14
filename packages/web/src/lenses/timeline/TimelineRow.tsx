@@ -195,13 +195,14 @@ function ToolBlock({
             <span className="lbl" style={isError ? { color: "var(--err)" } : undefined}>
               {isError ? "Tool · error" : "Tool"}
             </span>
-            {meta !== undefined && (
-              <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
-            )}
           </span>
           <span className="mono fs12">
-            {entry.name} {entry.inputSummary}
+            <span className="tool-name">{entry.name}</span>{" "}
+            <span className="tool-args">{entry.inputSummary}</span>
           </span>
+          {meta !== undefined && (
+            <span className={isError ? "mono fs10 errtx" : "mono fs10 mut"}>{meta}</span>
+          )}
         </button>
         <SourceLine line={entry.line} auto onOpenRecord={onOpenRecord} />
       </div>

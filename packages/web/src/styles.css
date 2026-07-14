@@ -653,6 +653,12 @@ button.tool-hd {
   gap: 10px;
   min-width: 0;
 }
+.tool-name {
+  font-weight: 600;
+}
+.tool-args {
+  color: var(--mut);
+}
 .btxt {
   font-size: 13px;
   line-height: 1.55;
