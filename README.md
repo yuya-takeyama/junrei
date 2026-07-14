@@ -1,7 +1,8 @@
 # Junrei
 
-**Agent Statistics Analyzer** — a local-first tool that turns your coding-agent
-session logs into quantitative, reproducible metrics.
+**Zero-config agent statistics analyzer for Claude Code and Codex** — a
+local-first tool that turns your existing session logs into quantitative,
+reproducible metrics.
 
 Junrei (巡礼, "pilgrimage") walks a session's route again after the fact and
 shows where the tokens, dollars, and time actually went. It parses session
@@ -116,8 +117,8 @@ claude mcp add --transport http junrei http://localhost:7867/mcp
 
 ## How it works
 
-Junrei reads directly from each agent's local session logs — nothing is sent
-anywhere:
+There is nothing to configure: Junrei discovers each agent's local session
+logs and reads them in place — nothing is sent anywhere:
 
 - **Claude Code**: `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`),
   plus subagent sidecar transcripts and a join against the Desktop app's
