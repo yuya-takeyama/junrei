@@ -47,7 +47,15 @@ export function displayPath(path: string, cwd: string | undefined): string {
 
 export type FileTreeRow =
   | { kind: "dir"; key: string; label: string }
-  | { kind: "file"; key: string; label: string; indent: boolean; entry: FileAccessEntryLike };
+  | {
+      kind: "file";
+      key: string;
+      label: string;
+      indent: boolean;
+      entry: FileAccessEntryLike;
+      /** See `buildFileTreeRows` — true when another listed path lies beneath this one, proving it's a directory (e.g. an rg/grep search root). */
+      isDirectory: boolean;
+    };
 
 /**
  * Flatten `entries` into display rows: grouped by containing directory (dirs
@@ -59,11 +67,24 @@ export type FileTreeRow =
  * paths would interleave a subdirectory's entries between its parent's files
  * (`src/parser.ts` < `src/pricing/x` < `src/session-data.ts`) and emit the
  * parent header — and its React row key — twice.
+ *
+ * An entry row is flagged `isDirectory` when ANOTHER entry's path lies
+ * strictly beneath it — a file can't contain other paths, so this is proof,
+ * not a guess. Such entries are directories a read command took as a whole —
+ * rg/grep search roots, `ls`-style listings — which Codex's shell-command
+ * read heuristic can't tell apart from files by the token alone (see
+ * core's `codex/files-skills.ts`). The converse doesn't hold: a directory
+ * none of whose files were ALSO touched individually still renders as a
+ * plain file row — transcript text alone can't prove that one either way.
  */
 export function buildFileTreeRows(
   entries: readonly FileAccessEntryLike[],
   cwd: string | undefined,
 ): FileTreeRow[] {
+  const isDirectory = (path: string): boolean => {
+    const prefix = `${path}/`;
+    return entries.some((other) => other.path.startsWith(prefix));
+  };
   const split = entries.map((entry) => {
     const display = displayPath(entry.path, cwd);
     const slashIdx = display.lastIndexOf("/");
@@ -90,7 +111,14 @@ export function buildFileTreeRows(
       rows.push({ kind: "dir", key: `dir:${dir}`, label: dir });
     }
     currentDir = dir === "" ? undefined : dir;
-    rows.push({ kind: "file", key: entry.path, label: name, indent: dir !== "", entry });
+    rows.push({
+      kind: "file",
+      key: entry.path,
+      label: name,
+      indent: dir !== "",
+      entry,
+      isDirectory: isDirectory(entry.path),
+    });
   }
   return rows;
 }
