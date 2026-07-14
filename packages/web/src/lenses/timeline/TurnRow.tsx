@@ -49,6 +49,11 @@ interface Props {
   expanded: boolean;
   isOutlier: boolean;
   onToggle: (line: number) => void;
+  /** Registers this row's header button by `anchorLine` — the turn-aware
+   * minimap (`TurnMiniMap.tsx`) scrolls to it directly, which is what makes
+   * clicking into a *collapsed* turn actually work (the header button is
+   * always mounted, unlike its entries). */
+  registerRef: (line: number, el: HTMLButtonElement | null) => void;
 }
 
 /**
@@ -63,7 +68,15 @@ interface Props {
  * `#` and `Model · Prompt` stay hand-written since their caret/aria/dot-
  * cluster markup doesn't fit a generic column descriptor.
  */
-export function TurnRow({ group, columns, gridTemplate, expanded, isOutlier, onToggle }: Props) {
+export function TurnRow({
+  group,
+  columns,
+  gridTemplate,
+  expanded,
+  isOutlier,
+  onToggle,
+  registerRef,
+}: Props) {
   const promptPreview = group.userEntry?.text.split("\n")[0];
   const rowClass = joinClasses("trow", "trg", isOutlier && "tint", expanded && "exh");
 
@@ -74,6 +87,7 @@ export function TurnRow({ group, columns, gridTemplate, expanded, isOutlier, onT
       aria-expanded={expanded}
       style={{ gridTemplateColumns: gridTemplate }}
       onClick={() => onToggle(group.anchorLine)}
+      ref={(el) => registerRef(group.anchorLine, el)}
     >
       <span className="tnum">
         <span className="car" style={expanded ? { color: "var(--amb)" } : undefined}>
