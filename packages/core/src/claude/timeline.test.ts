@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { estimateCostUsd } from "../shared/pricing/pricing.js";
 import type {
   ApiErrorEntry,
   AssistantTextEntry,
@@ -11,11 +12,13 @@ import type {
   ToolCallEntry,
   UserEntry,
 } from "../shared/timeline.js";
+import type { TokenUsage } from "../shared/types.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
 import type { SessionData } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
 import { loadSubagentSessionData } from "./subagents.js";
 import { buildClaudeTimeline, getClaudeRecordDetail } from "./timeline.js";
+import type { AssistantContentBlock, ClaudeTranscript } from "./types.js";
 
 const FIXTURE_PROJECTS = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -34,6 +37,33 @@ const AGENT_ID = "aaaa111122223333f";
 async function loadMainData(): Promise<SessionData> {
   const transcript = await parseClaudeTranscriptFile(SESSION_FILE);
   return buildSessionData(transcript);
+}
+
+// Inline-transcript helpers for the multi-record-message cases the shared
+// fixture doesn't cover (its text-bearing messages are all single-record).
+function usageOf(outputTokens: number): TokenUsage {
+  return { inputTokens: 100, outputTokens, cacheReadTokens: 400, cacheCreationTokens: 0 };
+}
+
+function assistantStep(
+  line: number,
+  messageId: string,
+  blocks: AssistantContentBlock[],
+  outputTokens: number,
+): ClaudeTranscript["records"][number] {
+  return {
+    type: "assistant",
+    line,
+    messageId,
+    model: "claude-fable-5",
+    timestamp: `2026-07-09T01:00:0${String(line)}.000Z`,
+    usage: usageOf(outputTokens),
+    blocks,
+  };
+}
+
+function transcriptOf(records: ClaudeTranscript["records"]): ClaudeTranscript {
+  return { filePath: "/tmp/fake.jsonl", records, warnings: [] };
 }
 
 describe("buildClaudeTimeline", () => {
@@ -136,6 +166,48 @@ describe("buildClaudeTimeline", () => {
     expect(done?.costUsd).toBeGreaterThan(0);
     // No per-message duration field exists in the log — never fabricated.
     expect(done?.apiDurationMs).toBeUndefined();
+  });
+
+  it("prices a text block by its message's FINAL usage, not the record's streaming snapshot", async () => {
+    // One API message spans several JSONL records, each repeating `usage`
+    // with output_tokens as a GROWING streaming snapshot (5→60 here). The
+    // text block lands on an early record, so pricing by record.usage
+    // undercounted — the badge must come from the deduped ApiMessage.
+    const data = buildSessionData(
+      transcriptOf([
+        assistantStep(1, "msg_a", [{ kind: "text", text: "Let me check." }], 5),
+        assistantStep(
+          2,
+          "msg_a",
+          [{ kind: "tool_use", toolUseId: "toolu_x", name: "Read", input: {} }],
+          60,
+        ),
+      ]),
+    );
+    const entries = await buildClaudeTimeline(data);
+    const text = entries.find((e): e is AssistantTextEntry => e.kind === "assistant-text");
+    expect(text?.outputTokens).toBe(60);
+    expect(text?.costUsd).toBe(estimateCostUsd("claude-fable-5", usageOf(60)));
+  });
+
+  it("puts the usage badge only on the message's LAST text block", async () => {
+    const data = buildSessionData(
+      transcriptOf([
+        assistantStep(1, "msg_b", [{ kind: "text", text: "part one" }], 5),
+        assistantStep(2, "msg_b", [{ kind: "text", text: "part two" }], 90),
+      ]),
+    );
+    const entries = await buildClaudeTimeline(data);
+    const texts = entries.filter((e): e is AssistantTextEntry => e.kind === "assistant-text");
+    expect(texts).toHaveLength(2);
+    // Both blocks belong to ONE API message — repeating the message total on
+    // each would read as 2× the real cost in the list, so only the last
+    // block carries the badge. The model chip stays on both.
+    expect(texts[0]?.outputTokens).toBeUndefined();
+    expect(texts[0]?.costUsd).toBeUndefined();
+    expect(texts[0]?.model).toBe("claude-fable-5");
+    expect(texts[1]?.outputTokens).toBe(90);
+    expect(texts[1]?.costUsd).toBe(estimateCostUsd("claude-fable-5", usageOf(90)));
   });
 
   it("recognizes compaction boundaries", async () => {
@@ -348,6 +420,22 @@ describe("getClaudeRecordDetail", () => {
     expect(detail.model).toBe("claude-fable-5");
     expect(detail.outputTokens).toBe(80);
     expect(detail.costUsd).toBeGreaterThan(0);
+  });
+
+  it("reports the message-final usage on ANY of the message's text blocks", async () => {
+    // Unlike the timeline badge (last text block only), the single-record
+    // detail view answers "what did this message cost" on every block — and
+    // never with the record's own streaming snapshot (5 here).
+    const data = buildSessionData(
+      transcriptOf([
+        assistantStep(1, "msg_b", [{ kind: "text", text: "part one" }], 5),
+        assistantStep(2, "msg_b", [{ kind: "text", text: "part two" }], 90),
+      ]),
+    );
+    const detail = await getClaudeRecordDetail(data, 1);
+    if (detail?.kind !== "assistant-text") throw new Error("expected assistant-text");
+    expect(detail.outputTokens).toBe(90);
+    expect(detail.costUsd).toBe(estimateCostUsd("claude-fable-5", usageOf(90)));
   });
 
   it("returns full subagent-launch detail, unresolved without mainFilePath", async () => {

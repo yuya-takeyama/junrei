@@ -42,8 +42,9 @@ import {
   truncate,
   truncateOneLine,
 } from "../shared/timeline.js";
+import type { TokenUsage } from "../shared/types.js";
 import { computeUsage } from "./metrics.js";
-import type { SessionData, ToolCall } from "./session-data.js";
+import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
 import { asyncAgentLaunchToolUseIds } from "./session-data.js";
 import { listSubagentRefs, loadSubagentSessionData, type SubagentRef } from "./subagents.js";
 import type {
@@ -108,6 +109,57 @@ function isSubagentLaunchTool(name: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Per-message usage resolution for assistant-text badges
+// ---------------------------------------------------------------------------
+
+/**
+ * Usage to price an assistant record's badge with. A record's own `usage` is
+ * a streaming snapshot whose output_tokens GROWS across the message's records
+ * (e.g. 5→5→473) — only the deduped `ApiMessage` carries the final billed
+ * total (see its doc comment). Falls back to the record's own snapshot when
+ * the record has no messageId to look up (or the message is absent from
+ * `apiMessages`, e.g. hand-built SessionData): a lone record's snapshot is
+ * the best available figure.
+ */
+function resolveMessageUsage(
+  record: AssistantRecord,
+  apiMessagesById: Map<string, ApiMessage>,
+): TokenUsage | undefined {
+  const message =
+    record.messageId !== undefined ? apiMessagesById.get(record.messageId) : undefined;
+  return message?.usage ?? record.usage;
+}
+
+/**
+ * Line of the last text-block-bearing record per message id. Because the
+ * badge shows the MESSAGE's usage (not the record's snapshot), a message that
+ * emits several text blocks must carry it exactly once — repeating the same
+ * total on every block would read as N× the real cost in the timeline list.
+ */
+function lastTextLineByMessageId(records: SessionData["records"]): Map<string, number> {
+  const byId = new Map<string, number>();
+  for (const record of records) {
+    if (record.type !== "assistant" || !("blocks" in record)) continue;
+    if (record.messageId === undefined) continue;
+    if (record.blocks.some((b) => b.kind === "text")) byId.set(record.messageId, record.line);
+  }
+  return byId;
+}
+
+/** Whether this text block is its message's last — the badge carrier. */
+function carriesUsageBadge(
+  record: AssistantRecord,
+  block: ContentBlockText,
+  lastTextLines: Map<string, number>,
+): boolean {
+  const texts = record.blocks.filter((b) => b.kind === "text");
+  if (texts[texts.length - 1] !== block) return false;
+  // No messageId → nothing to group by; the record keeps its own badge.
+  if (record.messageId === undefined) return true;
+  return lastTextLines.get(record.messageId) === record.line;
+}
+
+// ---------------------------------------------------------------------------
 // Subagent resolution (shared between list + detail builders)
 // ---------------------------------------------------------------------------
 
@@ -156,6 +208,8 @@ export async function buildClaudeTimeline(
   const toolCallsById = new Map(data.toolCalls.map((c) => [c.toolUseId, c]));
   const launchByTaskId = new Map(data.backgroundLaunches.map((l) => [l.taskId, l]));
   const asyncLaunchIds = asyncAgentLaunchToolUseIds(data);
+  const apiMessagesById = new Map(data.apiMessages.map((m) => [m.messageId, m]));
+  const lastTextLines = lastTextLineByMessageId(data.records);
 
   const refByToolUseId = new Map<string, SubagentRef>();
   if (opts.mainFilePath !== undefined) {
@@ -197,7 +251,14 @@ export async function buildClaudeTimeline(
         if (!("blocks" in record)) break;
         for (const block of record.blocks) {
           if (block.kind === "text") {
-            entries.push(buildAssistantTextEntry(record, block));
+            entries.push(
+              buildAssistantTextEntry(
+                record,
+                block,
+                resolveMessageUsage(record, apiMessagesById),
+                carriesUsageBadge(record, block, lastTextLines),
+              ),
+            );
           } else if (block.kind === "thinking") {
             entries.push(buildThinkingEntry(record, block));
           } else if (block.kind === "tool_use") {
@@ -262,14 +323,21 @@ export async function buildClaudeTimeline(
   return entries;
 }
 
+/**
+ * `usage` is the message-final usage from `resolveMessageUsage`, and
+ * `showUsage` (from `carriesUsageBadge`) confines the badge to the message's
+ * last text block; the model chip stays on every block.
+ */
 function buildAssistantTextEntry(
   record: AssistantRecord,
   block: ContentBlockText,
+  usage: TokenUsage | undefined,
+  showUsage: boolean,
 ): AssistantTextEntry {
   const { text, truncated } = truncate(block.text, ASSISTANT_TEXT_LIMIT);
   const costUsd =
-    record.model !== undefined && record.usage !== undefined
-      ? estimateCostUsd(record.model, record.usage)
+    showUsage && record.model !== undefined && usage !== undefined
+      ? estimateCostUsd(record.model, usage)
       : undefined;
   return {
     kind: "assistant-text",
@@ -278,7 +346,7 @@ function buildAssistantTextEntry(
     line: record.line,
     ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
     ...(record.model !== undefined && { model: record.model }),
-    ...(record.usage !== undefined && { outputTokens: record.usage.outputTokens }),
+    ...(showUsage && usage !== undefined && { outputTokens: usage.outputTokens }),
     ...(costUsd !== undefined && { costUsd }),
   };
 }
@@ -511,7 +579,7 @@ export async function getClaudeRecordDetail(
       return buildToolCallDetail(call);
     }
     const text = record.blocks.find((b): b is ContentBlockText => b.kind === "text");
-    if (text !== undefined) return buildAssistantTextDetail(record, text);
+    if (text !== undefined) return buildAssistantTextDetail(record, text, data);
     const thinking = record.blocks.find((b): b is ContentBlockThinking => b.kind === "thinking");
     if (thinking !== undefined) return buildThinkingDetail(record, thinking);
     return undefined;
@@ -580,13 +648,21 @@ export async function getClaudeRecordDetail(
   return undefined;
 }
 
+/**
+ * Unlike the timeline entry (badge confined to the message's last text block
+ * — see `carriesUsageBadge`), the detail always reports the owning API
+ * message's final usage: a single-record view has no list to double-count in,
+ * and "what did this message cost" is the useful answer on any of its blocks.
+ */
 function buildAssistantTextDetail(
   record: AssistantRecord,
   block: ContentBlockText,
+  data: SessionData,
 ): AssistantTextRecordDetail {
+  const usage = resolveMessageUsage(record, new Map(data.apiMessages.map((m) => [m.messageId, m])));
   const costUsd =
-    record.model !== undefined && record.usage !== undefined
-      ? estimateCostUsd(record.model, record.usage)
+    record.model !== undefined && usage !== undefined
+      ? estimateCostUsd(record.model, usage)
       : undefined;
   return {
     kind: "assistant-text",
@@ -594,7 +670,7 @@ function buildAssistantTextDetail(
     line: record.line,
     ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
     ...(record.model !== undefined && { model: record.model }),
-    ...(record.usage !== undefined && { outputTokens: record.usage.outputTokens }),
+    ...(usage !== undefined && { outputTokens: usage.outputTokens }),
     ...(costUsd !== undefined && { costUsd }),
   };
 }
