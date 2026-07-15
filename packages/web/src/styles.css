@@ -955,6 +955,39 @@ button.trow.exh {
   }
 }
 
+/* Long-turn middle-elision summary row (`elision.ts`/`Timeline.tsx`'s
+   `ElisionSummary`, phase 5) — same dotted-rule-flanked-line shape as
+   `.cbreak`/`.cbline` above, matching design mock panel 2d's `.elide`/
+   `.eline` exactly. Indented to the same 54px gutter as `.steprow` so it
+   reads as part of the same event column, not the turn header. */
+.elide {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--mut);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 6px 0;
+  margin-left: 54px;
+}
+.eline {
+  flex: 1;
+  border-top: 1px dotted var(--bd);
+}
+/* "show all" / "show N more" — real buttons (focusable, no anchors) styled
+   as the mock's inline amber text, not as `.chip` pills. */
+.elide button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--amb);
+  cursor: pointer;
+}
+.elide button:hover {
+  text-decoration: underline;
+}
+
 /* Per-API-call breakdown inside an expanded turn (`StepsRow.tsx`, phase 4) —
    collapsed toggle line + expanded per-step lines share this class, matching
    design mock panel 2a's `.steprow` exactly. */

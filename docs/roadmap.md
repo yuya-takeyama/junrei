@@ -505,8 +505,18 @@ the events underneath, in place. Six phases, static mock in
    row now expands the turn and its steps together (mock 2i); a plain click
    is unchanged, and collapsing a turn resets its own steps back to
    collapsed.
-5. ⬜ Long-turn elision — first/last 2 events always render, middle events
-   collapse behind a count + "show all"/"show N more" affordance.
+5. ✅ Long-turn elision — this PR. `elision.ts`'s `elideEntries` splits an
+   expanded turn's chip/dial-filtered entries into first-2/last-2 anchors
+   plus a collapsed middle once the list exceeds `ELISION_THRESHOLD` (16);
+   `hiddenKindCounts` tallies the hidden middle into the same seven
+   chip-shaped buckets the filter row uses. `Timeline.tsx` renders the
+   summary row (`.elide`/`.eline`, mock panel 2d) between the anchors with
+   real "show all"/"show 25 more" buttons; per-turn reveal progress resets
+   on that turn's own collapse, and for every turn together on a dial or
+   chip change (the filtered list it runs over just changed shape). Flat
+   (Codex/subagent) views and `turnsUpToBudget`'s whole-turn chunking are
+   untouched — elision is purely a render-level reshaping of one already-
+   filtered, already-chunked turn's entries.
 6. ⬜ Interaction polish (hover attribution for mixed-model clusters, capped
    dot cluster + "+n" overflow, incomplete-cost tooltips).
 
