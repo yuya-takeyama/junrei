@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/docs", "!**/dist", "!**/node_modules"]
+    "includes": [
+      "**",
+      "!**/docs",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/test/fixtures/**/wf_corrupt.json"
+    ]
   },
   "formatter": {
     "enabled": true,

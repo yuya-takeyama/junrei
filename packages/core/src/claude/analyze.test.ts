@@ -479,8 +479,9 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
 describe("listClaudeSessionFiles", () => {
   it("finds session files under a projects dir", async () => {
     const refs = await listClaudeSessionFiles([FIXTURE_PROJECTS]);
-    // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture, #27).
-    expect(refs).toHaveLength(4);
+    // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture,
+    // #27) plus 55555555…555 (Workflow-tool fixture).
+    expect(refs).toHaveLength(5);
     expect(refs.map((r) => r.sessionId)).toContain("11111111-1111-1111-1111-111111111111");
     expect(refs[0]?.projectDirName).toBe("-Users-test-proj");
   });

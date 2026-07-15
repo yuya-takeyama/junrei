@@ -38,7 +38,8 @@ import {
   buildSessionData,
   toolResultLength,
 } from "./session-data.js";
-import { listSubagentRefs } from "./subagents.js";
+import { listSubagentRefs, type SubagentRef } from "./subagents.js";
+import { listWorkflowRuns, type WorkflowPhase, type WorkflowRun } from "./workflows.js";
 
 /** Sentinel owner id for nodes launched directly from the main transcript. */
 const MAIN_OWNER = "main";
@@ -46,6 +47,32 @@ const MAIN_OWNER = "main";
 const PROMPT_PREVIEW_LIMIT = 500;
 /** Cap for `SubagentNode.returnedPreview` — matches the parser's own tool-result capture cap. */
 const RETURNED_PREVIEW_LIMIT = 2000;
+
+/**
+ * One Workflow-tool run's session-level summary — the run-state metadata
+ * (`workflows/<runId>.json`, see `workflows.ts`) plus what only the main
+ * transcript can supply (`toolUseId`/`launchLine`, resolved by matching the
+ * runId against the `Workflow` tool_use's own `tool_result` text — see
+ * `findWorkflowLaunch`). Deliberately carries NO usage/cost: those live only
+ * on the member `SubagentNode`s (`workflowRunId`-tagged, flat among
+ * `subagents`) to avoid double-counting — a run summary is a rollup INDEX,
+ * not a second usage-bearing node. `agentCount` is the number of agent
+ * transcripts actually discovered for this run (`listSubagentRefs`), which
+ * can be less than the run state's own `agentCount` for a still-running or
+ * partially-synced run.
+ */
+export interface ClaudeWorkflowRunSummary {
+  runId: string;
+  name?: string;
+  status?: string;
+  durationMs?: number;
+  phases: WorkflowPhase[];
+  agentCount: number;
+  /** tool_use id of the `Workflow` call that launched this run, when it can be matched in the main transcript. */
+  toolUseId?: string;
+  /** Source line of that same tool_use. */
+  launchLine?: number;
+}
 
 /**
  * Claude Code session analysis — `SessionAnalysisCore` plus everything that
@@ -70,6 +97,8 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   taskExecutions: TaskExecutionInfo[];
   subagents: SubagentNode[];
   subagentCount: number;
+  /** Every Workflow-tool run recorded for this session — see `ClaudeWorkflowRunSummary`. */
+  workflowRuns: ClaudeWorkflowRunSummary[];
 }
 
 /** Analyze one session file, including its subagent sidecar transcripts. */
@@ -79,10 +108,8 @@ export async function analyzeClaudeSession(filePath: string): Promise<ClaudeSess
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
 
-  const { subagents, subagentCount, subagentTotals, subagentFileAccess } = await analyzeSubagents(
-    filePath,
-    data,
-  );
+  const { subagents, subagentCount, subagentTotals, subagentFileAccess, workflowRuns } =
+    await analyzeSubagents(filePath, data);
   const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
     computeFileAccess(data),
     subagentFileAccess,
@@ -141,6 +168,7 @@ export async function analyzeClaudeSession(filePath: string): Promise<ClaudeSess
     skillInvocations: computeSkillInvocations(data),
     subagents,
     subagentCount,
+    workflowRuns,
     parseWarningCount: data.warningCount,
     ...(data.cwd !== undefined && { cwd: data.cwd }),
     ...(repoRoot !== undefined && { repoRoot }),
@@ -165,6 +193,7 @@ async function analyzeSubagents(
   subagentTotals: TokenTotals & { costUsd: number; costIsComplete: boolean };
   /** Every subagent's file-access tallies, folded into one combined map. */
   subagentFileAccess: Map<string, FileAccessAgg>;
+  workflowRuns: ClaudeWorkflowRunSummary[];
 }> {
   const subagentTotals = {
     inputTokens: 0,
@@ -176,9 +205,21 @@ async function analyzeSubagents(
   };
   const subagentFileAccess = new Map<string, FileAccessAgg>();
 
-  const refs = await listSubagentRefs(filePath);
+  const [refs, workflowRuns] = await Promise.all([
+    listSubagentRefs(filePath),
+    listWorkflowRuns(filePath),
+  ]);
+  const workflowRunSummaries = buildWorkflowRunSummaries(workflowRuns, refs, mainData);
+  const workflowRunsById = new Map(workflowRuns.map((r) => [r.runId, r]));
+
   if (refs.length === 0) {
-    return { subagents: [], subagentCount: 0, subagentTotals, subagentFileAccess };
+    return {
+      subagents: [],
+      subagentCount: 0,
+      subagentTotals,
+      subagentFileAccess,
+      workflowRuns: workflowRunSummaries,
+    };
   }
 
   const nodes = new Map<string, SubagentNode>();
@@ -213,7 +254,7 @@ async function analyzeSubagents(
   };
   registerOwner(MAIN_OWNER, mainData);
 
-  for (const { agentId, jsonlPath, meta } of refs) {
+  for (const { agentId, jsonlPath, meta, workflowRunId } of refs) {
     const transcript = await parseClaudeTranscriptFile(jsonlPath);
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
@@ -227,9 +268,16 @@ async function analyzeSubagents(
     subagentTotals.costUsd += usage.total.costUsd;
     if (!usage.total.costIsComplete) subagentTotals.costIsComplete = false;
 
+    // Transcript's own `message.model` — NEVER the workflow run-state's
+    // `workflowProgress[].model`, which can carry harness decorations (e.g.
+    // `claude-opus-4-8[1m]`) the transcript's own field never does.
     const model = data.apiMessages.find((m) => m.model !== undefined)?.model;
     const promptPreview = data.userPrompts[0]?.text.slice(0, PROMPT_PREVIEW_LIMIT);
     const toolErrorCount = data.toolCalls.filter((c) => c.result?.isError === true).length;
+    const workflowProgress =
+      workflowRunId !== undefined
+        ? workflowRunsById.get(workflowRunId)?.agents.get(agentId)
+        : undefined;
 
     nodes.set(agentId, {
       agentId,
@@ -245,6 +293,14 @@ async function analyzeSubagents(
       ...(promptPreview !== undefined && { promptPreview }),
       ...(data.firstTimestamp !== undefined && { startedAt: data.firstTimestamp }),
       ...(data.lastTimestamp !== undefined && { endedAt: data.lastTimestamp }),
+      ...(workflowRunId !== undefined && { workflowRunId }),
+      ...(workflowProgress?.label !== undefined && { workflowLabel: workflowProgress.label }),
+      ...(workflowProgress?.phaseTitle !== undefined && {
+        workflowPhase: workflowProgress.phaseTitle,
+      }),
+      ...(workflowProgress?.queuedAt !== undefined && {
+        queuedAt: new Date(workflowProgress.queuedAt).toISOString(),
+      }),
     });
   }
 
@@ -278,13 +334,98 @@ async function analyzeSubagents(
         taskNotificationsByOwner,
       ),
     );
+    // Workflow agents have no per-agent Agent/Task tool_use of their own (one
+    // `Workflow` call spawns the whole batch), so `launchLinkage` above always
+    // leaves them "unresolved". Override from the run-state's own progress
+    // entry instead — the ONLY evidence source that exists for these agents.
+    if (node.workflowRunId !== undefined) {
+      const progress = workflowRunsById.get(node.workflowRunId)?.agents.get(node.agentId);
+      const resolved = resolveWorkflowAgentStatus(progress?.state);
+      if (resolved !== undefined) node.status = resolved;
+    }
   }
   const byStart = (a: SubagentNode, b: SubagentNode) =>
     (a.startedAt ?? "").localeCompare(b.startedAt ?? "");
   for (const node of nodes.values()) node.children.sort(byStart);
   roots.sort(byStart);
 
-  return { subagents: roots, subagentCount: nodes.size, subagentTotals, subagentFileAccess };
+  return {
+    subagents: roots,
+    subagentCount: nodes.size,
+    subagentTotals,
+    subagentFileAccess,
+    workflowRuns: workflowRunSummaries,
+  };
+}
+
+/**
+ * Build the session-level `ClaudeWorkflowRunSummary` list from every parsed
+ * run-state file, cross-referenced against the discovered agent refs (for
+ * `agentCount`) and the main transcript (for `toolUseId`/`launchLine`).
+ * Independent of whether any agents were actually discovered for a run — a
+ * run-state file with zero matching sidecars still gets a summary entry,
+ * just with `agentCount: 0`.
+ */
+function buildWorkflowRunSummaries(
+  workflowRuns: readonly WorkflowRun[],
+  refs: readonly SubagentRef[],
+  mainData: SessionData,
+): ClaudeWorkflowRunSummary[] {
+  if (workflowRuns.length === 0) return [];
+
+  const agentCountByRunId = new Map<string, number>();
+  for (const ref of refs) {
+    if (ref.workflowRunId === undefined) continue;
+    agentCountByRunId.set(ref.workflowRunId, (agentCountByRunId.get(ref.workflowRunId) ?? 0) + 1);
+  }
+
+  return workflowRuns.map((run) => {
+    const launch = findWorkflowLaunch(mainData, run.runId);
+    return {
+      runId: run.runId,
+      ...(run.workflowName !== undefined && { name: run.workflowName }),
+      ...(run.status !== undefined && { status: run.status }),
+      ...(run.durationMs !== undefined && { durationMs: run.durationMs }),
+      phases: run.phases,
+      agentCount: agentCountByRunId.get(run.runId) ?? 0,
+      ...(launch !== undefined && { toolUseId: launch.toolUseId, launchLine: launch.line }),
+    };
+  });
+}
+
+/**
+ * Find the `Workflow` tool_use in the MAIN transcript whose parent-side
+ * `tool_result` text mentions this run id. This is the only place a runId
+ * round-trips back to a specific tool_use: workflow agents' meta.json never
+ * carries a `toolUseId` (unlike classic Agent/Task launches), and a session
+ * can invoke `Workflow` more than once (e.g. resuming after editing the
+ * script), so matching is done PER RUN ID rather than assuming a single
+ * `Workflow` call exists.
+ */
+function findWorkflowLaunch(
+  mainData: SessionData,
+  runId: string,
+): { toolUseId: string; line: number } | undefined {
+  const call = mainData.toolCalls.find(
+    (c) => c.name === "Workflow" && c.result?.text.includes(runId) === true,
+  );
+  return call === undefined ? undefined : { toolUseId: call.toolUseId, line: call.line };
+}
+
+/**
+ * Map a workflow run-state `workflow_agent` progress entry's `state` to
+ * `SubagentStatus` — the only status evidence that exists for a
+ * Workflow-spawned agent (see the override site in `analyzeSubagents`
+ * above). `"done"` -> completed; anything error/failure/cancellation-shaped
+ * -> failed; every other value (queued, running, ...) -> `undefined`, which
+ * leaves the node's existing "unresolved" status untouched rather than
+ * guessing.
+ */
+function resolveWorkflowAgentStatus(state: string | undefined): SubagentStatus | undefined {
+  if (state === undefined) return undefined;
+  if (state === "done") return "completed";
+  if (/error|fail|cancel/i.test(state)) return "failed";
+  return undefined;
 }
 
 /**

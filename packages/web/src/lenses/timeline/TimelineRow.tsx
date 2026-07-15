@@ -169,9 +169,30 @@ function ToolBlock({
   onOpenRecord: (line: number) => void;
 }) {
   const isError = entry.status === "error";
+  // A `Workflow` call whose run could be resolved (see
+  // `buildWorkflowToolCallEntry` in core) gets a structured summary —
+  // "<name> · N agents · $cost" — instead of the generic result-text
+  // one-liner, which is just launch-ack boilerplate ("Workflow launched in
+  // background...") with none of that information legible at a glance.
+  const isWorkflow = entry.workflowRunId !== undefined && !isError;
   const metaParts: string[] = [];
-  if (isError) metaParts.push("error");
-  else if (entry.resultSummary !== undefined) metaParts.push(entry.resultSummary);
+  if (isWorkflow) {
+    const label = entry.workflowName ?? entry.workflowRunId ?? "";
+    metaParts.push(
+      entry.workflowAgentCount !== undefined
+        ? `${label} · ${entry.workflowAgentCount} agent${entry.workflowAgentCount === 1 ? "" : "s"}`
+        : label,
+    );
+    if (entry.workflowCostUsd !== undefined) {
+      metaParts.push(
+        `${formatUsd(entry.workflowCostUsd)}${entry.workflowCostIsComplete === false ? "*" : ""}`,
+      );
+    }
+  } else if (isError) {
+    metaParts.push("error");
+  } else if (entry.resultSummary !== undefined) {
+    metaParts.push(entry.resultSummary);
+  }
   if (entry.durationMs !== undefined) metaParts.push(formatDuration(entry.durationMs));
   const meta = metaParts.length > 0 ? `→ ${metaParts.join(" · ")}` : undefined;
   const codeLines = [

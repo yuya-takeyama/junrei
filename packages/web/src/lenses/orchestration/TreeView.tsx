@@ -3,7 +3,8 @@ import { formatTokens } from "../../format.js";
 import {
   activeModels,
   costShare,
-  flattenSubagents,
+  displayName,
+  groupedTreeRows,
   isSessionLive,
   MAIN_ID,
   nodeDurationMs,
@@ -28,7 +29,11 @@ interface Props {
  * design-spec/13-orchestration.md.
  */
 export function TreeView({ session, selected, onSelect }: Props) {
-  const rows = flattenSubagents(session.subagents);
+  // `workflowRuns` is Claude-only (absent from `CodexSessionJson` — Codex has
+  // no Workflow-tool concept) — `groupedTreeRows` degrades to plain
+  // `flattenSubagents` behavior when given `[]`.
+  const workflowRuns = "workflowRuns" in session ? session.workflowRuns : [];
+  const rows = groupedTreeRows(session.subagents, workflowRuns);
   const mainModels = activeModels(session.usage.byModel);
   // Computed once per render (not per row) — every row's Status cell reads
   // off the SAME "is this session live right now" snapshot, so a render
@@ -71,7 +76,45 @@ export function TreeView({ session, selected, onSelect }: Props) {
             {session.durationMs !== undefined ? formatDurationCompact(session.durationMs) : "—"}
           </span>
         </button>
-        {rows.map((row) => {
+        {rows.map((entry) => {
+          if (entry.kind === "workflow-header") {
+            const share = costShare(entry.rollup.costUsd, session.totalUsage.costUsd);
+            const status =
+              entry.status === "completed"
+                ? "done"
+                : entry.status !== undefined && /error|fail|cancel/i.test(entry.status)
+                  ? "fail"
+                  : sessionLive
+                    ? "run"
+                    : undefined;
+            return (
+              <div className="tn workflow-hdr" key={`wf-${entry.runId}`}>
+                <span className="nowrap">
+                  ⚙ Workflow: {entry.name ?? entry.runId} · {entry.agentCount}{" "}
+                  {entry.agentCount === 1 ? "agent" : "agents"}
+                </span>
+                <span className="mut fs11">—</span>
+                <StatusCell status={status} />
+                <span className="num fs11 cellr">{formatTokens(entry.rollup.tokens)}</span>
+                <span className="num fs11 cellr">{formatCostCell(entry.rollup.costUsd)}</span>
+                <span className="num fs11 cellr">{formatPctShare(share)}</span>
+                <span className="num fs11 cellr">
+                  {entry.durationMs !== undefined ? formatDurationCompact(entry.durationMs) : "—"}
+                </span>
+              </div>
+            );
+          }
+          if (entry.kind === "phase-header") {
+            return (
+              <div className="tn phase-hdr" key={`ph-${entry.runId}-${entry.phaseTitle}`}>
+                <span className="nowrap">
+                  {entry.phaseTitle} · {entry.agentCount}{" "}
+                  {entry.agentCount === 1 ? "agent" : "agents"}
+                </span>
+              </div>
+            );
+          }
+          const row = entry.row;
           const durationMs = nodeDurationMs(row.node);
           const tokens = formatTokens(totalTokensOf(row.node.usage.total));
           const returned =
@@ -103,9 +146,7 @@ export function TreeView({ session, selected, onSelect }: Props) {
                   })}
                   <span className={row.isLast ? "tree-branch last" : "tree-branch"} />
                 </span>
-                <span className="nowrap">
-                  {row.node.description ?? row.node.agentType ?? row.node.agentId}
-                </span>
+                <span className="nowrap">{displayName(row.node)}</span>
               </span>
               {models.length > 0 ? (
                 <ModelBadges models={models} />

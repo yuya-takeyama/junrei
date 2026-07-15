@@ -63,6 +63,8 @@ export type CodexSessionJson = Extract<CodexSessionResponse, { analysis: unknown
 };
 export type SubagentNodeJson = SessionJson["subagents"][number];
 export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
+/** One Workflow-tool run's session-level summary — Claude-only, see `ClaudeWorkflowRunSummary` in `@junrei/core`. */
+export type WorkflowRunSummaryJson = SessionJson["workflowRuns"][number];
 
 /**
  * Either harness's full session analysis, discriminated on `source` — shared
