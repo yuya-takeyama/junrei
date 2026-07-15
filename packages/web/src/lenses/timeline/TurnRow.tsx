@@ -48,7 +48,8 @@ interface Props {
   gridTemplate: string;
   expanded: boolean;
   isOutlier: boolean;
-  onToggle: (line: number) => void;
+  /** `altKey` is passed straight through from the click event — Timeline.tsx decides what it means (⌥-click expands turn + steps in one gesture, mock 2i); TurnRow itself carries no expansion logic. */
+  onToggle: (line: number, altKey: boolean) => void;
   /** Registers this row's header button by `anchorLine` — the turn-aware
    * minimap (`TurnMiniMap.tsx`) scrolls to it directly, which is what makes
    * clicking into a *collapsed* turn actually work (the header button is
@@ -86,7 +87,7 @@ export function TurnRow({
       className={rowClass}
       aria-expanded={expanded}
       style={{ gridTemplateColumns: gridTemplate }}
-      onClick={() => onToggle(group.anchorLine)}
+      onClick={(e) => onToggle(group.anchorLine, e.altKey)}
       ref={(el) => registerRef(group.anchorLine, el)}
     >
       <span className="tnum">

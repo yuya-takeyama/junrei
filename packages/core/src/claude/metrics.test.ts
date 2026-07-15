@@ -2,9 +2,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type FileAccessAgg, foldFileAccess, mergeFileAccess } from "../shared/metrics.js";
-import { computeFileAccess, computeSkillInvocations, computeUsage } from "./metrics.js";
+import {
+  computeFileAccess,
+  computeSkillInvocations,
+  computeTurnUsage,
+  computeUsage,
+} from "./metrics.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
-import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
+import type { ApiMessage, SessionData, ToolCall, UserPrompt } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
 import type { UserRecord } from "./types.js";
 
@@ -110,6 +115,126 @@ describe("computeUsage", () => {
     expect(usage.total.costIsComplete).toBe(false);
     const entry = usage.byModel.find((m) => m.model === "totally-unknown-model-xyz");
     expect(entry?.costUsd).toBeUndefined();
+  });
+});
+
+describe("computeTurnUsage", () => {
+  /** Bare `SessionData` with `userPrompts` + `apiMessages` populated — the two fields `computeTurnUsage` reads. */
+  function sessionDataWithTurns(userPrompts: UserPrompt[], apiMessages: ApiMessage[]): SessionData {
+    return {
+      records: [],
+      apiMessages,
+      toolCalls: [],
+      userPrompts,
+      compactions: [],
+      backgroundLaunches: [],
+      taskNotifications: [],
+      apiErrorCount: 0,
+      apiErrors: [],
+      warningCount: 0,
+    };
+  }
+
+  it("returns [] for a session with no user prompts", () => {
+    expect(computeTurnUsage(sessionDataWithTurns([], []))).toEqual([]);
+  });
+
+  it("gives a turn with no api messages an empty steps array", () => {
+    const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], []));
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.steps).toEqual([]);
+    expect(turns[0]?.apiMessageCount).toBe(0);
+  });
+
+  it("splits steps per turn, one per usage-bearing message, matching apiMessageCount", () => {
+    const prompts: UserPrompt[] = [
+      { text: "first", line: 1 },
+      { text: "second", line: 10 },
+    ];
+    const messages: ApiMessage[] = [
+      {
+        messageId: "m1",
+        model: "claude-fable-5",
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        line: 2,
+      },
+      {
+        messageId: "m2",
+        model: "claude-fable-5",
+        usage: { inputTokens: 20, outputTokens: 8, cacheReadTokens: 100, cacheCreationTokens: 0 },
+        line: 5,
+      },
+      {
+        messageId: "m3",
+        model: "claude-sonnet-4-5",
+        usage: { inputTokens: 30, outputTokens: 12, cacheReadTokens: 0, cacheCreationTokens: 40 },
+        line: 12,
+      },
+    ];
+    const turns = computeTurnUsage(sessionDataWithTurns(prompts, messages));
+
+    expect(turns[0]?.steps).toHaveLength(2);
+    expect(turns[0]?.steps.map((s) => s.line)).toEqual([2, 5]);
+    expect(turns[0]?.apiMessageCount).toBe(turns[0]?.steps.length);
+
+    expect(turns[1]?.steps).toHaveLength(1);
+    expect(turns[1]?.steps.map((s) => s.line)).toEqual([12]);
+    expect(turns[1]?.apiMessageCount).toBe(turns[1]?.steps.length);
+  });
+
+  it("skips usage-less messages, same exclusion as apiMessageCount", () => {
+    const messages: ApiMessage[] = [
+      {
+        messageId: "m1",
+        model: "claude-fable-5",
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        line: 2,
+      },
+      { messageId: "m2", line: 3 }, // no usage — a streaming gap or synthetic stub
+    ];
+    const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], messages));
+    expect(turns[0]?.steps).toHaveLength(1);
+    expect(turns[0]?.apiMessageCount).toBe(1);
+  });
+
+  it("captures each step's own model/timestamp and full token breakdown", () => {
+    const messages: ApiMessage[] = [
+      {
+        messageId: "m1",
+        model: "claude-sonnet-4-5",
+        timestamp: "2026-01-01T00:00:05.000Z",
+        usage: {
+          inputTokens: 41_900,
+          outputTokens: 5_400,
+          cacheReadTokens: 896_900,
+          cacheCreationTokens: 12_100,
+        },
+        line: 2,
+      },
+    ];
+    const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], messages));
+    expect(turns[0]?.steps[0]).toEqual({
+      line: 2,
+      timestamp: "2026-01-01T00:00:05.000Z",
+      model: "claude-sonnet-4-5",
+      inputTokens: 41_900,
+      outputTokens: 5_400,
+      cacheReadTokens: 896_900,
+      cacheCreationTokens: 12_100,
+    });
+  });
+
+  it("leaves model/timestamp off a step when the source message lacks them", () => {
+    const messages: ApiMessage[] = [
+      {
+        messageId: "m1",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        line: 2,
+      },
+    ];
+    const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], messages));
+    expect(turns[0]?.steps[0]).not.toHaveProperty("model");
+    expect(turns[0]?.steps[0]).not.toHaveProperty("timestamp");
   });
 });
 

@@ -74,6 +74,22 @@ export function computeUsage(data: SessionData): UsageSummary {
 // Per-turn token composition
 // ---------------------------------------------------------------------------
 
+/**
+ * One API call's own usage inside a turn — the per-call breakdown behind
+ * `ClaudeTurnUsage.apiMessageCount` (`steps.length === apiMessageCount`,
+ * same usage-less-message exclusion as the turn-level aggregate fields).
+ */
+export interface ClaudeTurnStep {
+  line: number;
+  timestamp?: string;
+  model?: string;
+  /** Fresh (uncached) input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
 export interface ClaudeTurnUsage {
   /** Source line of the user prompt that opened this turn. */
   line: number;
@@ -84,6 +100,8 @@ export interface ClaudeTurnUsage {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   apiMessageCount: number;
+  /** Per-call breakdown, chronological — see `ClaudeTurnStep`. */
+  steps: ClaudeTurnStep[];
 }
 
 /**
@@ -111,6 +129,7 @@ export function computeTurnUsage(data: SessionData): ClaudeTurnUsage[] {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     apiMessageCount: 0,
+    steps: [],
   }));
 
   const messages = [...data.apiMessages].sort((a, b) => a.line - b.line);
@@ -129,6 +148,15 @@ export function computeTurnUsage(data: SessionData): ClaudeTurnUsage[] {
     turn.cacheReadTokens += message.usage.cacheReadTokens;
     turn.cacheCreationTokens += message.usage.cacheCreationTokens;
     turn.apiMessageCount += 1;
+    turn.steps.push({
+      line: message.line,
+      ...(message.timestamp !== undefined && { timestamp: message.timestamp }),
+      ...(message.model !== undefined && { model: message.model }),
+      inputTokens: message.usage.inputTokens,
+      outputTokens: message.usage.outputTokens,
+      cacheReadTokens: message.usage.cacheReadTokens,
+      cacheCreationTokens: message.usage.cacheCreationTokens,
+    });
   }
   return turns;
 }

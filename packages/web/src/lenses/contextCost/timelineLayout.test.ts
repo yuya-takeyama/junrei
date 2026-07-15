@@ -13,6 +13,7 @@ function turn(line: number, overrides: Partial<Record<string, number>> = {}) {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     apiMessageCount: 1,
+    steps: [],
     ...overrides,
   };
 }

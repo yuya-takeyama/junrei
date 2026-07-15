@@ -39,8 +39,23 @@ export interface TurnGroup {
   cacheCreationTokens?: number;
   /** Codex only — absent for every Claude turn; set by `buildCodexTurnGroups`. */
   reasoningTokens?: number;
-  /** Claude only (`ClaudeTurnUsage.apiMessageCount`) — absent for Codex turns, which are flat. */
+  /** Claude only (`ClaudeTurnUsage.apiMessageCount`, now `steps.length` — see below) — absent for Codex turns, which are flat. */
   stepCount?: number;
+  /**
+   * Claude only — one entry per API call inside the turn
+   * (`ClaudeTurnUsage.steps`), trimmed to what the UI reads: `line`/
+   * `timestamp` are provenance the view never needs, so the adapter drops
+   * them rather than leaking the wire shape into this source-neutral type.
+   * Absent for Codex (`buildCodexTurnGroups` never sets it) — `StepsRow.tsx`
+   * renders purely off this field's presence, no source check.
+   */
+  steps?: {
+    model?: string;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+  }[];
   /** Claude only (derived from `assistant-text` entries); undefined = no concept for this harness. */
   costUsd?: number;
   /** True when an `assistant-text` entry in the turn lacks `costUsd` (unpriced model), or the session's own cost total is incomplete elsewhere. */
@@ -135,7 +150,18 @@ export function buildClaudeTurnGroups(
       cacheReadTokens: usage.cacheReadTokens,
       outputTokens: usage.outputTokens,
       cacheCreationTokens: usage.cacheCreationTokens,
-      stepCount: usage.apiMessageCount,
+      // Single source for the Steps column and the StepsRow breakdown below
+      // it — both read `steps.length` rather than the separate
+      // `apiMessageCount` field (the two are always equal; see
+      // `computeTurnUsage`'s doc comment in `@junrei/core`).
+      stepCount: usage.steps.length,
+      steps: usage.steps.map((step) => ({
+        ...(step.model !== undefined && { model: step.model }),
+        inputTokens: step.inputTokens,
+        outputTokens: step.outputTokens,
+        cacheReadTokens: step.cacheReadTokens,
+        cacheCreationTokens: step.cacheCreationTokens,
+      })),
       ...(costUsd !== undefined && { costUsd }),
       costIncomplete: costMissing || !opts.costIsComplete,
       toolErrorCount,
