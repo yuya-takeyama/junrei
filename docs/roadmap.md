@@ -492,8 +492,19 @@ the events underneath, in place. Six phases, static mock in
    expand/collapse and chunk growth) and drags via pointer capture. Clicking
    a band scrolls the turn's header into view even when collapsed, fixing
    the Phase-1 gap.
-4. ⬜ Per-step (per-API-call) sub-rows inside an expanded turn — collapsed by
-   default.
+4. ✅ Per-step (per-API-call) sub-rows inside an expanded turn — this PR.
+   `computeTurnUsage` (`@junrei/core`) now collects one `ClaudeTurnStep` per
+   usage-bearing API message in the same per-turn walk (`steps.length ===
+   apiMessageCount`); `buildClaudeTurnGroups` maps it onto `TurnGroup.steps`
+   (line/timestamp dropped — the UI never needs them), Codex leaves it
+   undefined. `StepsRow.tsx` renders at the top of an expanded turn's
+   content whenever `steps` is present and non-empty: collapsed by default
+   (toggle + first-two-steps inline preview + "… sN" overflow), expanded
+   shows every step's full token breakdown, prefixed with its model dot only
+   for turns that actually spanned more than one model. ⌥-click on a turn
+   row now expands the turn and its steps together (mock 2i); a plain click
+   is unchanged, and collapsing a turn resets its own steps back to
+   collapsed.
 5. ⬜ Long-turn elision — first/last 2 events always render, middle events
    collapse behind a count + "show all"/"show N more" affordance.
 6. ⬜ Interaction polish (hover attribution for mixed-model clusters, capped

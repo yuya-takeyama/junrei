@@ -13,6 +13,7 @@ export {
   resolveClaudeProjectsDirs,
 } from "./discovery.js";
 export type {
+  ClaudeTurnStep,
   ClaudeTurnUsage,
   ExplorationProfile,
   RepetitionFinding,

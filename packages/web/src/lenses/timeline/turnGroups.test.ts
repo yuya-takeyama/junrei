@@ -20,6 +20,7 @@ function turn(line: number, overrides: Partial<TurnUsage> = {}): TurnUsage {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     apiMessageCount: 0,
+    steps: [],
     ...overrides,
   };
 }
@@ -93,6 +94,15 @@ describe("buildClaudeTurnGroups", () => {
         cacheCreationTokens: 56,
         outputTokens: 78,
         apiMessageCount: 3,
+        // stepCount is derived from steps.length, not apiMessageCount — see
+        // the dedicated "sets stepCount from steps.length" test below for
+        // that distinction; here the two agree so this test stays focused on
+        // the plain field-flattening behavior.
+        steps: [
+          { line: 2, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+          { line: 3, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+          { line: 4, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        ],
       }),
     ];
     const groups = buildClaudeTurnGroups([user(1)], turns, { costIsComplete: true });
@@ -105,6 +115,81 @@ describe("buildClaudeTurnGroups", () => {
     });
     expect(groups[0]).not.toHaveProperty("usage");
     expect(groups[0]?.reasoningTokens).toBeUndefined();
+  });
+
+  it("maps usage.steps onto the group, dropping line/timestamp (not needed by the view)", () => {
+    const turns = [
+      turn(1, {
+        apiMessageCount: 2,
+        steps: [
+          {
+            line: 2,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            model: "claude-fable-5",
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 1,
+            cacheCreationTokens: 2,
+          },
+          {
+            line: 4,
+            model: "claude-sonnet-4-5",
+            inputTokens: 20,
+            outputTokens: 8,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        ],
+      }),
+    ];
+    const groups = buildClaudeTurnGroups([user(1)], turns, { costIsComplete: true });
+    expect(groups[0]?.steps).toEqual([
+      {
+        model: "claude-fable-5",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 1,
+        cacheCreationTokens: 2,
+      },
+      {
+        model: "claude-sonnet-4-5",
+        inputTokens: 20,
+        outputTokens: 8,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+    ]);
+  });
+
+  it("sets stepCount from steps.length (single source, not a separate apiMessageCount read)", () => {
+    const turns = [
+      turn(1, {
+        apiMessageCount: 99, // deliberately mismatched — stepCount must ignore this
+        steps: [
+          {
+            line: 2,
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        ],
+      }),
+    ];
+    const groups = buildClaudeTurnGroups([user(1)], turns, { costIsComplete: true });
+    expect(groups[0]?.stepCount).toBe(1);
+  });
+
+  it("leaves a step's model undefined when the source step has none", () => {
+    const turns = [
+      turn(1, {
+        steps: [
+          { line: 2, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        ],
+      }),
+    ];
+    const groups = buildClaudeTurnGroups([user(1)], turns, { costIsComplete: true });
+    expect(groups[0]?.steps?.[0]).not.toHaveProperty("model");
   });
 
   it("attributes an entry exactly at the next turn's line to that next turn", () => {
@@ -330,6 +415,8 @@ describe("buildCodexTurnGroups", () => {
     expect(groups[0]?.cacheCreationTokens).toBeUndefined();
     expect(groups[0]?.stepCount).toBeUndefined();
     expect(groups[0]?.costUsd).toBeUndefined();
+    // No step layer for Codex — StepsRow.tsx never mounts for these groups.
+    expect(groups[0]?.steps).toBeUndefined();
   });
 
   it("produces exactly the 2c column set (Started/Dur/Input/C·Read/Output/Reasoning) — reasoning visible, steps/c·write/cost hidden", () => {

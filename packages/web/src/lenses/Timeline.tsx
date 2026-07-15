@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AnySessionJson, fetchTimeline, type SessionRef, type TimelineEntry } from "../api.js";
 import { MiniMap } from "./timeline/MiniMap.js";
+import { StepsRow } from "./timeline/StepsRow.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
 import { TurnMiniMap } from "./timeline/TurnMiniMap.js";
 import { TurnGroupHeaderRow, TurnRow } from "./timeline/TurnRow.js";
@@ -99,6 +100,13 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   // `isTurnExpanded` below) — keyed by turn line, cleared whenever the dial
   // changes so switching stops always starts from that stop's own default.
   const [turnOverrides, setTurnOverrides] = useState<ReadonlySet<number>>(new Set());
+  // Per-turn StepsRow expansion (anchorLine keys, same as turnOverrides) —
+  // collapsed by default for every turn. Cleared any time turnOverrides is
+  // (dial change, session switch) and any time a SPECIFIC turn collapses
+  // (see `handleTurnRowClick`/`collapseAll` below), so a turn's steps always
+  // start collapsed again the next time that turn re-expands — "collapsing a
+  // turn resets its steps state" (mock 2i).
+  const [expandedStepsLines, setExpandedStepsLines] = useState<ReadonlySet<number>>(new Set());
   const [visibleCount, setVisibleCount] = useState(CHUNK_SIZE);
   const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
   // Mirrors `pendingScrollLine`, but for a turn header's `anchorLine` rather
@@ -133,6 +141,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     setEntries(null);
     setError(null);
     setTurnOverrides(new Set());
+    setExpandedStepsLines(new Set());
     fetchTimeline(sessionRef, agent)
       .then(setEntries)
       .catch((e: unknown) => setError(String(e)));
@@ -258,6 +267,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   const handleDialChange = useCallback((next: DetailDial) => {
     setDial(next);
     setTurnOverrides(new Set());
+    setExpandedStepsLines(new Set());
   }, []);
 
   useEffect(() => {
@@ -320,6 +330,51 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     });
   }, []);
 
+  const toggleSteps = useCallback((line: number) => {
+    setExpandedStepsLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(line)) next.delete(line);
+      else next.add(line);
+      return next;
+    });
+  }, []);
+
+  // Turn-row click dispatch: a plain click keeps today's toggle behavior; an
+  // ⌥-click (mock 2i) forces the turn AND its steps open in one gesture
+  // instead of merely toggling. `wasExpanded` is the row's own already-
+  // computed `isTurnExpanded` result (passed in at the render call site
+  // below) — cheaper than re-deriving it here, and it's what lets a plain
+  // click reset a turn's steps back to collapsed the moment that turn itself
+  // collapses, per the mock's interaction note.
+  const handleTurnRowClick = useCallback(
+    (line: number, altKey: boolean, wasExpanded: boolean) => {
+      if (altKey) {
+        setTurnOverrides((prev) => {
+          // Force-expand: only needs an override entry when the dial's own
+          // default is "collapsed" for this stop.
+          const needsOverride = !defaultTurnExpanded;
+          if (prev.has(line) === needsOverride) return prev;
+          const next = new Set(prev);
+          if (needsOverride) next.add(line);
+          else next.delete(line);
+          return next;
+        });
+        setExpandedStepsLines((prev) => (prev.has(line) ? prev : new Set(prev).add(line)));
+        return;
+      }
+      toggleTurn(line);
+      if (wasExpanded) {
+        setExpandedStepsLines((prev) => {
+          if (!prev.has(line)) return prev;
+          const next = new Set(prev);
+          next.delete(line);
+          return next;
+        });
+      }
+    },
+    [defaultTurnExpanded, toggleTurn],
+  );
+
   const anyTurnCollapsed = turnGroups.some((g) => !isTurnExpanded(g.anchorLine));
   const expandAll = useCallback(() => {
     setTurnOverrides(
@@ -330,6 +385,8 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     setTurnOverrides(
       defaultTurnExpanded ? new Set(turnGroups.map((g) => g.anchorLine)) : new Set(),
     );
+    // Every turn ends up collapsed — reset every turn's steps state too.
+    setExpandedStepsLines(new Set());
   }, [defaultTurnExpanded, turnGroups]);
 
   // Chips only act inside expanded turns (collapsed rows show nothing to
@@ -374,7 +431,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
               </button>
             ))}
           </div>
-          {turnGroupable && <span className="ann">keys 1–4 · click a row to toggle one turn</span>}
+          {turnGroupable && <span className="ann">keys 1–4 · click a row · ⌥-click row+steps</span>}
         </div>
         <div className="fx ac gap8" style={{ flexWrap: "wrap" }}>
           {allTurnsCollapsed ? (
@@ -448,7 +505,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
                       gridTemplate={turnGridTemplateColumns}
                       expanded={expanded}
                       isOutlier={isOutlier}
-                      onToggle={toggleTurn}
+                      onToggle={(line, altKey) => handleTurnRowClick(line, altKey, expanded)}
                       registerRef={registerTurnRef}
                     />
                     {collapsedCompactions.map((entry, i) => (
@@ -465,6 +522,14 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
                     ))}
                     {expanded && (
                       <div className="ex">
+                        {group.steps !== undefined && group.steps.length > 0 && (
+                          <StepsRow
+                            steps={group.steps}
+                            mixedModel={group.models.length > 1}
+                            expanded={expandedStepsLines.has(group.anchorLine)}
+                            onToggle={() => toggleSteps(group.anchorLine)}
+                          />
+                        )}
                         {visibleTurnEntries.length === 0 ? (
                           <div className="mut fs12" style={{ padding: "8px 0" }}>
                             No entries match the current filters.

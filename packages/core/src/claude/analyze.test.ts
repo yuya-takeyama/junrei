@@ -228,6 +228,12 @@ describe("analyzeClaudeSession", () => {
     expect(turn1?.outputTokens).toBe(50 + 30 + 25 + 40 + 20 + 20 + 20 + 15);
     expect(turn1?.cacheReadTokens).toBe(0 + 300 + 310 + 320 + 330 + 340 + 350 + 355);
     expect(turn1?.cacheCreationTokens).toBe(200 + 10 + 5);
+    // The per-call breakdown behind apiMessageCount rides through the same
+    // analyzeClaudeSession pipeline (see metrics.test.ts's computeTurnUsage
+    // coverage for the isolated unit tests).
+    expect(turn1?.steps).toHaveLength(8);
+    expect(turn1?.steps[0]?.inputTokens).toBe(100);
+    expect(turn1?.steps[0]?.model).toBe("claude-fable-5");
 
     // Turn 2 = msg_8, msg_10, msg_9 (everything between line 20 and line 28).
     expect(turn2?.apiMessageCount).toBe(3);

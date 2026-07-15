@@ -955,6 +955,30 @@ button.trow.exh {
   }
 }
 
+/* Per-API-call breakdown inside an expanded turn (`StepsRow.tsx`, phase 4) —
+   collapsed toggle line + expanded per-step lines share this class, matching
+   design mock panel 2a's `.steprow` exactly. */
+.steprow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--mut);
+  padding: 3px 0 3px 54px;
+}
+.stepstoggle {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* ---------------------------------------------------------------------
    Record-detail slide-over (L3, screen 8). See design-spec/17-record-detail.md
    and 99-components.md's `.so`/`.kv`/`.cp`/`.code` component specs.
