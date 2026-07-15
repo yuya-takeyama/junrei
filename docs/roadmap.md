@@ -240,9 +240,10 @@ extract — so the missing signals shipped as one same-day PR series instead.
   calls (a short recognized-command list — cat/head/tail/less/more/rg/grep/
   awk/wc/stat/nl/sed, `sed` only counted with `-n` — never `-i`, never an
   unrecognized command), under-reporting rather than guessing at arbitrary
-  shell invocations; relative paths resolve against the session's
-  `session_meta`/`turn_context` cwd. Skill invocations are parsed from
-  `[$plugin:skill](path-to-SKILL.md)` markdown markers in `user_message`
+  shell invocations. Attached shell terminators are stripped and Git revision
+  ranges are excluded so neither becomes a false file path; relative paths
+  resolve against the session's `session_meta`/`turn_context` cwd. Skill
+  invocations are parsed from `[$plugin:skill](path-to-SKILL.md)` markdown markers in `user_message`
   event text. `fileAccess`/`skillInvocations` are now `SessionAnalysisCore`
   fields (promoted off the Claude-only `SessionAnalysis`), so the web's
   `FilesSkills`/`FileAccessTree`/`SkillInvocationsPanel` render unbranched
