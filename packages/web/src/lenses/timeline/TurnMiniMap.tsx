@@ -158,8 +158,13 @@ export const TurnMiniMap = memo(function TurnMiniMap({
           );
         })}
       </div>
+      {/* Duplicates what scrolling already conveys and isn't focus-operable
+          (a drag-only pointer target, no keyboard equivalent) — hidden from
+          assistive tech rather than left as an unlabeled, unreachable div
+          (mock 2i a11y pass). */}
       <div
         className="mmap-vp"
+        aria-hidden="true"
         style={{ top: `${String(viewport.top)}px`, height: `${String(viewport.height)}px` }}
         onPointerDown={onVpPointerDown}
         onPointerMove={onVpPointerMove}

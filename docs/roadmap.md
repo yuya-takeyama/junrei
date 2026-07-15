@@ -452,7 +452,7 @@ a turn header row reads as a dense table (Codex-parity) and expands to reveal
 the events underneath, in place. Six phases, static mock in
 `design/turns-timeline.dc.html`:
 
-1. ✅ Claude turn spine — this PR. Claude Code main-transcript Timeline groups
+1. ✅ Claude turn spine — #94. Claude Code main-transcript Timeline groups
    entries into `TurnGroup`s (`turnGroups.ts`, attribution mirrors
    `computeTurnUsage`'s "greatest `turn.line <= entry.line`" rule); turns
    render as a dense `.trg` table (`TurnRow.tsx`) collapsed by default (new
@@ -462,7 +462,7 @@ the events underneath, in place. Six phases, static mock in
    per-turn cost AND ≥$0.10) gets an amber tint; compactions stay visible as
    a sibling row even when their turn is collapsed. Codex sessions and
    subagent (`?agent=`) views are unchanged — flat rendering, 3-stop dial.
-2. ✅ Codex turn spine + Turns tab removal — this PR. `buildCodexTurnGroups`
+2. ✅ Codex turn spine + Turns tab removal — #95. `buildCodexTurnGroups`
    (`turnGroups.ts`) attributes entries to `session.codex.turns` by timestamp
    (mirrors Phase 1's line rule with `startedAt` standing in for `line`, since
    Codex turns carry no source line): sort turns by `startedAt` (stable for
@@ -482,7 +482,7 @@ the events underneath, in place. Six phases, static mock in
    Codex-only role/nickname/session-total-reasoning meta chips `CodexTurns`
    used to show had no other home and were dropped rather than ported
    (origin/CLI version were already duplicated in the session header).
-3. ✅ Mini-map rewrite — this PR. `TurnMiniMap.tsx` replaces the flat rail for
+3. ✅ Mini-map rewrite — #96. `TurnMiniMap.tsx` replaces the flat rail for
    grouped views only (flat/subagent views keep `MiniMap.tsx` unchanged): one
    band per turn sized by entry count with a min-height clamp
    (`layoutTurnBandHeights`, `turnMiniMapLayout.ts`), a tick per turn
@@ -492,7 +492,7 @@ the events underneath, in place. Six phases, static mock in
    expand/collapse and chunk growth) and drags via pointer capture. Clicking
    a band scrolls the turn's header into view even when collapsed, fixing
    the Phase-1 gap.
-4. ✅ Per-step (per-API-call) sub-rows inside an expanded turn — this PR.
+4. ✅ Per-step (per-API-call) sub-rows inside an expanded turn — #97.
    `computeTurnUsage` (`@junrei/core`) now collects one `ClaudeTurnStep` per
    usage-bearing API message in the same per-turn walk (`steps.length ===
    apiMessageCount`); `buildClaudeTurnGroups` maps it onto `TurnGroup.steps`
@@ -505,7 +505,7 @@ the events underneath, in place. Six phases, static mock in
    row now expands the turn and its steps together (mock 2i); a plain click
    is unchanged, and collapsing a turn resets its own steps back to
    collapsed.
-5. ✅ Long-turn elision — this PR. `elision.ts`'s `elideEntries` splits an
+5. ✅ Long-turn elision — #98. `elision.ts`'s `elideEntries` splits an
    expanded turn's chip/dial-filtered entries into first-2/last-2 anchors
    plus a collapsed middle once the list exceeds `ELISION_THRESHOLD` (16);
    `hiddenKindCounts` tallies the hidden middle into the same seven
@@ -517,8 +517,29 @@ the events underneath, in place. Six phases, static mock in
    (Codex/subagent) views and `turnsUpToBudget`'s whole-turn chunking are
    untouched — elision is purely a render-level reshaping of one already-
    filtered, already-chunked turn's entries.
-6. ⬜ Interaction polish (hover attribution for mixed-model clusters, capped
-   dot cluster + "+n" overflow, incomplete-cost tooltips).
+6. ✅ Interaction polish + meta restoration + a11y pass — #99. Shift-click on
+   a turn row now applies ONE state (expand or collapse, taken from the
+   shift-clicked row's own pre-click state) to the whole inclusive range
+   since the last plain-/⌥-clicked row — `computeShiftClickRange`
+   (`turnRangeSelect.ts`) is a pure, unit-tested helper; the anchor then
+   moves to the shift-clicked row, and a shift-click with no prior anchor
+   falls back to a plain click (mock 2i). `button.trow` gets `user-select:
+   none` so the drag-select a shift-click naturally performs never leaves a
+   text-selection artifact behind. The dial gained a "N overridden" badge
+   (`.chip`, mono/muted/dotted-border) next to it whenever `turnOverrides` is
+   non-empty; clicking it resets every turn to the dial's own default. Light
+   a11y pass: the dial is a `role="radiogroup"` of `role="radio"` buttons
+   (`aria-checked`), filter chips carry `aria-pressed`, the turn-aware
+   minimap's drag-only viewport box is `aria-hidden` (bands were already real
+   `<button>`s with `aria-label`s), and a shared `:focus-visible` amber
+   outline now covers turn rows, the steps toggle, elide buttons, chips, and
+   dial stops in both themes. Codex's `agentRole`/`agentNickname` — dropped
+   with Phase 2's `CodexMetaChips` — are back, presence-driven, as `role X`/
+   `as Y` segments in the session header's `MetaLine`; the session-total
+   reasoning badge stays dropped (per-turn Reasoning is now a visible
+   Timeline column).
+
+All six phases shipped: #94, #95, #96, #97, #98, #99.
 
 ## Later (post-v1)
 

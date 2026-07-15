@@ -74,9 +74,10 @@ filters leave visible. Results are paginated.
 **Session detail** opens into a set of lenses:
 
 - **Overview** — top-line usage, cost, and delegation numbers for the session.
-- **Timeline** — the record-by-record transcript with filters and a mini-map;
-  the main session view groups events into a per-turn table (model, duration,
-  tokens) that expands in place to reveal the events underneath.
+- **Timeline** — the record-by-record transcript with filters and a turn-aware
+  mini-map; the main session view groups events into a per-turn table (model,
+  duration, tokens, per-step breakdown) that expands in place, eliding a long
+  turn's middle behind a "show more" summary.
 - **Orchestration** — the subagent tree, as a tree, waterfall, or flame view.
 - **Context & cost** — context growth over time, compactions, and per-model
   cost breakdown.
