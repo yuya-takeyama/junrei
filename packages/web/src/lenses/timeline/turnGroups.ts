@@ -1,4 +1,4 @@
-import type { CodexSessionJson, SessionJson, TimelineEntry } from "../../api.js";
+import type { CodexSessionJson, SessionJson, SubagentNodeJson, TimelineEntry } from "../../api.js";
 
 type TurnUsage = SessionJson["turnUsage"][number];
 type CodexTurn = CodexSessionJson["codex"]["turns"][number];
@@ -62,6 +62,26 @@ export interface TurnGroup {
   costUsd?: number;
   /** True when the turn mixes priced and unpriced steps (a partial sum), or the session's own cost total is incomplete elsewhere. */
   costIncomplete: boolean;
+  /**
+   * Claude only — the OTHER half of per-turn cost (`costUsd` above is the
+   * turn's own main-loop spend): cost of every subagent this turn launched,
+   * summed from each `subagent-launch` entry's resolved SUBTREE cost (its
+   * own usage plus every nested descendant's — see
+   * `buildSubagentSubtreeCosts`), not the launch entry's own `costUsd`
+   * (which prices the sidecar transcript alone, excluding nested children).
+   * Defined only when the turn has >= 1 subagent-launch entry; Codex adapter
+   * never sets it (hidden by presence — see `turnColumns.ts`'s `deleg`
+   * column).
+   */
+  delegatedCostUsd?: number;
+  /**
+   * True when `delegatedCostUsd` is a partial sum: a launch couldn't be
+   * joined to the subagent forest (no `agentId`, or one missing from it —
+   * falls back to the launch entry's own, nested-excluding `costUsd`), a
+   * joined subtree itself had incomplete pricing, or the session's own cost
+   * total is incomplete elsewhere. Undefined whenever `delegatedCostUsd` is.
+   */
+  delegatedCostIncomplete?: boolean;
   toolErrorCount: number;
   /** Stable expand/override key and compaction-sibling anchor — the user prompt line that opened this turn (or the first entry's line, for the head-of-transcript turn with no captured prompt). */
   anchorLine: number;
@@ -70,6 +90,14 @@ export interface TurnGroup {
 export interface BuildTurnGroupsOptions {
   /** `session.totalUsage.costIsComplete` — folded into every turn's `costIncomplete` so a turn that looks fully priced in isolation still reads as approximate when the session has unpriced usage elsewhere (e.g. a subagent). */
   costIsComplete: boolean;
+  /**
+   * `session.subagents` — the session's own subagent forest, used to
+   * attribute delegated cost to the turn whose `subagent-launch` entry
+   * spawned each agent (see `buildSubagentSubtreeCosts`). Optional: a
+   * session with no subagents (or the caller not passing any) just means no
+   * group ever gets a `delegatedCostUsd`.
+   */
+  subagents?: readonly SubagentNodeJson[];
 }
 
 /**
@@ -82,6 +110,48 @@ function durationBetween(start: string | undefined, end: string | undefined): nu
   if (start === undefined || end === undefined) return undefined;
   const delta = Date.parse(end) - Date.parse(start);
   return Number.isFinite(delta) && delta >= 0 ? delta : undefined;
+}
+
+interface SubtreeCost {
+  costUsd: number;
+  costIsComplete: boolean;
+}
+
+/**
+ * Top-level subagent `agentId` -> subtree cost — that node's own usage cost
+ * plus every nested descendant's, recursively, with `costIsComplete` AND'd
+ * across the whole subtree. Keyed by TOP-LEVEL agentId only: a
+ * `subagent-launch` timeline entry only ever appears in the MAIN
+ * transcript's timeline (a nested subagent's own launch happens inside its
+ * PARENT's sidecar transcript, which this turn-grouped spine never walks),
+ * so a launch entry's `agentId` can only ever name a root of the forest.
+ *
+ * This map exists because a `subagent-launch` entry's OWN `costUsd` comes
+ * from core's `resolveSubagentUsage`, which prices that sidecar transcript
+ * ALONE — nested children are excluded (see docs/roadmap.md's cost-fix
+ * follow-up). Summing launch entries' `costUsd` directly would silently
+ * undercount any subagent that itself delegated further.
+ */
+export function buildSubagentSubtreeCosts(
+  roots: readonly SubagentNodeJson[],
+): Map<string, SubtreeCost> {
+  const subtreeOf = (node: SubagentNodeJson): SubtreeCost =>
+    node.children.reduce<SubtreeCost>(
+      (acc, child) => {
+        const childCost = subtreeOf(child);
+        return {
+          costUsd: acc.costUsd + childCost.costUsd,
+          costIsComplete: acc.costIsComplete && childCost.costIsComplete,
+        };
+      },
+      { costUsd: node.usage.total.costUsd, costIsComplete: node.usage.total.costIsComplete },
+    );
+
+  const map = new Map<string, SubtreeCost>();
+  for (const root of roots) {
+    map.set(root.agentId, subtreeOf(root));
+  }
+  return map;
 }
 
 /**
@@ -105,6 +175,8 @@ export function buildClaudeTurnGroups(
 ): TurnGroup[] {
   if (turnUsage.length === 0) return [];
 
+  const subtreeCosts = buildSubagentSubtreeCosts(opts.subagents ?? []);
+
   const buckets: TimelineEntry[][] = turnUsage.map(() => []);
   let turnIndex = 0;
   for (const entry of entries) {
@@ -125,13 +197,30 @@ export function buildClaudeTurnGroups(
 
     const models: string[] = [];
     let toolErrorCount = 0;
+    // Delegated cost: joined by agentId against `subtreeCosts` (nested
+    // descendants included) below — a launch with no agentId, or one
+    // missing from the forest, falls back to the launch entry's own
+    // (nested-excluding) costUsd and flags the sum as an undercount.
+    let delegatedCostUsd: number | undefined;
+    let delegatedCostIncomplete = false;
     for (const entry of bucket) {
       if (entry.kind === "assistant-text") {
         if (entry.model !== undefined && !models.includes(entry.model)) models.push(entry.model);
       } else if (entry.kind === "tool-call" && entry.status === "error") {
         toolErrorCount += 1;
+      } else if (entry.kind === "subagent-launch") {
+        delegatedCostUsd ??= 0;
+        const subtree = entry.agentId !== undefined ? subtreeCosts.get(entry.agentId) : undefined;
+        if (subtree !== undefined) {
+          delegatedCostUsd += subtree.costUsd;
+          if (!subtree.costIsComplete) delegatedCostIncomplete = true;
+        } else {
+          if (entry.costUsd !== undefined) delegatedCostUsd += entry.costUsd;
+          delegatedCostIncomplete = true;
+        }
       }
     }
+    if (delegatedCostUsd !== undefined && !opts.costIsComplete) delegatedCostIncomplete = true;
 
     // Cost (and the rest of the model list) comes from `usage.steps` — EVERY
     // priced API call in the turn, not just the ones with an assistant-text
@@ -185,6 +274,7 @@ export function buildClaudeTurnGroups(
       })),
       ...(costUsd !== undefined && { costUsd }),
       costIncomplete: costMissing || !opts.costIsComplete,
+      ...(delegatedCostUsd !== undefined && { delegatedCostUsd, delegatedCostIncomplete }),
       toolErrorCount,
       anchorLine: usage.line,
     };

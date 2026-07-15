@@ -546,7 +546,16 @@ summed only `assistant-text` entries' `costUsd`, but that field only exists on
 API calls that emitted a text block, so tool-use-only calls (most agentic
 steps) contributed $0 with no `costIncomplete` warning. Fixed: `ClaudeTurnStep`
 (`@junrei/core`'s `metrics.ts`) now carries its own `costUsd` from the same
-pricing helper, and the adapter sums ALL of a turn's steps instead.
+pricing helper, and the adapter sums ALL of a turn's steps instead. Second
+half: a turn's Cost cell was still only its own main-loop spend, with no
+column for cost it delegated to subagents. `buildClaudeTurnGroups` now takes
+the session's subagent forest and joins each turn's `subagent-launch` entries
+against a per-root subtree-cost map (`buildSubagentSubtreeCosts` — own usage
+plus every nested descendant's, recursively; NOT the launch entry's own
+`costUsd`, which prices the sidecar transcript alone and excludes nested
+children), producing `TurnGroup.delegatedCostUsd`/`delegatedCostIncomplete`. A
+new `deleg` column (`turnColumns.ts`, after Cost) renders it presence-driven,
+so Σ(Cost) + Σ(Deleg) now reconciles against the session's total cost.
 
 ## Later (post-v1)
 

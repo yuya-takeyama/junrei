@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { CodexSessionJson, SessionJson, TimelineEntry } from "../../api.js";
+import type { CodexSessionJson, SessionJson, SubagentNodeJson, TimelineEntry } from "../../api.js";
 import { visibleTurnColumns } from "./turnColumns.js";
 import {
   buildClaudeTurnGroups,
   buildCodexTurnGroups,
+  buildSubagentSubtreeCosts,
   isOutlierTurn,
   sumTurnCosts,
   turnsUpToBudget,
@@ -55,6 +56,47 @@ function toolCall(line: number, status: "ok" | "error" | "missing-result" = "ok"
 
 function compaction(line: number): TimelineEntry {
   return { kind: "compaction", line };
+}
+
+function subagentLaunch(
+  line: number,
+  overrides: Partial<Extract<TimelineEntry, { kind: "subagent-launch" }>> = {},
+): TimelineEntry {
+  return {
+    kind: "subagent-launch",
+    line,
+    toolUseId: `su${String(line)}`,
+    promptTruncated: false,
+    ...overrides,
+  };
+}
+
+function usageTotal(costUsd: number, costIsComplete = true): SubagentNodeJson["usage"] {
+  return {
+    byModel: [],
+    total: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd,
+      costIsComplete,
+    },
+  };
+}
+
+function subagentNode(
+  agentId: string,
+  overrides: Partial<SubagentNodeJson> = {},
+): SubagentNodeJson {
+  return {
+    agentId,
+    usage: usageTotal(0),
+    toolCallCount: 0,
+    toolErrorCount: 0,
+    children: [],
+    ...overrides,
+  };
 }
 
 function codexTurn(overrides: Partial<CodexTurn> = {}): CodexTurn {
@@ -400,6 +442,181 @@ describe("buildClaudeTurnGroups", () => {
     ];
     const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true });
     expect(groups[0]?.toolErrorCount).toBe(2);
+  });
+
+  describe("delegatedCostUsd (subagent subtree join)", () => {
+    it("joins a launch by agentId to the subtree-cost map, not the launch entry's own costUsd", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [
+        user(1),
+        // Own costUsd (0.1) deliberately understates the real subtree cost
+        // (0.1 + 0.4 nested) — the join must use the latter.
+        subagentLaunch(2, { agentId: "a1", costUsd: 0.1, costIsComplete: true }),
+      ];
+      const subagents = [
+        subagentNode("a1", {
+          usage: usageTotal(0.1),
+          children: [subagentNode("a1-1", { usage: usageTotal(0.4) })],
+        }),
+      ];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents });
+      expect(groups[0]?.delegatedCostUsd).toBeCloseTo(0.5);
+      expect(groups[0]?.delegatedCostIncomplete).toBe(false);
+    });
+
+    it("falls back to the launch entry's own costUsd and flags incomplete when agentId is missing", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [user(1), subagentLaunch(2, { costUsd: 0.2 })];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents: [] });
+      expect(groups[0]?.delegatedCostUsd).toBe(0.2);
+      expect(groups[0]?.delegatedCostIncomplete).toBe(true);
+    });
+
+    it("falls back and flags incomplete when the agentId isn't in the subagent forest", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [
+        user(1),
+        subagentLaunch(2, { agentId: "ghost", costUsd: 0.3 }),
+      ];
+      const subagents = [subagentNode("a1", { usage: usageTotal(1) })];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents });
+      expect(groups[0]?.delegatedCostUsd).toBe(0.3);
+      expect(groups[0]?.delegatedCostIncomplete).toBe(true);
+    });
+
+    it("leaves delegatedCostUsd undefined for a turn with no subagent-launch entries", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [user(1), toolCall(2)];
+      const subagents = [subagentNode("a1", { usage: usageTotal(1) })];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents });
+      expect(groups[0]?.delegatedCostUsd).toBeUndefined();
+      expect(groups[0]?.delegatedCostIncomplete).toBeUndefined();
+    });
+
+    it("sums multiple launches in the same turn together", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [
+        user(1),
+        subagentLaunch(2, { agentId: "a1" }),
+        subagentLaunch(3, { agentId: "a2" }),
+      ];
+      const subagents = [
+        subagentNode("a1", { usage: usageTotal(0.3) }),
+        subagentNode("a2", { usage: usageTotal(0.7) }),
+      ];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents });
+      expect(groups[0]?.delegatedCostUsd).toBeCloseTo(1.0);
+      expect(groups[0]?.delegatedCostIncomplete).toBe(false);
+    });
+
+    it("flags incomplete when a joined subtree itself has incomplete pricing, even with no fallback", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [user(1), subagentLaunch(2, { agentId: "a1" })];
+      const subagents = [subagentNode("a1", { usage: usageTotal(0.5, false) })];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents });
+      expect(groups[0]?.delegatedCostIncomplete).toBe(true);
+    });
+
+    it("flags incomplete from session-level costIsComplete even when the joined subtree is fully priced", () => {
+      const turns = [turn(1)];
+      const entries: TimelineEntry[] = [user(1), subagentLaunch(2, { agentId: "a1" })];
+      const subagents = [subagentNode("a1", { usage: usageTotal(0.5, true) })];
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: false, subagents });
+      expect(groups[0]?.delegatedCostUsd).toBe(0.5);
+      expect(groups[0]?.delegatedCostIncomplete).toBe(true);
+    });
+
+    it("reconciles: Σ(costUsd) + Σ(delegatedCostUsd) equals main + subagent totals for a two-turn fixture with one nested subagent", () => {
+      // Turn 1: two priced main-loop API steps, no delegation.
+      // Turn 2: one priced step, plus a launch of "a1" (own cost 0.2) which
+      // itself launched a nested "a1-1" (cost 0.15) — the KNOWN PITFALL this
+      // whole feature exists to correct: summing the launch entry's own
+      // costUsd (0.2) alone would silently drop the nested 0.15.
+      const turns = [
+        turn(1, {
+          steps: [
+            {
+              line: 2,
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheCreationTokens: 0,
+              costUsd: 0.4,
+            },
+          ],
+        }),
+        turn(10, {
+          steps: [
+            {
+              line: 11,
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheCreationTokens: 0,
+              costUsd: 0.1,
+            },
+          ],
+        }),
+      ];
+      const entries: TimelineEntry[] = [
+        user(1),
+        assistantText(2, { costUsd: 0.4 }),
+        user(10),
+        assistantText(11, { costUsd: 0.1 }),
+        subagentLaunch(12, { agentId: "a1", costUsd: 0.2, costIsComplete: true }),
+      ];
+      const nested = subagentNode("a1-1", { usage: usageTotal(0.15) });
+      const subagents = [subagentNode("a1", { usage: usageTotal(0.2), children: [nested] })];
+
+      const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true, subagents });
+
+      const sumCost = groups.reduce((sum, g) => sum + (g.costUsd ?? 0), 0);
+      const sumDelegated = groups.reduce((sum, g) => sum + (g.delegatedCostUsd ?? 0), 0);
+      // Main total: 0.4 (turn 1) + 0.1 (turn 2) = 0.5. Subagent total: the
+      // full a1 subtree, 0.2 + 0.15 = 0.35. Session grand total: 0.85.
+      const mainTotal = 0.5;
+      const subagentTotal = 0.35;
+      expect(sumCost).toBeCloseTo(mainTotal);
+      expect(sumDelegated).toBeCloseTo(subagentTotal);
+      expect(sumCost + sumDelegated).toBeCloseTo(mainTotal + subagentTotal);
+      expect(groups[1]?.delegatedCostIncomplete).toBe(false);
+    });
+  });
+});
+
+describe("buildSubagentSubtreeCosts", () => {
+  it("sums a root's own cost with every nested descendant's, recursively", () => {
+    const root = subagentNode("a1", {
+      usage: usageTotal(1),
+      children: [
+        subagentNode("a1-1", {
+          usage: usageTotal(0.5),
+          children: [subagentNode("a1-1-1", { usage: usageTotal(0.25) })],
+        }),
+      ],
+    });
+    const map = buildSubagentSubtreeCosts([root]);
+    expect(map.get("a1")).toEqual({ costUsd: 1.75, costIsComplete: true });
+  });
+
+  it("keys only top-level roots, never a nested descendant's own agentId", () => {
+    const root = subagentNode("a1", { children: [subagentNode("a1-1")] });
+    const map = buildSubagentSubtreeCosts([root]);
+    expect(map.has("a1-1")).toBe(false);
+    expect(map.size).toBe(1);
+  });
+
+  it("ANDs costIsComplete across the whole subtree — one incomplete descendant makes the whole subtree incomplete", () => {
+    const root = subagentNode("a1", {
+      usage: usageTotal(1, true),
+      children: [subagentNode("a1-1", { usage: usageTotal(0.5, false) })],
+    });
+    const map = buildSubagentSubtreeCosts([root]);
+    expect(map.get("a1")?.costIsComplete).toBe(false);
+  });
+
+  it("returns an empty map for an empty forest", () => {
+    expect(buildSubagentSubtreeCosts([]).size).toBe(0);
   });
 });
 
