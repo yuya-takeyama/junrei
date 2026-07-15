@@ -541,6 +541,13 @@ the events underneath, in place. Six phases, static mock in
 
 All six phases shipped: #94, #95, #96, #97, #98, #99.
 
+Follow-up: the turn Cost column silently undercounted — `buildClaudeTurnGroups`
+summed only `assistant-text` entries' `costUsd`, but that field only exists on
+API calls that emitted a text block, so tool-use-only calls (most agentic
+steps) contributed $0 with no `costIncomplete` warning. Fixed: `ClaudeTurnStep`
+(`@junrei/core`'s `metrics.ts`) now carries its own `costUsd` from the same
+pricing helper, and the adapter sums ALL of a turn's steps instead.
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

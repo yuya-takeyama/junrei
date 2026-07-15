@@ -26,7 +26,7 @@ export interface TurnGroup {
   userEntry?: UserEntry;
   /** Every timeline entry attributed to this turn, in source order — includes compaction entries at their true position. */
   entries: TimelineEntry[];
-  /** Unique models across the turn's `assistant-text` entries, first-seen order. */
+  /** Unique models across the turn's `assistant-text` entries, then any additional models named only by a tool-only step, first-seen order in each pass. */
   models: string[];
   startedAt?: string;
   /** Codex: native turn duration; Claude: derived from entry timestamps. */
@@ -55,10 +55,12 @@ export interface TurnGroup {
     outputTokens: number;
     cacheReadTokens: number;
     cacheCreationTokens: number;
+    /** Undefined when the step's own model was missing/unpriced — see `ClaudeTurnStep.costUsd` in `@junrei/core`. */
+    costUsd?: number;
   }[];
-  /** Claude only (derived from `assistant-text` entries); undefined = no concept for this harness. */
+  /** Claude only — sum of every step's own `costUsd` (ALL API calls in the turn, not just ones that emitted a text block); undefined only when the turn has zero priced steps. No concept for Codex. */
   costUsd?: number;
-  /** True when an `assistant-text` entry in the turn lacks `costUsd` (unpriced model), or the session's own cost total is incomplete elsewhere. */
+  /** True when the turn mixes priced and unpriced steps (a partial sum), or the session's own cost total is incomplete elsewhere. */
   costIncomplete: boolean;
   toolErrorCount: number;
   /** Stable expand/override key and compaction-sibling anchor — the user prompt line that opened this turn (or the first entry's line, for the head-of-transcript turn with no captured prompt). */
@@ -122,18 +124,36 @@ export function buildClaudeTurnGroups(
     );
 
     const models: string[] = [];
-    let costUsd: number | undefined;
-    let costMissing = false;
     let toolErrorCount = 0;
     for (const entry of bucket) {
       if (entry.kind === "assistant-text") {
         if (entry.model !== undefined && !models.includes(entry.model)) models.push(entry.model);
-        if (entry.costUsd !== undefined) costUsd = (costUsd ?? 0) + entry.costUsd;
-        else costMissing = true;
       } else if (entry.kind === "tool-call" && entry.status === "error") {
         toolErrorCount += 1;
       }
     }
+
+    // Cost (and the rest of the model list) comes from `usage.steps` — EVERY
+    // priced API call in the turn, not just the ones with an assistant-text
+    // entry above. A tool-use-only call still costs money; summing only
+    // text-bearing entries silently dropped it (the bug this fixes — see
+    // docs/roadmap.md). `costMissing` only flags a MIX of priced/unpriced
+    // steps (a genuinely partial sum); a turn with zero priced steps has no
+    // sum to be partial about, so it just renders as no-cost-data (undefined
+    // costUsd) via the `present` check in turnColumns.ts.
+    let costUsd: number | undefined;
+    let hasPricedStep = false;
+    let hasUnpricedStep = false;
+    for (const step of usage.steps) {
+      if (step.model !== undefined && !models.includes(step.model)) models.push(step.model);
+      if (step.costUsd !== undefined) {
+        costUsd = (costUsd ?? 0) + step.costUsd;
+        hasPricedStep = true;
+      } else {
+        hasUnpricedStep = true;
+      }
+    }
+    const costMissing = hasPricedStep && hasUnpricedStep;
 
     const startedAt = usage.timestamp ?? userEntry?.timestamp;
     const lastEntry = bucket[bucket.length - 1];
@@ -161,6 +181,7 @@ export function buildClaudeTurnGroups(
         outputTokens: step.outputTokens,
         cacheReadTokens: step.cacheReadTokens,
         cacheCreationTokens: step.cacheCreationTokens,
+        ...(step.costUsd !== undefined && { costUsd: step.costUsd }),
       })),
       ...(costUsd !== undefined && { costUsd }),
       costIncomplete: costMissing || !opts.costIsComplete,

@@ -5,7 +5,7 @@ import type {
   SkillInvocation,
   UsageSummary,
 } from "../shared/metrics.js";
-import { estimateCostComponents } from "../shared/pricing/pricing.js";
+import { estimateCostComponents, estimateCostUsd } from "../shared/pricing/pricing.js";
 import type { SessionData, TaskNotificationEvent, ToolCall, UserPrompt } from "./session-data.js";
 import type { ClaudeSessionRecord } from "./types.js";
 
@@ -88,6 +88,8 @@ export interface ClaudeTurnStep {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /** Same pricing helper `buildAssistantTextEntry` uses (`../shared/pricing/pricing.js`'s `estimateCostUsd`). Undefined when the model is missing or unpriced — every step costs money, not just the ones that happened to emit a text block. */
+  costUsd?: number;
 }
 
 export interface ClaudeTurnUsage {
@@ -148,6 +150,11 @@ export function computeTurnUsage(data: SessionData): ClaudeTurnUsage[] {
     turn.cacheReadTokens += message.usage.cacheReadTokens;
     turn.cacheCreationTokens += message.usage.cacheCreationTokens;
     turn.apiMessageCount += 1;
+    // Same guard as `buildAssistantTextEntry` (core timeline.ts): only priced
+    // when the model is known, so a missing model reads as "no cost data"
+    // rather than falling back to some default rate.
+    const costUsd =
+      message.model !== undefined ? estimateCostUsd(message.model, message.usage) : undefined;
     turn.steps.push({
       line: message.line,
       ...(message.timestamp !== undefined && { timestamp: message.timestamp }),
@@ -156,6 +163,7 @@ export function computeTurnUsage(data: SessionData): ClaudeTurnUsage[] {
       outputTokens: message.usage.outputTokens,
       cacheReadTokens: message.usage.cacheReadTokens,
       cacheCreationTokens: message.usage.cacheCreationTokens,
+      ...(costUsd !== undefined && { costUsd }),
     });
   }
   return turns;

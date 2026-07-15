@@ -1,4 +1,4 @@
-import { formatTokens } from "../../format.js";
+import { formatTokens, formatUsd } from "../../format.js";
 import { classifyModel, modelShortLabel } from "../../modelClass.js";
 import type { TurnGroup } from "./turnGroups.js";
 
@@ -9,13 +9,19 @@ export function formatStepCompact(step: TurnStep, index: number): string {
   return `s${String(index)} · in ${formatTokens(step.inputTokens)} · out ${formatTokens(step.outputTokens)}`;
 }
 
-/** Full per-call breakdown line for the expanded steps list. */
+/**
+ * Full per-call breakdown line for the expanded steps list. Appends the
+ * step's own cost when priced — omitted entirely (not a placeholder) when
+ * undefined, same presence rule as the turn-level Cost column. The collapsed
+ * two-step preview (`formatStepCompact`) deliberately skips cost to stay
+ * short; this is the one place a step's price is visible.
+ */
 export function formatStepDetail(step: TurnStep, index: number): string {
-  return (
+  const base =
     `s${String(index)} · in ${formatTokens(step.inputTokens)} · ` +
     `c·r ${formatTokens(step.cacheReadTokens)} · c·w ${formatTokens(step.cacheCreationTokens)} · ` +
-    `out ${formatTokens(step.outputTokens)}`
-  );
+    `out ${formatTokens(step.outputTokens)}`;
+  return step.costUsd !== undefined ? `${base} · ${formatUsd(step.costUsd)}` : base;
 }
 
 /** First two steps, compact-formatted — the collapsed row's inline preview. */

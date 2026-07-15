@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type FileAccessAgg, foldFileAccess, mergeFileAccess } from "../shared/metrics.js";
+import { estimateCostUsd } from "../shared/pricing/pricing.js";
 import {
   computeFileAccess,
   computeSkillInvocations,
@@ -197,22 +198,27 @@ describe("computeTurnUsage", () => {
     expect(turns[0]?.apiMessageCount).toBe(1);
   });
 
-  it("captures each step's own model/timestamp and full token breakdown", () => {
+  it("captures each step's own model/timestamp, full token breakdown, and priced cost", () => {
+    const usage = {
+      inputTokens: 41_900,
+      outputTokens: 5_400,
+      cacheReadTokens: 896_900,
+      cacheCreationTokens: 12_100,
+    };
     const messages: ApiMessage[] = [
       {
         messageId: "m1",
         model: "claude-sonnet-4-5",
         timestamp: "2026-01-01T00:00:05.000Z",
-        usage: {
-          inputTokens: 41_900,
-          outputTokens: 5_400,
-          cacheReadTokens: 896_900,
-          cacheCreationTokens: 12_100,
-        },
+        usage,
         line: 2,
       },
     ];
     const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], messages));
+    // Computed via the same helper rather than a hardcoded literal, so this
+    // test doesn't drift if prices.json's rates change.
+    const expectedCost = estimateCostUsd("claude-sonnet-4-5", usage);
+    expect(expectedCost).toBeGreaterThan(0);
     expect(turns[0]?.steps[0]).toEqual({
       line: 2,
       timestamp: "2026-01-01T00:00:05.000Z",
@@ -221,10 +227,11 @@ describe("computeTurnUsage", () => {
       outputTokens: 5_400,
       cacheReadTokens: 896_900,
       cacheCreationTokens: 12_100,
+      costUsd: expectedCost,
     });
   });
 
-  it("leaves model/timestamp off a step when the source message lacks them", () => {
+  it("leaves model/timestamp/costUsd off a step when the source message lacks them", () => {
     const messages: ApiMessage[] = [
       {
         messageId: "m1",
@@ -235,6 +242,22 @@ describe("computeTurnUsage", () => {
     const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], messages));
     expect(turns[0]?.steps[0]).not.toHaveProperty("model");
     expect(turns[0]?.steps[0]).not.toHaveProperty("timestamp");
+    // No model at all means no pricing lookup is even attempted — a missing
+    // model reads as "no cost data", not a $0 default.
+    expect(turns[0]?.steps[0]).not.toHaveProperty("costUsd");
+  });
+
+  it("leaves a step's costUsd undefined when its model has no pricing entry (unpriced, not zero)", () => {
+    const messages: ApiMessage[] = [
+      {
+        messageId: "m1",
+        model: "totally-unknown-model-xyz",
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        line: 2,
+      },
+    ];
+    const turns = computeTurnUsage(sessionDataWithTurns([{ text: "hi", line: 1 }], messages));
+    expect(turns[0]?.steps[0]?.costUsd).toBeUndefined();
   });
 });
 
