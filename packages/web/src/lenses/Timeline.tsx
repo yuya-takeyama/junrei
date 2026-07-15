@@ -221,6 +221,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     return session.source === "claude-code"
       ? buildClaudeTurnGroups(entries, session.turnUsage, {
           costIsComplete: session.totalUsage.costIsComplete,
+          subagents: session.subagents,
         })
       : buildCodexTurnGroups(entries, session.codex.turns);
   }, [entries, turnGroupable, session]);

@@ -47,6 +47,19 @@ describe("visibleTurnColumns", () => {
     expect(visibleTurnColumns(groups).map((c) => c.key)).toContain("cost");
   });
 
+  it("hides deleg when no group defines delegatedCostUsd (Codex-shaped or no-delegation Claude)", () => {
+    const groups = [group(), group({ index: 2, anchorLine: 5, costUsd: 0.5 })];
+    expect(visibleTurnColumns(groups).map((c) => c.key)).not.toContain("deleg");
+  });
+
+  it("shows deleg once any group defines delegatedCostUsd", () => {
+    const groups = [
+      group(),
+      group({ index: 2, anchorLine: 5, delegatedCostUsd: 0.3, delegatedCostIncomplete: false }),
+    ];
+    expect(visibleTurnColumns(groups).map((c) => c.key)).toContain("deleg");
+  });
+
   it("shows reasoning once any group defines reasoningTokens (Codex-only field)", () => {
     const groups = [group(), group({ index: 2, anchorLine: 5, reasoningTokens: 120 })];
     expect(visibleTurnColumns(groups).map((c) => c.key)).toContain("reasoning");
@@ -66,6 +79,31 @@ describe("visibleTurnColumns", () => {
       "output",
       "reasoning",
       "cost",
+    ]);
+  });
+
+  it("places deleg right after cost, last in the fixed display order", () => {
+    const groups = [
+      group({
+        stepCount: 1,
+        cacheCreationTokens: 2,
+        reasoningTokens: 3,
+        costUsd: 4,
+        delegatedCostUsd: 1,
+        delegatedCostIncomplete: false,
+      }),
+    ];
+    expect(visibleTurnColumns(groups).map((c) => c.key)).toEqual([
+      "started",
+      "dur",
+      "steps",
+      "input",
+      "cread",
+      "cwrite",
+      "output",
+      "reasoning",
+      "cost",
+      "deleg",
     ]);
   });
 });
@@ -88,6 +126,38 @@ describe("reasoning column", () => {
   });
 });
 
+describe("deleg column", () => {
+  function delegColumn(groups: readonly TurnGroup[]) {
+    const col = visibleTurnColumns(groups).find((c) => c.key === "deleg");
+    if (col === undefined) throw new Error("deleg column not present");
+    return col;
+  }
+
+  it("renders an em-dash for a turn with no delegatedCostUsd (no launches)", () => {
+    const groups = [
+      group({ delegatedCostUsd: 0.5, delegatedCostIncomplete: false }),
+      group({ index: 2, anchorLine: 5 }),
+    ];
+    expect(delegColumn(groups).render(groups[1] as TurnGroup)).toBe("—");
+  });
+
+  it("renders the formatted USD amount, no ≈ prefix, when complete", () => {
+    const groups = [group({ delegatedCostUsd: 1.5, delegatedCostIncomplete: false })];
+    expect(delegColumn(groups).render(groups[0] as TurnGroup)).toBe("$1.50");
+  });
+
+  it("prefixes ≈ and adds the approx class when delegatedCostIncomplete", () => {
+    const groups = [group({ delegatedCostUsd: 1.5, delegatedCostIncomplete: true })];
+    expect(delegColumn(groups).render(groups[0] as TurnGroup)).toBe("≈ $1.50");
+    expect(delegColumn(groups).className(groups[0] as TurnGroup, false)).toBe("stat approx");
+  });
+
+  it("has no approx class when complete", () => {
+    const groups = [group({ delegatedCostUsd: 1.5, delegatedCostIncomplete: false })];
+    expect(delegColumn(groups).className(groups[0] as TurnGroup, false)).toBe("stat");
+  });
+});
+
 describe("turnGridTemplate", () => {
   it("matches the Claude-full-presence template exactly (no visual change from the prior fixed grid)", () => {
     const groups = [group({ stepCount: 1, cacheCreationTokens: 2, costUsd: 4 })];
@@ -104,5 +174,11 @@ describe("turnGridTemplate", () => {
     const groups = [group({ reasoningTokens: 10 })];
     const template = turnGridTemplate(visibleTurnColumns(groups));
     expect(template).toBe("46px minmax(0, 1fr) 66px 58px 68px 74px 68px 82px");
+  });
+
+  it("appends the deleg column's width, after cost, once any group defines delegatedCostUsd", () => {
+    const groups = [group({ costUsd: 4, delegatedCostUsd: 1, delegatedCostIncomplete: false })];
+    const template = turnGridTemplate(visibleTurnColumns(groups));
+    expect(template).toBe("46px minmax(0, 1fr) 66px 58px 68px 74px 68px 66px 74px");
   });
 });

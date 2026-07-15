@@ -116,6 +116,20 @@ const TURN_COLUMNS: readonly TurnColumn[] = [
       ),
     present: (groups) => groups.some((g) => g.costUsd !== undefined),
   },
+  {
+    key: "deleg",
+    label: "Deleg",
+    width: "74px",
+    // No outlier tint — `isOutlier` reflects the turn's OWN cost share, not
+    // its delegated spend, so tinting this cell off that flag would be
+    // misleading.
+    render: (g) =>
+      g.delegatedCostUsd === undefined
+        ? EM_DASH
+        : `${g.delegatedCostIncomplete ? "≈ " : ""}${formatUsd(g.delegatedCostUsd)}`,
+    className: (g) => joinClasses("stat", g.delegatedCostIncomplete === true && "approx"),
+    present: (groups) => groups.some((g) => g.delegatedCostUsd !== undefined),
+  },
 ];
 
 /** The columns that actually show for a given set of groups, in display order. */
