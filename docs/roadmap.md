@@ -579,11 +579,11 @@ sub-headers; waterfall/flame pick up labels via `displayName`; `Workflow`
 timeline entries get a lazy `name · N agents · $cost` rollup; the MCP
 subagent tree passes `workflowRuns` through.
 
-Follow-up (in progress, separate session): `computeUsage` dedupes API
-messages by `message.id` keeping the FIRST occurrence, but Claude Code
-streams the same message across lines with growing `output_tokens` — last
-occurrence is billing-correct (the motivating session's workflow agents:
-$13.05 shown vs $17.39 correct).
+Follow-up shipped same day in #103: `computeUsage` deduped API messages by
+`message.id` keeping the FIRST occurrence, but Claude Code streams the same
+message across lines with growing `output_tokens` — dedup now keeps the last
+occurrence, which is billing-correct (the motivating session's workflow
+agents: $13.05 under first-occurrence vs $17.39 correct).
 
 ## Later (post-v1)
 
