@@ -117,7 +117,7 @@ describe("buildClaudeTurnGroups", () => {
     expect(groups[0]?.reasoningTokens).toBeUndefined();
   });
 
-  it("maps usage.steps onto the group, dropping line/timestamp (not needed by the view)", () => {
+  it("maps usage.steps onto the group, dropping line/timestamp (not needed by the view) but passing costUsd through", () => {
     const turns = [
       turn(1, {
         apiMessageCount: 2,
@@ -130,6 +130,7 @@ describe("buildClaudeTurnGroups", () => {
             outputTokens: 5,
             cacheReadTokens: 1,
             cacheCreationTokens: 2,
+            costUsd: 0.05,
           },
           {
             line: 4,
@@ -138,6 +139,7 @@ describe("buildClaudeTurnGroups", () => {
             outputTokens: 8,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
+            // No costUsd here — unpriced step, must stay absent on the group's step too.
           },
         ],
       }),
@@ -150,6 +152,7 @@ describe("buildClaudeTurnGroups", () => {
         outputTokens: 5,
         cacheReadTokens: 1,
         cacheCreationTokens: 2,
+        costUsd: 0.05,
       },
       {
         model: "claude-sonnet-4-5",
@@ -215,19 +218,76 @@ describe("buildClaudeTurnGroups", () => {
     expect(groups[1]?.entries.map((e) => e.kind)).toEqual(["user"]);
   });
 
-  it("sums assistant-text costUsd and flags costIncomplete when one is missing", () => {
-    const turns = [turn(1)];
+  it("sums costUsd from EVERY step, not just ones with a text-bearing assistant entry (regression: the old assistant-text-only sum silently dropped tool-only calls)", () => {
+    const turns = [
+      turn(1, {
+        steps: [
+          // A text-bearing call — has both an assistant-text entry AND a step.
+          {
+            line: 2,
+            model: "claude-fable-5",
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0.3,
+          },
+          // A tool-only call — a step, but NO assistant-text entry (no text
+          // block emitted). This is exactly the cost the old assistant-text
+          // sum silently dropped.
+          {
+            line: 3,
+            model: "claude-fable-5",
+            inputTokens: 200,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0.2,
+          },
+        ],
+      }),
+    ];
     const entries: TimelineEntry[] = [
       user(1),
-      assistantText(2, { costUsd: 0.5 }),
-      assistantText(3),
+      assistantText(2, { model: "claude-fable-5", costUsd: 0.3 }),
+      toolCall(3),
     ];
     const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true });
     expect(groups[0]?.costUsd).toBe(0.5);
+    expect(groups[0]?.costIncomplete).toBe(false);
+  });
+
+  it("flags costIncomplete when the turn mixes priced and unpriced steps", () => {
+    const turns = [
+      turn(1, {
+        steps: [
+          {
+            line: 2,
+            model: "claude-fable-5",
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0.1,
+          },
+          // Unpriced — no costUsd (model missing/unpriced upstream).
+          {
+            line: 3,
+            model: "totally-unknown-model-xyz",
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        ],
+      }),
+    ];
+    const groups = buildClaudeTurnGroups([user(1)], turns, { costIsComplete: true });
+    expect(groups[0]?.costUsd).toBe(0.1);
     expect(groups[0]?.costIncomplete).toBe(true);
   });
 
-  it("leaves costUsd undefined when no assistant-text entry carries a cost", () => {
+  it("leaves costUsd undefined when the turn has zero priced steps (no steps at all)", () => {
     const turns = [turn(1)];
     const entries: TimelineEntry[] = [user(1), toolCall(2)];
     const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true });
@@ -235,10 +295,23 @@ describe("buildClaudeTurnGroups", () => {
     expect(groups[0]?.costIncomplete).toBe(false);
   });
 
-  it("folds the session-level costIsComplete flag into every turn's costIncomplete", () => {
-    const turns = [turn(1)];
-    const entries: TimelineEntry[] = [user(1), assistantText(2, { costUsd: 1 })];
-    const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: false });
+  it("folds the session-level costIsComplete flag into every turn's costIncomplete, even when the turn's own steps are fully priced", () => {
+    const turns = [
+      turn(1, {
+        steps: [
+          {
+            line: 2,
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 1,
+          },
+        ],
+      }),
+    ];
+    const groups = buildClaudeTurnGroups([user(1)], turns, { costIsComplete: false });
+    expect(groups[0]?.costUsd).toBe(1);
     expect(groups[0]?.costIncomplete).toBe(true);
   });
 
@@ -277,6 +350,41 @@ describe("buildClaudeTurnGroups", () => {
       assistantText(2, { model: "claude-sonnet-4-5" }),
       assistantText(3, { model: "claude-3-5-haiku" }),
       assistantText(4, { model: "claude-sonnet-4-5" }),
+    ];
+    const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true });
+    expect(groups[0]?.models).toEqual(["claude-sonnet-4-5", "claude-3-5-haiku"]);
+  });
+
+  it("adds a step's model to the list even when its call has no assistant-text entry (tool-only call), after the assistant-text-seen models", () => {
+    const turns = [
+      turn(1, {
+        steps: [
+          {
+            line: 2,
+            model: "claude-sonnet-4-5",
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+          // Tool-only call — no matching assistant-text entry below, so this
+          // model would never have surfaced under the old assistant-text-only
+          // collection.
+          {
+            line: 3,
+            model: "claude-3-5-haiku",
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        ],
+      }),
+    ];
+    const entries: TimelineEntry[] = [
+      user(1),
+      assistantText(2, { model: "claude-sonnet-4-5" }),
+      toolCall(3),
     ];
     const groups = buildClaudeTurnGroups(entries, turns, { costIsComplete: true });
     expect(groups[0]?.models).toEqual(["claude-sonnet-4-5", "claude-3-5-haiku"]);

@@ -59,6 +59,17 @@ describe("formatStepDetail", () => {
     );
     expect(line).toBe("s3 · in 41.9k · c·r 896.9k · c·w 12.1k · out 5.4k");
   });
+
+  it("appends the step's own cost when priced", () => {
+    const line = formatStepDetail(step({ inputTokens: 100, outputTokens: 50, costUsd: 0.1234 }), 1);
+    expect(line).toBe("s1 · in 100 · c·r 0 · c·w 0 · out 50 · $0.12");
+  });
+
+  it("omits the cost segment entirely when the step is unpriced (no placeholder)", () => {
+    const line = formatStepDetail(step({ inputTokens: 100, outputTokens: 50 }), 1);
+    expect(line).not.toContain("$");
+    expect(line).toBe("s1 · in 100 · c·r 0 · c·w 0 · out 50");
+  });
 });
 
 describe("stepPreviewLines", () => {
