@@ -50,6 +50,9 @@ describe("analyzeClaudeSession", () => {
     expect(fable).toBeDefined();
     // input: 100+120+130+140+150+160+170+175+180+190+200+50+40 = 1805 (msg_1 counted once)
     expect(fable?.inputTokens).toBe(1805);
+    // output: 50+30+25+40+20+20+20+15+80+45+10+20+15 = 405. msg_1's records
+    // carry growing streaming snapshots (5 then 50) — the LAST occurrence is
+    // the billed total, so 50 counts, not 5.
     expect(fable?.outputTokens).toBe(405);
     expect(fable?.cacheCreationTokens).toBe(715);
     expect(fable?.messageCount).toBe(13);

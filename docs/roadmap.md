@@ -16,8 +16,9 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
 
 - ✅ Session discovery (`~/.claude/projects`, `CLAUDE_CONFIG_DIR` support)
 - ✅ Streaming JSONL parser with tolerant schema (unknown types → warnings)
-- ✅ Token accounting (dedupe by `message.id`) + cost engine (LiteLLM pricing
-  snapshot, tiered >200k, cache 5m/1h)
+- ✅ Token accounting (dedupe by `message.id`, last occurrence wins — output
+  is a growing streaming snapshot) + cost engine (LiteLLM pricing snapshot,
+  tiered >200k, cache 5m/1h)
 - ✅ Metrics: context growth, compaction, tool histogram/success, subagent tree
 - ✅ Differentiators: repetition detection, error classification, exploration
   profile

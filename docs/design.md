@@ -32,8 +32,10 @@ plus per-session sidecar dirs (`<sessionUuid>/subagents/agent-*.jsonl` + `.meta.
 **Base (confirmed):**
 
 - Token accounting per model: input / output / cache-read / cache-creation.
-  Usage records are deduplicated by `message.id` (one content block per JSONL record;
-  usage is duplicated across blocks of the same API message).
+  Usage records are deduplicated by `message.id` (one content block per JSONL
+  record). Input/cache fields are identical across a message's records, but
+  `output_tokens` is a growing streaming snapshot — the LAST occurrence per id
+  carries the final billed total and wins.
 - Cost (USD) per session and per model, including subagent transcripts.
   Pricing from LiteLLM's `model_prices_and_context_window.json` (bundled snapshot,
   ccusage-compatible approach; ccusage itself is MIT but ships no reusable library).
@@ -162,6 +164,11 @@ the same resolved API port.
   their usage is NOT included in the parent file. Cost must sum both.
 - `input_tokens`/`output_tokens` in logs can be streaming lower bounds; cache
   fields are reliable. Costs are estimates and labeled as such.
+- A message's records repeat its usage with `output_tokens` growing across
+  occurrences (e.g. 5→5→473); only the last occurrence holds the final billed
+  output. Measured on a real Workflow-heavy session: first-occurrence dedup
+  undercounted subagent cost $13.05 vs $17.39; summing without dedup
+  multiplies cache tokens ($43.31).
 - Tool results can appear BEFORE their `tool_use` record in file order
   (parallel batches interleave) — linkage must be two-pass.
 - `<task-notification>` user records are harness events, not human prompts —
