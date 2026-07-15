@@ -558,6 +558,33 @@ children), producing `TurnGroup.delegatedCostUsd`/`delegatedCostIncomplete`. A
 new `deleg` column (`turnColumns.ts`, after Cost) renders it presence-driven,
 so Σ(Cost) + Σ(Deleg) now reconciles against the session's total cost.
 
+## Workflow-tool subagents (2026-07-15)
+
+Shipped in #102. Claude Code's Workflow tool persists its spawned agents
+under `<sessionDir>/subagents/workflows/<runId>/` with run state at
+`<sessionDir>/workflows/<runId>.json` — a layout Junrei never scanned, so a
+workflow-heavy session reported `subagentCount: 0` and dropped most of its
+real cost (the motivating session showed $4.71 instead of $17.76; ~73% of
+spend was invisible). `listSubagentRefs` now scans the workflow layout one
+level deep (tagging refs with `workflowRunId`, skipping `journal.jsonl`), a
+new `claude/workflows.ts` parses run-state files tolerantly, and the analysis
+exposes session-level `workflowRuns` (name, status, phases, agentCount,
+`toolUseId`/`launchLine` matched per runId via the Workflow call's own
+tool_result text). Workflow agents join the subagent forest as flat root
+nodes carrying `workflowRunId`/`workflowLabel`/`workflowPhase`/`queuedAt` —
+run summaries deliberately carry no usage, so per-model totals and the
+delegation split include them with no double counting. The web orchestration
+tree groups them under a per-run header (client-side rollup) with phase
+sub-headers; waterfall/flame pick up labels via `displayName`; `Workflow`
+timeline entries get a lazy `name · N agents · $cost` rollup; the MCP
+subagent tree passes `workflowRuns` through.
+
+Follow-up shipped same day in #103: `computeUsage` deduped API messages by
+`message.id` keeping the FIRST occurrence, but Claude Code streams the same
+message across lines with growing `output_tokens` — dedup now keeps the last
+occurrence, which is billing-correct (the motivating session's workflow
+agents: $13.05 under first-occurrence vs $17.39 correct).
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped
