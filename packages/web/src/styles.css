@@ -862,6 +862,11 @@ button.trow {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  /* Shift-click range-expand (mock 2i) drags a native text selection across
+     every row it passes over otherwise — the row is a click target, not
+     copyable text, so opt it out entirely rather than fighting per-click
+     preventDefault. */
+  user-select: none;
 }
 button.trow:hover {
   background: var(--pan);
@@ -1010,6 +1015,21 @@ button.trow.exh {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Shared keyboard-focus outline (mock 2i a11y pass) — one rule for every
+   keyboard-operable Timeline control (turn rows, the steps toggle, elide
+   buttons, filter chips, dial stops) rather than duplicating it per
+   component. Amber reads clearly against both panel backgrounds in dark and
+   light, so no theme override is needed; `-2px` keeps the ring inside each
+   control's own box instead of relying on space outside it. */
+button.trow:focus-visible,
+.stepstoggle:focus-visible,
+.elide button:focus-visible,
+.chip:focus-visible,
+.dseg:focus-visible {
+  outline: 2px solid var(--amb);
+  outline-offset: -2px;
 }
 
 /* ---------------------------------------------------------------------

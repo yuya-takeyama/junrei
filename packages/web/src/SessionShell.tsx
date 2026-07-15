@@ -31,8 +31,17 @@ function shortenId(id: string): string {
  * Meta-line chips for both harnesses — `gitBranch`/`startedAt`/`endedAt`/
  * `durationMs` are `SessionAnalysisCore` fields shared by Claude and Codex;
  * `version` (Claude Code's own CLI version) and the Codex CLI provenance
- * chips (`originator`/`cliVersion`/`archived`) are each harness-specific and
- * only pushed for their own source.
+ * chips (`originator`/`cliVersion`/`agentRole`/`agentNickname`/`archived`)
+ * are each harness-specific and only pushed for their own source.
+ *
+ * `agentRole`/`agentNickname` were dropped along with Phase 2's
+ * `CodexMetaChips` (see docs/roadmap.md's "Unified Timeline") when that
+ * component's own tab disappeared — this is their only surface again,
+ * presence-driven like every other Codex-only field here (they only exist on
+ * a Codex sub-agent thread's own analysis, so no `source ===` check is
+ * needed beyond the block below). The session-total reasoning badge
+ * `CodexMetaChips` also used to show stays dropped: per-turn Reasoning is
+ * now a visible Timeline column, so the aggregate would be redundant.
  */
 function metaParts(session: AnySessionJson): ReactNode[] {
   const parts: ReactNode[] = [];
@@ -58,6 +67,12 @@ function metaParts(session: AnySessionJson): ReactNode[] {
     }
     if (session.codex.cliVersion !== undefined) {
       parts.push(<span key="cli">codex {session.codex.cliVersion}</span>);
+    }
+    if (session.codex.agentRole !== undefined) {
+      parts.push(<span key="role">role {session.codex.agentRole}</span>);
+    }
+    if (session.codex.agentNickname !== undefined) {
+      parts.push(<span key="nick">as {session.codex.agentNickname}</span>);
     }
     if (session.codex.archived) {
       parts.push(

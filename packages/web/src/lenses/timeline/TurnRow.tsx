@@ -42,14 +42,24 @@ function ModelCluster({ models }: { models: readonly string[] }) {
   );
 }
 
+/** Modifier keys straight off the click event — Timeline.tsx decides what
+ * each means (⌥-click expands turn + steps in one gesture, shift-click
+ * range-expands against the last-clicked anchor; both mock 2i). An options
+ * object rather than growing positional booleans, so a future modifier
+ * doesn't need another parameter threaded through every call site. */
+export interface TurnClickOptions {
+  altKey: boolean;
+  shiftKey: boolean;
+}
+
 interface Props {
   group: TurnGroup;
   columns: readonly TurnColumn[];
   gridTemplate: string;
   expanded: boolean;
   isOutlier: boolean;
-  /** `altKey` is passed straight through from the click event — Timeline.tsx decides what it means (⌥-click expands turn + steps in one gesture, mock 2i); TurnRow itself carries no expansion logic. */
-  onToggle: (line: number, altKey: boolean) => void;
+  /** TurnRow carries no expansion logic itself — see `TurnClickOptions`. */
+  onToggle: (line: number, options: TurnClickOptions) => void;
   /** Registers this row's header button by `anchorLine` — the turn-aware
    * minimap (`TurnMiniMap.tsx`) scrolls to it directly, which is what makes
    * clicking into a *collapsed* turn actually work (the header button is
@@ -87,7 +97,7 @@ export function TurnRow({
       className={rowClass}
       aria-expanded={expanded}
       style={{ gridTemplateColumns: gridTemplate }}
-      onClick={(e) => onToggle(group.anchorLine, e.altKey)}
+      onClick={(e) => onToggle(group.anchorLine, { altKey: e.altKey, shiftKey: e.shiftKey })}
       ref={(el) => registerRef(group.anchorLine, el)}
     >
       <span className="tnum">

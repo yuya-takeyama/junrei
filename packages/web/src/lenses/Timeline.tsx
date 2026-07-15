@@ -5,7 +5,7 @@ import { MiniMap } from "./timeline/MiniMap.js";
 import { StepsRow } from "./timeline/StepsRow.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
 import { TurnMiniMap } from "./timeline/TurnMiniMap.js";
-import { TurnGroupHeaderRow, TurnRow } from "./timeline/TurnRow.js";
+import { type TurnClickOptions, TurnGroupHeaderRow, TurnRow } from "./timeline/TurnRow.js";
 import {
   type ChipState,
   computeChipCounts,
@@ -24,6 +24,7 @@ import {
   type TurnGroup,
   turnsUpToBudget,
 } from "./timeline/turnGroups.js";
+import { computeShiftClickRange } from "./timeline/turnRangeSelect.js";
 
 interface Props {
   sessionRef: SessionRef;
@@ -143,6 +144,13 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   // `isTurnExpanded` below) — keyed by turn line, cleared whenever the dial
   // changes so switching stops always starts from that stop's own default.
   const [turnOverrides, setTurnOverrides] = useState<ReadonlySet<number>>(new Set());
+  // Shift-click range-expand anchor (mock 2i) — the last turn a plain click
+  // or ⌥-click landed on, in `anchorLine` terms. `null` means no anchor yet
+  // this dial/session, so a shift-click falls back to a plain click (see
+  // `handleTurnRowClick`). Reset wherever `turnOverrides` itself resets
+  // (dial change, session switch) since a stale anchor from a different
+  // baseline wouldn't mean anything once every turn's default has changed.
+  const [rangeAnchorLine, setRangeAnchorLine] = useState<number | null>(null);
   // Per-turn StepsRow expansion (anchorLine keys, same as turnOverrides) —
   // collapsed by default for every turn. Cleared any time turnOverrides is
   // (dial change, session switch) and any time a SPECIFIC turn collapses
@@ -190,6 +198,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     setEntries(null);
     setError(null);
     setTurnOverrides(new Set());
+    setRangeAnchorLine(null);
     setExpandedStepsLines(new Set());
     setRevealedCounts(new Map());
     fetchTimeline(sessionRef, agent)
@@ -327,6 +336,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   const handleDialChange = useCallback((next: DetailDial) => {
     setDial(next);
     setTurnOverrides(new Set());
+    setRangeAnchorLine(null);
     setExpandedStepsLines(new Set());
   }, []);
 
@@ -418,14 +428,62 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
 
   // Turn-row click dispatch: a plain click keeps today's toggle behavior; an
   // ⌥-click (mock 2i) forces the turn AND its steps open in one gesture
-  // instead of merely toggling. `wasExpanded` is the row's own already-
-  // computed `isTurnExpanded` result (passed in at the render call site
-  // below) — cheaper than re-deriving it here, and it's what lets a plain
-  // click reset a turn's steps back to collapsed the moment that turn itself
-  // collapses, per the mock's interaction note.
+  // instead of merely toggling; a shift-click with a prior anchor applies
+  // ONE state to the whole inclusive range between the anchor and this turn
+  // (see `computeShiftClickRange`), then moves the anchor here — a
+  // shift-click with no prior anchor (or a stale one `computeShiftClickRange`
+  // can't place) falls through to the plain-click branch instead. Every
+  // non-shift branch updates `rangeAnchorLine` to `line`, so the next
+  // shift-click always measures from whichever row was last plain-/⌥-clicked.
+  // `wasExpanded` is the row's own already-computed `isTurnExpanded` result
+  // (passed in at the render call site below) — cheaper than re-deriving it
+  // here, and it's what lets a collapse (single-turn or ranged) reset that
+  // turn's steps back to collapsed, per the mock's interaction note.
   const handleTurnRowClick = useCallback(
-    (line: number, altKey: boolean, wasExpanded: boolean) => {
-      if (altKey) {
+    (line: number, options: TurnClickOptions, wasExpanded: boolean) => {
+      if (options.shiftKey && rangeAnchorLine !== null) {
+        const range = computeShiftClickRange(
+          turnGroups.map((g) => g.anchorLine),
+          rangeAnchorLine,
+          line,
+          wasExpanded,
+        );
+        if (range !== null) {
+          const needsOverride = range.expand !== defaultTurnExpanded;
+          setTurnOverrides((prev) => {
+            const next = new Set(prev);
+            for (const l of range.affectedLines) {
+              if (needsOverride) next.add(l);
+              else next.delete(l);
+            }
+            return next;
+          });
+          // Collapsing a range resets every affected turn's steps/elision
+          // progress, same as a single-turn collapse below — expanding a
+          // range needs no such reset (those maps only ever hold entries for
+          // turns that were expanded, i.e. never the ones a range-expand
+          // just opened).
+          if (!range.expand) {
+            setExpandedStepsLines((prev) => {
+              if (!range.affectedLines.some((l) => prev.has(l))) return prev;
+              const next = new Set(prev);
+              for (const l of range.affectedLines) next.delete(l);
+              return next;
+            });
+            setRevealedCounts((prev) => {
+              if (!range.affectedLines.some((l) => prev.has(l))) return prev;
+              const next = new Map(prev);
+              for (const l of range.affectedLines) next.delete(l);
+              return next;
+            });
+          }
+          setRangeAnchorLine(line);
+          return;
+        }
+      }
+
+      setRangeAnchorLine(line);
+      if (options.altKey) {
         setTurnOverrides((prev) => {
           // Force-expand: only needs an override entry when the dial's own
           // default is "collapsed" for this stop.
@@ -457,7 +515,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
         });
       }
     },
-    [defaultTurnExpanded, toggleTurn],
+    [defaultTurnExpanded, toggleTurn, rangeAnchorLine, turnGroups],
   );
 
   const anyTurnCollapsed = turnGroups.some((g) => !isTurnExpanded(g.anchorLine));
@@ -474,6 +532,22 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     setExpandedStepsLines(new Set());
     setRevealedCounts(new Map());
   }, [defaultTurnExpanded, turnGroups]);
+
+  // "N overridden" dial badge (mock 2i) — clears every per-turn override,
+  // returning every turn to the dial's own default. Only resets steps/elision
+  // state when that default is "collapsed" (the `turns` stop): that's the
+  // one case where clearing can newly collapse a turn (an override under a
+  // collapsed default means "this turn is expanded"), mirroring
+  // `collapseAll`'s own reset above. Under an "expanded" default an override
+  // means "this turn is collapsed", so clearing only ever expands turns —
+  // those maps hold no stale entries for a turn that was already collapsed.
+  const clearOverrides = useCallback(() => {
+    setTurnOverrides(new Set());
+    if (!defaultTurnExpanded) {
+      setExpandedStepsLines(new Set());
+      setRevealedCounts(new Map());
+    }
+  }, [defaultTurnExpanded]);
 
   // Chips only act inside expanded turns (collapsed rows show nothing to
   // filter) — once every turn reads as collapsed, the chip row itself would
@@ -505,11 +579,14 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
       >
         <div className="fx ac gap12">
           <span className="lbl">Detail</span>
-          <div className="dial">
+          <div className="dial" role="radiogroup" aria-label="Detail level">
             {dialStopsForView.map((stop) => (
+              // biome-ignore lint/a11y/useSemanticElements: mock 2i keeps dial stops as buttons (spec: "keep them buttons")
               <button
                 key={stop}
                 type="button"
+                role="radio"
+                aria-checked={stop === dial}
                 className={stop === dial ? "dseg on" : "dseg"}
                 onClick={() => handleDialChange(stop)}
               >
@@ -517,6 +594,16 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
               </button>
             ))}
           </div>
+          {turnGroupable && turnOverrides.size > 0 && (
+            <button
+              type="button"
+              className="chip"
+              title="reset per-turn overrides"
+              onClick={clearOverrides}
+            >
+              {turnOverrides.size} overridden
+            </button>
+          )}
           {turnGroupable && <span className="ann">keys 1–4 · click a row · ⌥-click row+steps</span>}
         </div>
         <div className="fx ac gap8" style={{ flexWrap: "wrap" }}>
@@ -529,6 +616,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
               <button
                 key={key}
                 type="button"
+                aria-pressed={chips[key]}
                 className={chips[key] ? "chip on" : "chip"}
                 onClick={() => setChips((prev) => toggleChip(prev, key))}
               >
@@ -604,7 +692,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
                       gridTemplate={turnGridTemplateColumns}
                       expanded={expanded}
                       isOutlier={isOutlier}
-                      onToggle={(line, altKey) => handleTurnRowClick(line, altKey, expanded)}
+                      onToggle={(line, options) => handleTurnRowClick(line, options, expanded)}
                       registerRef={registerTurnRef}
                     />
                     {collapsedCompactions.map((entry, i) => (
