@@ -19,6 +19,11 @@ const UNIFIED_EXEC_FIXTURE = join(
   "../../test/fixtures/codex/files-skills/rollout-2026-07-14T09-00-00-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee.jsonl",
 );
 
+const PATH_SYNTAX_FIXTURE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/codex/files-skills/rollout-2026-07-16T09-00-00-ffffffff-ffff-ffff-ffff-ffffffffffff.jsonl",
+);
+
 async function loadFixture() {
   const transcript = await parseCodexTranscriptFile(FIXTURE);
   expect(transcript.format).toBe("current");
@@ -27,6 +32,12 @@ async function loadFixture() {
 
 async function loadUnifiedExecFixture() {
   const transcript = await parseCodexTranscriptFile(UNIFIED_EXEC_FIXTURE);
+  expect(transcript.format).toBe("current");
+  return transcript;
+}
+
+async function loadPathSyntaxFixture() {
+  const transcript = await parseCodexTranscriptFile(PATH_SYNTAX_FIXTURE);
   expect(transcript.format).toBe("current");
   return transcript;
 }
@@ -97,6 +108,15 @@ describe("computeCodexFileAccess", () => {
 });
 
 describe("computeCodexFileAccess — unified exec (Codex 0.144+)", () => {
+  it("strips an attached command terminator and ignores a Git revision range", async () => {
+    const transcript = await loadPathSyntaxFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    expect(map.get("/Users/test/path-syntax-proj/src/general_departments.ts")?.reads).toBe(1);
+    expect(map.has("/Users/test/path-syntax-proj/src/general_departments.ts;")).toBe(false);
+    expect(map.has("/Users/test/path-syntax-proj/origin/main...HEAD")).toBe(false);
+  });
+
   it("extracts reads from tools.exec_command call sites, splitting compound commands and resolving against the per-call workdir", async () => {
     const transcript = await loadUnifiedExecFixture();
     const map = computeCodexFileAccess(transcript);

@@ -82,6 +82,9 @@ const READ_COMMANDS = new Set([
 /** A bare filename's extension, e.g. `foo.spec.ts` with no `/` in it — still counts as path-looking. */
 const FILE_EXTENSION_PATTERN = /\.[A-Za-z0-9]{1,10}$/;
 
+/** Git revision ranges such as `origin/main...HEAD` are slash-bearing, but never file paths. */
+const GIT_REVISION_RANGE_PATTERN = /\.\.\./;
+
 /**
  * Characters that essentially never appear in an honest, unquoted file-path
  * argument but are common in the OTHER slash-bearing tokens read commands
@@ -94,6 +97,7 @@ const NON_PATH_CHARS_PATTERN = /['"`{}()[\]*?$\\!]|:\/\//;
 function isPathLooking(token: string): boolean {
   if (token === "" || token.startsWith("-")) return false;
   if (NON_PATH_CHARS_PATTERN.test(token)) return false;
+  if (GIT_REVISION_RANGE_PATTERN.test(token)) return false;
   return token.includes("/") || FILE_EXTENSION_PATTERN.test(token);
 }
 
@@ -169,7 +173,12 @@ function readPathsFromSegment(tokens: readonly string[]): string[] {
     }
     if (token.includes(">")) continue; // attached form: ">out.txt", "2>&1", "2>err.log"
     if (token === "<") continue; // `< in.txt` — in.txt itself still counts as the next token
-    if (isPathLooking(token)) paths.push(token);
+    // A semicolon may be attached to the preceding argument (`cat foo.ts;`)
+    // because this deliberately lightweight tokenizer splits only on
+    // whitespace. Keep the path, but never surface shell syntax as part of
+    // its name.
+    const pathToken = token.replace(/;+$/, "");
+    if (isPathLooking(pathToken)) paths.push(pathToken);
   }
   return paths;
 }
