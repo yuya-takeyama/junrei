@@ -53,6 +53,7 @@ import type {
   ContentBlockToolUse,
   TaskNotificationInfo,
 } from "./types.js";
+import { listWorkflowRuns } from "./workflows.js";
 
 // ---------------------------------------------------------------------------
 // Local formatting helpers
@@ -211,6 +212,8 @@ export async function buildClaudeTimeline(
                 asyncLaunchIds.has(call.toolUseId),
               );
               entries.push(entry);
+            } else if (call.name === "Workflow") {
+              entries.push(await buildWorkflowToolCallEntry(call, opts));
             } else {
               entries.push(buildToolCallEntry(call));
             }
@@ -310,6 +313,81 @@ function buildToolCallEntry(call: ToolCall): ToolCallEntry {
       resultLine: call.result.line,
     }),
     ...(durationMs !== undefined && { durationMs }),
+  };
+}
+
+/**
+ * A `Workflow` tool call's own `tool_result` text is the only place its run
+ * id round-trips back to this specific call (meta.json for the spawned
+ * agents carries no `toolUseId` at all — see `analyze.ts`'s
+ * `findWorkflowLaunch` for the INVERSE lookup, run id -> tool_use). Matches
+ * the explicit `Run ID: <id>` line the harness prints first, falling back to
+ * the `subagents/workflows/<id>` transcript-dir path segment.
+ */
+function extractWorkflowRunId(resultText: string): string | undefined {
+  const explicit = /Run ID:\s*(\S+)/.exec(resultText)?.[1];
+  if (explicit !== undefined) return explicit;
+  return /subagents\/workflows\/([^/\s]+)/.exec(resultText)?.[1];
+}
+
+/**
+ * Cost/count rollup over a workflow run's member agents, resolved lazily
+ * (only when a `Workflow` timeline entry actually needs it) the same way
+ * `resolveSubagentUsage` resolves one classic subagent's usage — never
+ * pre-computed for the whole session, and never a second usage-bearing tree
+ * node (this is a display summary only, see `ToolCallEntry.workflowCostUsd`'s
+ * doc comment). `undefined` when no member transcripts are discoverable yet
+ * (a run that's still starting, or whose sidecars haven't synced to disk).
+ */
+async function resolveWorkflowRollup(
+  runId: string,
+  mainFilePath: string,
+): Promise<{ agentCount: number; costUsd: number; costIsComplete: boolean } | undefined> {
+  const refs = (await listSubagentRefs(mainFilePath)).filter((r) => r.workflowRunId === runId);
+  if (refs.length === 0) return undefined;
+  let costUsd = 0;
+  let costIsComplete = true;
+  for (const ref of refs) {
+    const data = await loadSubagentSessionData(mainFilePath, ref.agentId);
+    if (data === undefined) continue;
+    const usage = computeUsage(data);
+    costUsd += usage.total.costUsd;
+    if (!usage.total.costIsComplete) costIsComplete = false;
+  }
+  return { agentCount: refs.length, costUsd, costIsComplete };
+}
+
+/**
+ * Enrich a `Workflow` tool call's plain `ToolCallEntry` (from
+ * `buildToolCallEntry`) with `workflowRunId`/`workflowName`/
+ * `workflowAgentCount`/`workflowCostUsd` when the run can be resolved — see
+ * `extractWorkflowRunId`/`resolveWorkflowRollup`. Falls back to the plain
+ * entry (no workflow fields) when `opts.mainFilePath` is absent (timeline
+ * built without sidecar access) or the run id can't be extracted at all.
+ */
+async function buildWorkflowToolCallEntry(
+  call: ToolCall,
+  opts: TimelineOptions,
+): Promise<ToolCallEntry> {
+  const base = buildToolCallEntry(call);
+  const runId = call.result !== undefined ? extractWorkflowRunId(call.result.text) : undefined;
+  if (runId === undefined || opts.mainFilePath === undefined) return base;
+
+  const [runs, rollup] = await Promise.all([
+    listWorkflowRuns(opts.mainFilePath),
+    resolveWorkflowRollup(runId, opts.mainFilePath),
+  ]);
+  const run = runs.find((r) => r.runId === runId);
+
+  return {
+    ...base,
+    workflowRunId: runId,
+    ...(run?.workflowName !== undefined && { workflowName: run.workflowName }),
+    ...(rollup !== undefined && {
+      workflowAgentCount: rollup.agentCount,
+      workflowCostUsd: rollup.costUsd,
+      workflowCostIsComplete: rollup.costIsComplete,
+    }),
   };
 }
 

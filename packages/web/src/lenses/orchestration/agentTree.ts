@@ -1,4 +1,9 @@
-import type { AnySessionJson, ModelUsageSummary, SubagentNodeJson } from "../../api.js";
+import type {
+  AnySessionJson,
+  ModelUsageSummary,
+  SubagentNodeJson,
+  WorkflowRunSummaryJson,
+} from "../../api.js";
 
 /** "main" (the root transcript) or a subagent's `agentId` — the tree's selection unit. */
 export type SelectedId = string;
@@ -169,6 +174,116 @@ export function flattenSubagents(nodes: readonly SubagentNodeJson[]): FlatTreeRo
   return rows;
 }
 
+/** A workflow run's non-usage-bearing header row — rollup computed client-side from its member nodes, never a second usage-bearing tree node (would double-count). */
+export interface WorkflowHeaderRow {
+  kind: "workflow-header";
+  runId: string;
+  name?: string;
+  status?: string;
+  agentCount: number;
+  durationMs?: number;
+  rollup: { tokens: number; costUsd: number };
+}
+
+/** A phase sub-header within a workflow run's group, between that phase's agent rows and the next. */
+export interface WorkflowPhaseHeaderRow {
+  kind: "phase-header";
+  runId: string;
+  phaseTitle: string;
+  agentCount: number;
+}
+
+/** An ordinary agent row (classic sidecar OR workflow agent) — same `FlatTreeRow` shape either way. */
+export interface AgentTreeRow {
+  kind: "agent";
+  row: FlatTreeRow;
+}
+
+export type GroupedTreeRow = WorkflowHeaderRow | WorkflowPhaseHeaderRow | AgentTreeRow;
+
+/**
+ * Tree rows for the Tree view, with workflow-run grouping layered on top of
+ * `flattenSubagents`:
+ *  - Classic (non-Workflow-tool) subagents flatten EXACTLY as
+ *    `flattenSubagents` already does — same order, box-drawing, nesting.
+ *    Untouched.
+ *  - Workflow-tool agents (`workflowRunId` set — always root-level per
+ *    `analyze.ts`'s `analyzeSubagents`) are pulled out of that flat pass and
+ *    re-grouped instead: one `WorkflowHeaderRow` per run (name, agent count,
+ *    a tokens/cost rollup summed from the member nodes — `subtreeTokens`/
+ *    `subtreeCost`, so a workflow agent that itself spawned nested children
+ *    still counts once), then a `WorkflowPhaseHeaderRow` per phase in
+ *    `run.phases` order (each phase's own agents flattened via
+ *    `flattenSubagents`, preserving nesting/box-drawing within the phase).
+ *    Any member agent whose `workflowPhase` doesn't match a known phase
+ *    title (including no phase at all) is appended after the named phases
+ *    with no phase header of its own — still inside the run's group.
+ *  - Run groups are appended after every classic row, in the order
+ *    `workflowRuns` is given; a run with zero discovered member nodes
+ *    contributes nothing (no empty header).
+ */
+export function groupedTreeRows(
+  subagents: readonly SubagentNodeJson[],
+  workflowRuns: readonly WorkflowRunSummaryJson[],
+): GroupedTreeRow[] {
+  const classicRoots = subagents.filter((n) => n.workflowRunId === undefined);
+  const out: GroupedTreeRow[] = flattenSubagents(classicRoots).map((row) => ({
+    kind: "agent" as const,
+    row,
+  }));
+  if (workflowRuns.length === 0) return out;
+
+  const membersByRun = new Map<string, SubagentNodeJson[]>();
+  for (const node of subagents) {
+    if (node.workflowRunId === undefined) continue;
+    const list = membersByRun.get(node.workflowRunId);
+    if (list === undefined) membersByRun.set(node.workflowRunId, [node]);
+    else list.push(node);
+  }
+
+  for (const run of workflowRuns) {
+    const members = membersByRun.get(run.runId);
+    if (members === undefined || members.length === 0) continue;
+
+    const rollup = members.reduce(
+      (acc, n) => ({
+        tokens: acc.tokens + subtreeTokens(n),
+        costUsd: acc.costUsd + subtreeCost(n),
+      }),
+      { tokens: 0, costUsd: 0 },
+    );
+    out.push({
+      kind: "workflow-header",
+      runId: run.runId,
+      ...(run.name !== undefined && { name: run.name }),
+      ...(run.status !== undefined && { status: run.status }),
+      agentCount: run.agentCount,
+      ...(run.durationMs !== undefined && { durationMs: run.durationMs }),
+      rollup,
+    });
+
+    const remaining = new Set(members);
+    for (const phase of run.phases) {
+      const inPhase = members.filter((n) => remaining.has(n) && n.workflowPhase === phase.title);
+      if (inPhase.length === 0) continue;
+      for (const n of inPhase) remaining.delete(n);
+      out.push({
+        kind: "phase-header",
+        runId: run.runId,
+        phaseTitle: phase.title,
+        agentCount: inPhase.length,
+      });
+      out.push(...flattenSubagents(inPhase).map((row) => ({ kind: "agent" as const, row })));
+    }
+    if (remaining.size > 0) {
+      const leftover = members.filter((n) => remaining.has(n));
+      out.push(...flattenSubagents(leftover).map((row) => ({ kind: "agent" as const, row })));
+    }
+  }
+
+  return out;
+}
+
 /** Every subagent, depth-first, flattened with no ordering guarantee beyond that. */
 export function allSubagents(nodes: readonly SubagentNodeJson[]): SubagentNodeJson[] {
   const out: SubagentNodeJson[] = [];
@@ -239,9 +354,16 @@ export function spawnedByLabel(
   return parent === undefined ? spawnedBy : displayName(parent);
 }
 
-/** Display name for a tree row: description, then agent type, then the raw id. */
+/**
+ * Display name for a tree row: for a Workflow-tool agent, its run-state
+ * `label` (e.g. "research:agentcore") wins first — far more legible than the
+ * generic `description`/`agentType` a `workflow-subagent` meta.json carries
+ * (always just `"workflow-subagent"`, not a real description); classic
+ * subagents fall through the same chain as before (description, then agent
+ * type, then the raw id).
+ */
 export function displayName(node: SubagentNodeJson): string {
-  return node.description ?? node.agentType ?? node.agentId;
+  return node.workflowLabel ?? node.description ?? node.agentType ?? node.agentId;
 }
 
 /** Session wall-clock span (ms) for positioning waterfall bars — undefined if unusable. */

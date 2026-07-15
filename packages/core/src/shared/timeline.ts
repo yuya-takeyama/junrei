@@ -64,6 +64,25 @@ export interface ToolCallEntry extends EntryBase {
   resultLineCount?: number;
   durationMs?: number;
   resultLine?: number;
+  /**
+   * Set only for a Claude Code `Workflow` tool call whose run id could be
+   * resolved from its own `tool_result` text (see `claude/timeline.ts`'s
+   * `buildWorkflowToolCallEntry`) — deliberately kept on the SAME
+   * `"tool-call"` entry kind rather than a new one (there's exactly one
+   * `Workflow` call per run, not one per spawned agent, so it doesn't fit
+   * `SubagentLaunchEntry`'s one-entry-per-agent shape; see design rationale
+   * in `analyze.ts`'s `ClaudeWorkflowRunSummary`). `workflowAgentCount`/
+   * `workflowCostUsd` are a rollup over the run's member agents (their own
+   * transcripts, resolved the same lazy way `resolveSubagentUsage` resolves
+   * one subagent's usage) — never a second usage-bearing node, just a
+   * display summary.
+   */
+  workflowRunId?: string;
+  workflowName?: string;
+  workflowAgentCount?: number;
+  workflowCostUsd?: number;
+  /** False when the rollup includes a model with no known pricing — mirrors `SubagentLaunchEntry.costIsComplete`. */
+  workflowCostIsComplete?: boolean;
 }
 
 export interface SubagentLaunchEntry extends EntryBase {

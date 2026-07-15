@@ -3,7 +3,7 @@
  * `../codex/`.
  */
 
-export type { ClaudeSessionAnalysis } from "./analyze.js";
+export type { ClaudeSessionAnalysis, ClaudeWorkflowRunSummary } from "./analyze.js";
 export { analyzeClaudeSession } from "./analyze.js";
 export { loadClaudeDesktopTitles, resolveClaudeDesktopSessionsDirs } from "./desktop.js";
 export type { ClaudeSessionFileRef } from "./discovery.js";
@@ -53,3 +53,5 @@ export type {
   ClaudeTranscript,
   UserRecord,
 } from "./types.js";
+export type { WorkflowAgentProgress, WorkflowPhase, WorkflowRun } from "./workflows.js";
+export { listWorkflowRuns, workflowsDirFor } from "./workflows.js";

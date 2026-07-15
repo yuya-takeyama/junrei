@@ -1127,6 +1127,21 @@ button.tn:hover {
   background: var(--pan);
   box-shadow: inset 2px 0 0 var(--amb);
 }
+/* Non-usage-bearing group rows for Workflow-tool runs (TreeView.tsx) — a
+   `<div>`, not a `<button>` like ordinary agent rows: these summarize a
+   run/phase, they don't select anything. */
+.tn.workflow-hdr {
+  background: var(--pan);
+  font-weight: 600;
+  cursor: default;
+}
+.tn.phase-hdr {
+  color: var(--mut);
+  font-size: 11px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  cursor: default;
+}
 .tree-panel {
   overflow-x: auto;
 }

@@ -81,5 +81,26 @@ export interface SubagentNode {
   spawnedBy?: string;
   /** See `SubagentStatus`'s doc comment for the evidence rules. Codex never sets this — no parent-side completion signal exists to read (see `codex/orchestration.ts`). */
   status?: SubagentStatus;
+  /**
+   * Set only for agents spawned by Claude Code's Workflow tool — the run id
+   * (`<sessionDir>/subagents/workflows/<runId>/`), letting the web group
+   * these nodes under a per-run header instead of treating them as ordinary
+   * root-level launches. See `claude/workflows.ts` for how the run's own
+   * state file is parsed, and `claude/analyze.ts`'s `analyzeSubagents` for
+   * how this and the fields below are populated from it. Deliberately never
+   * set for classic sidecar subagents.
+   */
+  workflowRunId?: string;
+  /**
+   * This agent's `label` from the workflow run's `workflowProgress` (e.g.
+   * "research:agentcore") — the display name the web prefers over `agentId`
+   * for workflow agents. Undefined when the run's state file is missing or
+   * doesn't mention this agent.
+   */
+  workflowLabel?: string;
+  /** This agent's phase title (e.g. "Research") from the same run-state lookup as `workflowLabel`. */
+  workflowPhase?: string;
+  /** ISO timestamp, converted from the run-state `queuedAt` epoch-ms field — when this agent was queued to run, which can precede `startedAt` (its own transcript's first record). */
+  queuedAt?: string;
   children: SubagentNode[];
 }

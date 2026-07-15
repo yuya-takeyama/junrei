@@ -417,7 +417,10 @@ export function createMcpServer(): McpServer {
         "a `byModel` entry's `cacheWriteCostUsd` is already included in `costUsd` (never add " +
         "them), and `usage.total.costIsComplete: false` means at least one nonzero-usage model " +
         'in that node had no pricing entry — the cost is a lower bound, shown as "estimated" in ' +
-        "the UI.",
+        "the UI. Claude Code sessions only also carry `workflowRuns`: one entry per Workflow-tool " +
+        "run (name, status, phases, agentCount), for making sense of any tree node tagged with a " +
+        "matching `workflowRunId` — those nodes are flat root-level entries in `subagents`, not a " +
+        "separate nested structure.",
       inputSchema: sessionRef,
     },
     async (args) => {
@@ -426,6 +429,7 @@ export function createMcpServer(): McpServer {
       return jsonResult({
         subagentCount: resolved.analysis.subagentCount,
         subagents: resolved.analysis.subagents,
+        ...(resolved.source === "claude-code" && { workflowRuns: resolved.analysis.workflowRuns }),
       });
     },
   );

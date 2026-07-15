@@ -1,0 +1,6 @@
+{
+  "agentType": "general-purpose",
+  "description": "Refactor foo",
+  "toolUseId": "toolu_classic1",
+  "spawnDepth": 1
+}

@@ -1,5 +1,4 @@
 import { stat } from "node:fs/promises";
-import { join } from "node:path";
 import {
   analyzeClaudeSession,
   buildClaudeTimeline,
@@ -10,6 +9,7 @@ import {
   getClaudeRecordDetail,
   listClaudeSessionFiles,
   listSubagentRefs,
+  listWorkflowRuns,
   loadClaudeDesktopTitles,
   loadSubagentSessionData,
   parseClaudeTranscriptFile,
@@ -17,7 +17,6 @@ import {
   resolveClaudeDesktopSessionsDirs,
   resolveClaudeProjectsDirs,
   type SessionData,
-  subagentsDirFor,
   type TimelineEntry,
 } from "@junrei/core";
 import {
@@ -239,13 +238,17 @@ export async function getSession(sessionId: string): Promise<ClaudeSessionAnalys
 
 /**
  * Last on-disk activity for a session — the max mtime across the main
- * transcript AND every subagent sidecar file, so a session with a quiet main
- * transcript but a subagent still actively writing still reads as live. Fresh
- * per request (never cached alongside `ClaudeSessionAnalysis`, which is keyed
- * by the MAIN file's mtime alone — see `analyzeCached`'s doc comment); the
- * web derives "still running" from this value (`isSessionLive` in
- * `agentTree.ts`), so it must reflect the CURRENT filesystem state, not
- * whatever mtime the analysis happened to be cached under.
+ * transcript, every subagent sidecar file (classic AND Workflow-tool, via
+ * `listSubagentRefs`), and every workflow run's own state file
+ * (`workflows/<runId>.json`, which keeps getting rewritten as a run
+ * progresses even between individual agent-transcript writes) — so a session
+ * with a quiet main transcript but a subagent or workflow run still actively
+ * writing still reads as live. Fresh per request (never cached alongside
+ * `ClaudeSessionAnalysis`, which is keyed by the MAIN file's mtime alone —
+ * see `analyzeCached`'s doc comment); the web derives "still running" from
+ * this value (`isSessionLive` in `agentTree.ts`), so it must reflect the
+ * CURRENT filesystem state, not whatever mtime the analysis happened to be
+ * cached under.
  *
  * Never throws: a stat failure (race with the file disappearing, permission
  * hiccup, ...) degrades to `undefined` rather than failing the whole session
@@ -256,17 +259,24 @@ export async function getClaudeLastActivityAt(sessionId: string): Promise<string
   if (ref === undefined) return undefined;
   try {
     let latestMs = ref.mtimeMs;
-    const refs = await listSubagentRefs(ref.filePath);
-    const sidecarMtimes = await Promise.all(
-      refs.map(async (subagent) => {
+    const [refs, workflowRuns] = await Promise.all([
+      listSubagentRefs(ref.filePath),
+      listWorkflowRuns(ref.filePath),
+    ]);
+    const candidatePaths = [
+      ...refs.map((subagent) => subagent.jsonlPath),
+      ...workflowRuns.map((run) => run.filePath),
+    ];
+    const mtimes = await Promise.all(
+      candidatePaths.map(async (path) => {
         try {
-          return (await stat(subagent.jsonlPath)).mtimeMs;
+          return (await stat(path)).mtimeMs;
         } catch {
           return undefined;
         }
       }),
     );
-    for (const mtimeMs of sidecarMtimes) {
+    for (const mtimeMs of mtimes) {
       if (mtimeMs !== undefined && mtimeMs > latestMs) latestMs = mtimeMs;
     }
     return new Date(latestMs).toISOString();
@@ -281,6 +291,10 @@ export async function getClaudeLastActivityAt(sessionId: string): Promise<string
  * flow through the same `analyzeCached` cache as main sessions — keyed by
  * `filePath`, which is unique per sidecar, so no separate cache is needed.
  * `undefined` when the main session or the sidecar file doesn't exist.
+ *
+ * Resolves via `listSubagentRefs` (not a direct top-level path join) so it
+ * finds Workflow-tool agents too — those live one level deeper, under
+ * `subagents/workflows/<runId>/`.
  */
 async function findAgentRef(
   sessionId: string,
@@ -288,12 +302,13 @@ async function findAgentRef(
 ): Promise<ClaudeSessionFileRef | undefined> {
   const mainRef = await findRefById(sessionId);
   if (mainRef === undefined) return undefined;
-  const filePath = join(subagentsDirFor(mainRef.filePath), `agent-${agentId}.jsonl`);
+  const subagentRef = (await listSubagentRefs(mainRef.filePath)).find((r) => r.agentId === agentId);
+  if (subagentRef === undefined) return undefined;
   try {
-    const stats = await stat(filePath);
+    const stats = await stat(subagentRef.jsonlPath);
     return {
       sessionId: agentId,
-      filePath,
+      filePath: subagentRef.jsonlPath,
       projectDirName: mainRef.projectDirName,
       mtimeMs: stats.mtimeMs,
       birthtimeMs: stats.birthtimeMs,

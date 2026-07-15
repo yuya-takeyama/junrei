@@ -1,0 +1,44 @@
+{
+  "runId": "wf_run1",
+  "workflowName": "widget-research",
+  "status": "completed",
+  "durationMs": 120000,
+  "agentCount": 2,
+  "defaultModel": "claude-sonnet-5",
+  "totalTokens": 700,
+  "totalToolCalls": 0,
+  "phases": [
+    { "title": "Research", "detail": "gather info" },
+    { "title": "Synthesis", "detail": "write summary" }
+  ],
+  "workflowProgress": [
+    { "type": "workflow_phase", "index": 1, "title": "Research" },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:foo",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "wf1111111111111",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "queuedAt": 1783641628000,
+      "startedAt": 1783641629000,
+      "promptPreview": "research widgets"
+    },
+    { "type": "workflow_phase", "index": 2, "title": "Synthesis" },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "synth:bar",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesis",
+      "agentId": "wf2222222222222",
+      "model": "claude-opus-4-8[1m]",
+      "state": "done",
+      "queuedAt": 1783641718000,
+      "startedAt": 1783641719000,
+      "promptPreview": "synthesize findings"
+    }
+  ]
+}
