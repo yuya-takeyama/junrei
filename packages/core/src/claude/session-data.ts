@@ -7,7 +7,13 @@ import type {
   UserRecord,
 } from "./types.js";
 
-/** One deduplicated API message (usage is repeated across JSONL records). */
+/**
+ * One deduplicated API message. The same message is repeated across JSONL
+ * records (one content block each); `usage` is the LAST occurrence's — its
+ * output_tokens is the final billed total, earlier ones are growing streaming
+ * snapshots — while `line`/`timestamp` are the FIRST occurrence's (message
+ * start).
+ */
 export interface ApiMessage {
   messageId: string;
   model?: string;
@@ -288,15 +294,25 @@ function collectAssistant(
   toolCallsById: Map<string, ToolCall>,
 ): void {
   // Dedupe usage by message.id: each JSONL record carries one content block
-  // of the same API message with identical usage.
-  if (record.messageId !== undefined && !apiMessagesById.has(record.messageId)) {
-    apiMessagesById.set(record.messageId, {
-      messageId: record.messageId,
-      line: record.line,
-      ...(record.model !== undefined && { model: record.model }),
-      ...(record.usage !== undefined && { usage: record.usage }),
-      ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
-    });
+  // of the same API message. Input/cache token fields are identical across
+  // occurrences, but output_tokens is a streaming snapshot that grows until
+  // the message completes (e.g. 5→5→473), so the LAST occurrence's usage is
+  // the billed total — later usage overwrites earlier. Line/timestamp keep
+  // the first occurrence: they anchor the message's start for turn
+  // attribution and the context timeline.
+  if (record.messageId !== undefined) {
+    const existing = apiMessagesById.get(record.messageId);
+    if (existing === undefined) {
+      apiMessagesById.set(record.messageId, {
+        messageId: record.messageId,
+        line: record.line,
+        ...(record.model !== undefined && { model: record.model }),
+        ...(record.usage !== undefined && { usage: record.usage }),
+        ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+      });
+    } else if (record.usage !== undefined) {
+      existing.usage = record.usage;
+    }
   }
   for (const block of record.blocks) {
     if (block.kind !== "tool_use") continue;
