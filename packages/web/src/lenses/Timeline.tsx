@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AnySessionJson, fetchTimeline, type SessionRef, type TimelineEntry } from "../api.js";
+import { elideEntries, hiddenKindCounts, type KindCount, REVEAL_STEP } from "./timeline/elision.js";
 import { MiniMap } from "./timeline/MiniMap.js";
 import { StepsRow } from "./timeline/StepsRow.js";
 import { TimelineRow } from "./timeline/TimelineRow.js";
@@ -63,6 +64,48 @@ const CHIP_ORDER: ReadonlyArray<{ key: keyof ChipState; label: string; tone?: "e
 ];
 
 /**
+ * Long-turn middle-elision summary row (design mock panel 2d's `.elide`) —
+ * rendered between an expanded turn's head and tail anchors whenever
+ * `elideEntries` (see `elision.ts`) still has entries hidden. `show all` and
+ * `show N more` are real buttons, not anchors, so the row stays keyboard-
+ * focusable. `show N more`'s label caps at `REVEAL_STEP` even on the final,
+ * smaller step — `elideEntries` clamps the actual reveal internally either
+ * way, so the label is cosmetic only.
+ */
+function ElisionSummary({
+  hiddenCount,
+  kindCounts,
+  onShowAll,
+  onShowMore,
+}: {
+  hiddenCount: number;
+  kindCounts: { counts: KindCount[]; overflow: number };
+  onShowAll: () => void;
+  onShowMore: () => void;
+}) {
+  const kindLabel = kindCounts.counts.map((c) => `${c.kind} ${String(c.count)}`).join(" · ");
+  const overflowLabel = kindCounts.overflow > 0 ? ` +${String(kindCounts.overflow)}` : "";
+
+  return (
+    <div className="elide">
+      <span className="eline" />
+      <span>
+        {`… ${String(hiddenCount)} events${kindLabel === "" ? "" : ` · ${kindLabel}${overflowLabel}`} · `}
+        <button type="button" onClick={onShowAll}>
+          show all
+        </button>
+        {" · "}
+        <button type="button" onClick={onShowMore}>
+          {`show ${String(Math.min(hiddenCount, REVEAL_STEP))} more`}
+        </button>
+        {" …"}
+      </span>
+      <span className="eline" />
+    </div>
+  );
+}
+
+/**
  * Timeline lens (L2) — the full-transcript view. See design-spec/12-timeline.md.
  *
  * The main transcript (not a `?agent=` subagent view) renders as a
@@ -107,6 +150,12 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   // start collapsed again the next time that turn re-expands — "collapsing a
   // turn resets its steps state" (mock 2i).
   const [expandedStepsLines, setExpandedStepsLines] = useState<ReadonlySet<number>>(new Set());
+  // Per-turn elision reveal progress (anchorLine -> how many entries "show N
+  // more"/"show all" have pulled off the hidden middle's top so far — see
+  // elision.ts). Reset alongside `expandedStepsLines` wherever a turn's own
+  // filtered entry list can change out from under it: turn collapse, dial
+  // change, chip change (session switch below too, for the same reason).
+  const [revealedCounts, setRevealedCounts] = useState<ReadonlyMap<number, number>>(new Map());
   const [visibleCount, setVisibleCount] = useState(CHUNK_SIZE);
   const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
   // Mirrors `pendingScrollLine`, but for a turn header's `anchorLine` rather
@@ -142,6 +191,7 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     setError(null);
     setTurnOverrides(new Set());
     setExpandedStepsLines(new Set());
+    setRevealedCounts(new Map());
     fetchTimeline(sessionRef, agent)
       .then(setEntries)
       .catch((e: unknown) => setError(String(e)));
@@ -177,6 +227,16 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
     setVisibleCount(CHUNK_SIZE);
+  }, [dial, chips]);
+
+  // A dial or chip change reshapes the CHIP/DIAL-FILTERED entry list every
+  // expanded turn's elision runs over, so any in-progress reveal offsets
+  // could now point at different entries — reset every turn's progress
+  // together, same trigger as the chunking reset above. (Turn-collapse reset
+  // is per-turn instead, at the call sites below.)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
+  useEffect(() => {
+    setRevealedCounts(new Map());
   }, [dial, chips]);
 
   const onToggleExpand = useCallback((line: number) => {
@@ -339,6 +399,23 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     });
   }, []);
 
+  // "show N more" — pulls REVEAL_STEP more entries off the hidden middle's
+  // top; elideEntries clamps internally, so overshooting past what's left is
+  // safe (the final click just reveals the remainder).
+  const revealMore = useCallback((anchorLine: number) => {
+    setRevealedCounts((prev) => {
+      const next = new Map(prev);
+      next.set(anchorLine, (prev.get(anchorLine) ?? 0) + REVEAL_STEP);
+      return next;
+    });
+  }, []);
+
+  // "show all" — Infinity rather than the exact remaining count; elideEntries
+  // clamps it to the middle's real length either way.
+  const revealAll = useCallback((anchorLine: number) => {
+    setRevealedCounts((prev) => new Map(prev).set(anchorLine, Number.POSITIVE_INFINITY));
+  }, []);
+
   // Turn-row click dispatch: a plain click keeps today's toggle behavior; an
   // ⌥-click (mock 2i) forces the turn AND its steps open in one gesture
   // instead of merely toggling. `wasExpanded` is the row's own already-
@@ -370,6 +447,14 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
           next.delete(line);
           return next;
         });
+        // This turn is collapsing — its own elision progress resets too, so
+        // it starts fresh (first-2/last-2) the next time it re-expands.
+        setRevealedCounts((prev) => {
+          if (!prev.has(line)) return prev;
+          const next = new Map(prev);
+          next.delete(line);
+          return next;
+        });
       }
     },
     [defaultTurnExpanded, toggleTurn],
@@ -385,8 +470,9 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
     setTurnOverrides(
       defaultTurnExpanded ? new Set(turnGroups.map((g) => g.anchorLine)) : new Set(),
     );
-    // Every turn ends up collapsed — reset every turn's steps state too.
+    // Every turn ends up collapsed — reset every turn's steps and elision state too.
     setExpandedStepsLines(new Set());
+    setRevealedCounts(new Map());
   }, [defaultTurnExpanded, turnGroups]);
 
   // Chips only act inside expanded turns (collapsed rows show nothing to
@@ -496,6 +582,19 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
                 const visibleTurnEntries = expanded
                   ? group.entries.filter((e) => isEntryVisible(e, dial, chips))
                   : [];
+                // Elision runs on the already-filtered list above, never on
+                // `group.entries` directly — isolating a kind via chips
+                // recomputes elision over just that kind's own entries,
+                // which is how a chip match resurfaces something that was
+                // previously buried in the hidden middle. `revealedCount`
+                // defaults to 0 (nothing revealed) the first time a turn is
+                // seen; elideEntries itself is a no-op (hidden stays empty)
+                // below ELISION_THRESHOLD, so this is cheap even when the
+                // turn is collapsed (visibleTurnEntries === []).
+                const elision = elideEntries(
+                  visibleTurnEntries,
+                  revealedCounts.get(group.anchorLine) ?? 0,
+                );
 
                 return (
                   <div key={`turn-${String(group.anchorLine)}`}>
@@ -535,18 +634,51 @@ export function Timeline({ sessionRef, agent, session, onOpenRecord }: Props) {
                             No entries match the current filters.
                           </div>
                         ) : (
-                          visibleTurnEntries.map((entry, i) => (
-                            <TimelineRow
-                              key={`${entry.kind}-${String(entry.line)}-${String(i)}`}
-                              entry={entry}
-                              sessionRef={sessionRef}
-                              agent={agent}
-                              expanded={expandedLines.has(entry.line)}
-                              onToggleExpand={onToggleExpand}
-                              registerRef={registerRef}
-                              onOpenRecord={onOpenRecord}
-                            />
-                          ))
+                          <>
+                            {elision.head.map((entry, i) => (
+                              <TimelineRow
+                                key={`${entry.kind}-${String(entry.line)}-${String(i)}`}
+                                entry={entry}
+                                sessionRef={sessionRef}
+                                agent={agent}
+                                expanded={expandedLines.has(entry.line)}
+                                onToggleExpand={onToggleExpand}
+                                registerRef={registerRef}
+                                onOpenRecord={onOpenRecord}
+                              />
+                            ))}
+                            {elision.hidden.length > 0 && (
+                              <ElisionSummary
+                                hiddenCount={elision.hidden.length}
+                                kindCounts={hiddenKindCounts(elision.hidden)}
+                                onShowAll={() => revealAll(group.anchorLine)}
+                                onShowMore={() => revealMore(group.anchorLine)}
+                              />
+                            )}
+                            {elision.tail.map((entry, i) => {
+                              // Preserve each entry's original index in
+                              // `visibleTurnEntries` for the key, not its
+                              // position within `tail` alone — two entries
+                              // can share both kind and line (e.g. two
+                              // subagent launches from one assistant
+                              // message), so re-numbering from 0 per segment
+                              // could collide with a head-side key.
+                              const originalIndex =
+                                visibleTurnEntries.length - elision.tail.length + i;
+                              return (
+                                <TimelineRow
+                                  key={`${entry.kind}-${String(entry.line)}-${String(originalIndex)}`}
+                                  entry={entry}
+                                  sessionRef={sessionRef}
+                                  agent={agent}
+                                  expanded={expandedLines.has(entry.line)}
+                                  onToggleExpand={onToggleExpand}
+                                  registerRef={registerRef}
+                                  onOpenRecord={onOpenRecord}
+                                />
+                              );
+                            })}
+                          </>
                         )}
                       </div>
                     )}
