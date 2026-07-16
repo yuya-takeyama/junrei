@@ -631,6 +631,21 @@ injected-only root entries now display as "AGENTS.md instructions (merged)"
 (fuzzy-findable by that label), and the `inj N` marker's tooltip appends the
 user/project char split when known.
 
+Follow-up: since the merged file paths are unknowable but the merged CONTENT
+is fully persisted, the injected text itself is now viewable. A new
+`injected-context` RecordDetail kind ("Injected context") — Codex's
+`getCodexRecordDetail` previously returned `undefined` for every synthetic
+user response_item; it now returns the full text (header included, char
+count attached) for AGENTS.md merges and the other injected-context markers
+(`<user_instructions>`/`<environment_context>`), while a response_item
+duplicate of a real event-sourced prompt still dedups to `undefined`. The
+Files lens links each injected-only Codex fileAccess row (whose
+`firstTouchLine` is by construction an injection record) to the existing
+record slide-over via the same `onOpenRecord` wiring Timeline uses, in both
+the session and agent shells. Claude's isMeta injection records stay
+unexposed — its record detail skips them, so no link is rendered for Claude
+sessions.
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

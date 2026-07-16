@@ -453,14 +453,23 @@ export function getCodexRecordDetail(
   if (target.type === "responseItem") {
     const item = target.item;
     if (item.kind === "message") {
-      if (
-        item.role !== "user" ||
-        useEventUserMessages ||
-        item.text === "" ||
-        isSyntheticUserText(item.text)
-      ) {
-        return undefined;
+      if (item.role !== "user" || item.text === "") return undefined;
+      // Injected context (AGENTS.md merge / user_instructions /
+      // environment_context) never surfaces as a user_message EVENT, so it
+      // stays viewable regardless of `useEventUserMessages` — the Files lens
+      // links an injected-only fileAccess entry straight to this record.
+      // Real user prompts on this surface still defer to the event record
+      // when one exists (same dedup rule as `buildCodexTimeline`).
+      if (isSyntheticUserText(item.text)) {
+        return {
+          kind: "injected-context",
+          text: item.text,
+          charCount: item.text.length,
+          line,
+          ...(target.timestamp !== undefined && { timestamp: target.timestamp }),
+        };
       }
+      if (useEventUserMessages) return undefined;
       return {
         kind: "user",
         text: item.text,

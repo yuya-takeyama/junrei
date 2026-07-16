@@ -278,7 +278,12 @@ export function SessionShell({ source }: Props) {
           <ContextCost session={session} />
         )}
         {error === null && session !== null && lens === "files" && (
-          <FilesSkills session={session} />
+          <FilesSkills
+            session={session}
+            onOpenRecord={(line) => {
+              navigate(recordPath(ref, lens, line));
+            }}
+          />
         )}
       </div>
       {record !== undefined && (

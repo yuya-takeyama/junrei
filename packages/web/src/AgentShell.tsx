@@ -481,7 +481,12 @@ export function AgentShell({ source }: Props) {
           </div>
         )}
         {session !== null && agent !== null && node !== undefined && lens === "files" && (
-          <FilesSkills session={agent} />
+          <FilesSkills
+            session={agent}
+            onOpenRecord={(line) => {
+              navigate(agentRecordPath(sessionRef, agentId, lens, line));
+            }}
+          />
         )}
         {session !== null &&
           agent !== null &&
