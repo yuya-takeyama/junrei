@@ -609,6 +609,28 @@ directory's children start visibly deeper than the directory's own label —
 previously a file at depth N+1 (15px) landed at its parent's label x
 (15·N + 16) and read as a sibling.
 
+## Codex AGENTS.md injections in fileAccess (2026-07-17)
+
+Codex's rollout persists its AGENTS.md context injection as a synthetic
+`role:"user"` response_item starting with `# AGENTS.md instructions for
+<cwd>` — previously recognized only to keep it out of the prompt count
+(`isSyntheticUserText`), never surfaced as an injection. The core previously
+skipped `injectedCount`/`injectedChars` for Codex entirely because the marker
+names a directory, not a file (Codex merges root + nested AGENTS.md /
+AGENTS.override.md into one message; individual paths never reach the log).
+`computeCodexFileAccess` now emits an injected-only `FileAccessAgg` entry
+keyed by the header's directory itself — the honest granularity, no
+fabricated `<cwd>/AGENTS.md` path. When the body carries the
+`--- project-doc ---` separator (present only when both a user-level
+`~/.codex/AGENTS.md` and project docs exist), the halves' sizes split into
+new optional `injectedUserDocChars`/`injectedProjectDocChars` fields
+(`FileAccessAgg`/`FileAccessEntry`; summed through `mergeFileAccess`/
+`foldFileAccess` and the Codex serve-time merge). The web file tree
+previously rendered such a root-pointing entry as a file named "." —
+injected-only root entries now display as "AGENTS.md instructions (merged)"
+(fuzzy-findable by that label), and the `inj N` marker's tooltip appends the
+user/project char split when known.
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

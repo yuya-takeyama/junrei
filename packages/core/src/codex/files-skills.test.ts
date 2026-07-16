@@ -24,6 +24,11 @@ const PATH_SYNTAX_FIXTURE = join(
   "../../test/fixtures/codex/files-skills/rollout-2026-07-16T09-00-00-ffffffff-ffff-ffff-ffff-ffffffffffff.jsonl",
 );
 
+const AGENTS_INJECTION_FIXTURE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/codex/files-skills/rollout-2026-07-17T09-00-00-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl",
+);
+
 async function loadFixture() {
   const transcript = await parseCodexTranscriptFile(FIXTURE);
   expect(transcript.format).toBe("current");
@@ -38,6 +43,12 @@ async function loadUnifiedExecFixture() {
 
 async function loadPathSyntaxFixture() {
   const transcript = await parseCodexTranscriptFile(PATH_SYNTAX_FIXTURE);
+  expect(transcript.format).toBe("current");
+  return transcript;
+}
+
+async function loadAgentsInjectionFixture() {
+  const transcript = await parseCodexTranscriptFile(AGENTS_INJECTION_FIXTURE);
   expect(transcript.format).toBe("current");
   return transcript;
 }
@@ -182,6 +193,65 @@ describe("computeCodexFileAccess — unified exec (Codex 0.144+)", () => {
   });
 });
 
+describe("computeCodexFileAccess — AGENTS.md injection", () => {
+  it("keys an injected-only entry by the header's directory, splitting user/project chars at the '--- project-doc ---' separator", async () => {
+    const transcript = await loadAgentsInjectionFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Line 3's body: "User rules here." (16) + "\n\n--- project-doc ---\n\n"
+    // (23) + "Project rules body.\n\nMore project rules." (40) = 79 chars —
+    // the separator counts toward the total but toward neither half.
+    expect(map.get("/Users/test/agents-proj")).toEqual({
+      path: "/Users/test/agents-proj",
+      reads: 0,
+      edits: 0,
+      injectedCount: 1,
+      injectedChars: 79,
+      injectedUserDocChars: 16,
+      injectedProjectDocChars: 40,
+      firstLine: 3,
+      firstTimestamp: "2026-07-17T09:00:02.000Z",
+    });
+  });
+
+  it("records no user/project split without the separator, and strips the header directory's trailing slash", async () => {
+    const transcript = await loadAgentsInjectionFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Line 7's header names "/Users/test/agents-proj/sub/" — one lone body
+    // ("Sub project doc only.", 21 chars) could be either the user-level or
+    // the project-level doc, so no split is attributed.
+    expect(map.get("/Users/test/agents-proj/sub")).toEqual({
+      path: "/Users/test/agents-proj/sub",
+      reads: 0,
+      edits: 0,
+      injectedCount: 1,
+      injectedChars: 21,
+      firstLine: 7,
+      firstTimestamp: "2026-07-17T09:00:06.000Z",
+    });
+    expect(map.has("/Users/test/agents-proj/sub/")).toBe(false);
+  });
+
+  it("ignores real user prompts and other synthetic user messages (<environment_context>), keeping ordinary reads intact", async () => {
+    const transcript = await loadAgentsInjectionFixture();
+    const map = computeCodexFileAccess(transcript);
+
+    // Lines 4 (human prompt) and 5 (<environment_context>) must create no
+    // entries; line 8's `cat notes.md` still counts as a normal read.
+    expect(map.get("/Users/test/agents-proj/sub/notes.md")?.reads).toBe(1);
+    expect(map.size).toBe(3);
+  });
+
+  it("derives no injection entries from a transcript without AGENTS.md messages", async () => {
+    const transcript = await loadFixture();
+    const map = computeCodexFileAccess(transcript);
+    for (const entry of map.values()) {
+      expect(entry.injectedCount).toBeUndefined();
+    }
+  });
+});
+
 describe("computeCodexSkillInvocations", () => {
   it("extracts every '[$plugin:skill](path)' marker from user_message text, in line order", async () => {
     const transcript = await loadFixture();
@@ -277,6 +347,42 @@ describe("mergeCodexFileAccess", () => {
       "/proj/main-only.ts",
       "/proj/shared.ts",
       "/proj/sub-only.ts",
+    ]);
+  });
+
+  it("carries injection fields through the serve-time merge, summing counts/chars and each doc half", () => {
+    const injectedMain: FileAccessEntry = {
+      path: "/proj",
+      reads: 0,
+      edits: 0,
+      injectedCount: 1,
+      injectedChars: 79,
+      injectedUserDocChars: 16,
+      injectedProjectDocChars: 40,
+      threads: "main",
+    };
+    // A sub-agent thread's own separator-less injection of the same directory
+    // contributes to count/chars but not to either half.
+    const injectedChild: FileAccessEntry = {
+      path: "/proj",
+      reads: 0,
+      edits: 0,
+      injectedCount: 1,
+      injectedChars: 21,
+      threads: "main",
+    };
+    const { fileAccess } = mergeCodexFileAccess([injectedMain], [[injectedChild]]);
+    expect(fileAccess).toEqual([
+      {
+        path: "/proj",
+        reads: 0,
+        edits: 0,
+        injectedCount: 2,
+        injectedChars: 100,
+        injectedUserDocChars: 16,
+        injectedProjectDocChars: 40,
+        threads: "both",
+      },
     ]);
   });
 });
