@@ -117,3 +117,59 @@ describe("findModelPricing (OpenAI Codex model ids)", () => {
     expect(estimateCostUsd("codex-auto-review", USAGE)).toBeGreaterThan(0);
   });
 });
+
+describe("findModelPricing (Bedrock-style Claude model ids)", () => {
+  it.each([
+    ["us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"],
+    ["eu.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"],
+    ["apac.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"],
+    ["global.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"],
+    // Bedrock also uses non-regional ids: bare `anthropic.` with no region prefix.
+    ["anthropic.claude-haiku-4-5-20251001-v1:0", "claude-haiku-4-5-20251001"],
+    // A different revision suffix shape (`-v2:1`) should strip the same way.
+    ["us.anthropic.claude-haiku-4-5-20251001-v2:1", "claude-haiku-4-5-20251001"],
+  ])("normalizes %s to the same pricing as %s", (bedrockId, plainId) => {
+    const pricing = findModelPricing(bedrockId);
+    expect(pricing).toBeDefined();
+    expect(pricing).toEqual(findModelPricing(plainId));
+  });
+
+  it("combines Bedrock normalization with dateless stripping (pipeline step 2)", () => {
+    // `20301231` is not a real snapshot date for claude-sonnet-4-5, so after
+    // stripping the region/anthropic prefix and the `-v1:0` suffix, the
+    // normalized id only resolves via the existing dateless-stripping step
+    // (falling back to the bare "claude-sonnet-4-5" entry).
+    const pricing = findModelPricing("us.anthropic.claude-sonnet-4-5-20301231-v1:0");
+    expect(pricing).toBeDefined();
+    expect(pricing).toEqual(findModelPricing("claude-sonnet-4-5"));
+  });
+
+  it("combines Bedrock normalization with longest-prefix matching (pipeline step 3)", () => {
+    // Appending a non-numeric suffix after the date defeats the dateless
+    // regex (which only strips a trailing 8-digit date), so this must fall
+    // through to the longest-prefix step to resolve to the dated entry.
+    const pricing = findModelPricing("us.anthropic.claude-opus-4-1-20250805-customvariant-v1:0");
+    expect(pricing).toBeDefined();
+    expect(pricing).toEqual(findModelPricing("claude-opus-4-1-20250805"));
+  });
+
+  it("leaves plain Claude ids and gpt ids unaffected (no regression)", () => {
+    expect(findModelPricing("claude-sonnet-4-5-20250929")).toEqual(
+      findModelPricing("claude-sonnet-4-5-20250929"),
+    );
+    expect(findModelPricing("claude-sonnet-4-5")).toBeDefined();
+    expect(findModelPricing("gpt-5.4")).toBeDefined();
+  });
+
+  it("still returns undefined for an unknown model", () => {
+    expect(findModelPricing("totally-unknown-model-xyz")).toBeUndefined();
+  });
+
+  it("does not mangle an id with 'anthropic' in the middle rather than as a prefix", () => {
+    // Neither of these starts with an (region.)?anthropic. prefix, so the
+    // Bedrock normalization must be a no-op and both must resolve exactly as
+    // the unmodified pipeline would (i.e. undefined — these aren't real keys).
+    expect(findModelPricing("claude-anthropic-experimental-4-5")).toBeUndefined();
+    expect(findModelPricing("not.anthropic.claude-sonnet-4-5-20250929-v1:0")).toBeUndefined();
+  });
+});

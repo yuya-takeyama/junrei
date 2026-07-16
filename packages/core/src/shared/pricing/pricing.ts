@@ -23,24 +23,50 @@ const snapshot = pricesJson as PricingSnapshot;
 
 const TIER_THRESHOLD = 200_000;
 
+// Bedrock-style ids prefix the plain model id with an optional region
+// (`us.`, `eu.`, `apac.`, `global.`) followed by `anthropic.`, e.g.
+// `us.anthropic.claude-sonnet-4-5-20250929-v1:0`. Bedrock also uses
+// non-regional ids (bare `anthropic.` with no region), hence the region
+// group being optional.
+const BEDROCK_ID_PREFIX = /^(?:us\.|eu\.|apac\.|global\.)?anthropic\.(.+)$/;
+// Bedrock model ids carry a trailing revision suffix like `-v1:0` or `-v2:1`
+// that has no counterpart in prices.json's plain model-id keys.
+const BEDROCK_VERSION_SUFFIX = /-v\d+:\d+$/;
+
+/**
+ * Normalize a Bedrock-style model id (`(region.)?anthropic.<id>[-v<N>:<M>]`)
+ * down to the plain id used as a prices.json key. Ids that don't start with
+ * the Bedrock `anthropic.` prefix are returned unchanged.
+ */
+function normalizeBedrockModelId(model: string): string {
+  const match = model.match(BEDROCK_ID_PREFIX);
+  const captured = match?.[1];
+  if (captured === undefined) return model;
+  return captured.replace(BEDROCK_VERSION_SUFFIX, "");
+}
+
 /**
  * Find pricing for a model id. Lookup order:
+ * 0. normalize a Bedrock-style id (region/anthropic prefix + `-v<N>:<M>`
+ *    suffix stripped) down to the plain id — a no-op for non-Bedrock ids,
  * 1. exact match,
  * 2. exact match after stripping a trailing `-YYYYMMDD` date suffix,
  * 3. longest snapshot key that prefixes the model id (date/revision variants).
  */
 export function findModelPricing(model: string): ModelPricing | undefined {
   const models = snapshot.models;
-  const exact = models[model];
+  const normalized = normalizeBedrockModelId(model);
+
+  const exact = models[normalized];
   if (exact !== undefined) return exact;
 
-  const dateless = model.replace(/-\d{8}$/, "");
+  const dateless = normalized.replace(/-\d{8}$/, "");
   const datelessHit = models[dateless];
   if (datelessHit !== undefined) return datelessHit;
 
   let best: { key: string; pricing: ModelPricing } | undefined;
   for (const [key, pricing] of Object.entries(models)) {
-    if (model.startsWith(key) && (best === undefined || key.length > best.key.length)) {
+    if (normalized.startsWith(key) && (best === undefined || key.length > best.key.length)) {
       best = { key, pricing };
     }
   }
