@@ -159,6 +159,21 @@ export interface UserRecordDetail extends DetailBase {
   text: string;
 }
 
+/**
+ * Harness-injected context persisted as a synthetic user record — today only
+ * Codex produces these (AGENTS.md merges / `<user_instructions>` /
+ * `<environment_context>` response_items, see `isSyntheticUserText` in
+ * `codex/analyze.ts`); Claude's isMeta injections stay unexposed here. Kept
+ * as its own kind rather than `"user"` so the slide-over never presents
+ * injected context as something the human typed.
+ */
+export interface InjectedContextRecordDetail extends DetailBase {
+  kind: "injected-context";
+  /** Full injected text, synthetic header line included. */
+  text: string;
+  charCount: number;
+}
+
 export interface AssistantTextRecordDetail extends DetailBase {
   kind: "assistant-text";
   text: string;
@@ -239,6 +254,7 @@ export interface ApiErrorRecordDetail extends DetailBase {
 
 export type RecordDetail =
   | UserRecordDetail
+  | InjectedContextRecordDetail
   | AssistantTextRecordDetail
   | ThinkingRecordDetail
   | ToolCallRecordDetail

@@ -13,6 +13,7 @@ export const TOOL_RESULT_TEXT_CAP = 2000;
 /** Human label for the slide-over header — see design-spec/17-record-detail.md's anatomy. */
 export const RECORD_KIND_LABEL: Record<RecordDetail["kind"], string> = {
   user: "User message",
+  "injected-context": "Injected context",
   "assistant-text": "Assistant message",
   thinking: "Thinking",
   "tool-call": "Tool call",

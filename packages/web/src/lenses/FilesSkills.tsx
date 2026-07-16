@@ -7,6 +7,8 @@ import { ToolStatsTable } from "./filesSkills/ToolStatsTable.js";
 
 interface Props {
   session: AnySessionJson;
+  /** Opens the record slide-over (L3) for a source line — see `FileAccessTree`. */
+  onOpenRecord?: (line: number) => void;
 }
 
 /**
@@ -29,12 +31,12 @@ interface Props {
  * `ToolStatsTable`/`TaskExecutionsPanel` all take a Claude-only `SessionJson`
  * prop, not the `AnySessionJson` union.
  */
-export function FilesSkills({ session }: Props) {
+export function FilesSkills({ session, onOpenRecord }: Props) {
   const claude = session.source === "claude-code" ? session : undefined;
   return (
     <>
       <div className="hpad fx gap16 mt16">
-        <FileAccessTree session={session} />
+        <FileAccessTree session={session} {...(onOpenRecord !== undefined && { onOpenRecord })} />
         <div className="col gap12" style={{ width: "430px", flex: "none" }}>
           <SkillInvocationsPanel session={session} />
           {claude !== undefined && <RepetitionFindingsPanel session={claude} />}

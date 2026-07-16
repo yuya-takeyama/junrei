@@ -277,9 +277,30 @@ describe("getCodexRecordDetail", () => {
     expect(getCodexRecordDetail(transcript, 999)).toBeUndefined();
   });
 
-  it("returns undefined for a synthetic response_item user-text line", async () => {
+  it("returns injected-context (full text, header included) for an AGENTS.md injection line", async () => {
     const transcript = await loadSynthetic();
-    expect(getCodexRecordDetail(transcript, 2)).toBeUndefined();
+    const detail = getCodexRecordDetail(transcript, 2);
+    expect(detail).toEqual({
+      kind: "injected-context",
+      text: "# AGENTS.md instructions for /Users/test/codex-proj\n\nInjected project instructions.",
+      charCount: 83,
+      line: 2,
+      timestamp: "2026-07-02T09:00:01.000Z",
+    });
+  });
+
+  it("returns injected-context for other synthetic user texts (<user_instructions>), even though an event user message exists", async () => {
+    const transcript = await loadSynthetic();
+    // Injected context never surfaces as a user_message EVENT, so the
+    // event-dedup rule must not swallow it (the Files lens links straight
+    // to this line).
+    const detail = getCodexRecordDetail(transcript, 3);
+    expect(detail).toMatchObject({ kind: "injected-context", charCount: 52, line: 3 });
+  });
+
+  it("still returns undefined for a response_item duplicate of a real event-sourced prompt", async () => {
+    const transcript = await loadSynthetic();
+    expect(getCodexRecordDetail(transcript, 4)).toBeUndefined();
   });
 });
 

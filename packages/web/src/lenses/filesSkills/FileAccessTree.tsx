@@ -14,6 +14,8 @@ import { formatInjectedSize } from "./skillInvocationFormat.js";
 
 interface Props {
   session: AnySessionJson;
+  /** Opens the record slide-over (L3) for a given source line — wired by the shells the same way Timeline's is. */
+  onOpenRecord?: (line: number) => void;
 }
 
 const EM_DASH = "—";
@@ -85,14 +87,18 @@ function FuzzyLabel({ label, indices }: { label: string; indices: number[] | und
  * Read/Edit call, e.g. CLAUDE.md/MEMORY.md system-reminders or a Skill's
  * `SKILL.md` — gets a muted `· inj N` marker next to its name; the Reads/Edits
  * cells stay numeric-only (already muted at 0 by the existing rule below), the
- * injected char count only surfaces in the marker's tooltip.
+ * injected char count only surfaces in the marker's tooltip. An injected-ONLY
+ * Codex row additionally renders its label as a button opening the record
+ * slide-over at the injection record itself (`onOpenRecord`), so the merged
+ * AGENTS.md content is readable even though its member file paths aren't
+ * knowable.
  *
  * A row proven to be a DIRECTORY (see `fileTree.ts`'s `isDirectory` proof) —
  * typically an rg/grep search root the shell-read heuristic counted whole —
  * renders with a trailing `/` and a muted `· dir` marker so it can't be
  * mistaken for a file named like one.
  */
-export function FileAccessTree({ session }: Props) {
+export function FileAccessTree({ session, onOpenRecord }: Props) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const filtering = query.trim() !== "";
@@ -222,16 +228,44 @@ export function FileAccessTree({ session }: Props) {
 
           const { entry } = row;
           const reread = entry.reads >= REREAD_THRESHOLD;
+          // An injected-ONLY entry's every touch was an injection, so its
+          // firstTouchLine is guaranteed to be an injection record — for
+          // Codex, one the record slide-over can render as "Injected
+          // context" (see core's getCodexRecordDetail); Claude's meta
+          // injection records aren't exposed by its record detail, so no
+          // link there.
+          const injectionLine =
+            session.source === "codex" &&
+            entry.injectedCount !== undefined &&
+            entry.reads === 0 &&
+            entry.edits === 0
+              ? entry.firstTouchLine
+              : undefined;
+          const label = (
+            <FuzzyLabel
+              label={row.isDirectory ? `${row.name}/` : row.name}
+              indices={row.matchedIndices}
+            />
+          );
           return (
             <div className="ftg" key={row.key} style={style}>
               <span
                 className={`mono fs11${reread ? " rere" : ""}`}
                 style={{ paddingLeft: `${row.depth * TREE_INDENT_PX + TREE_CHEVRON_PX}px` }}
               >
-                <FuzzyLabel
-                  label={row.isDirectory ? `${row.name}/` : row.name}
-                  indices={row.matchedIndices}
-                />
+                {injectionLine !== undefined && onOpenRecord !== undefined ? (
+                  <button
+                    type="button"
+                    className="lnbtn mono fs11"
+                    style={{ color: "inherit" }}
+                    onClick={() => onOpenRecord(injectionLine)}
+                    title="View injected content"
+                  >
+                    {label}
+                  </button>
+                ) : (
+                  label
+                )}
                 {row.isDirectory && (
                   <span className="fs10 mut" style={{ marginLeft: "6px" }} title={DIR_MARKER_TITLE}>
                     · dir

@@ -249,6 +249,16 @@ function RecordBody({ detail, agent }: { detail: RecordDetailData; agent: string
       return <SubagentLaunchBody detail={detail} />;
     case "user":
       return <TextBody label="Message" text={detail.text} rows={baseRows(detail.timestamp)} />;
+    case "injected-context": {
+      const rows: KvRow[] = [
+        {
+          label: "Length",
+          value: <span className="num fs12">{formatTokens(detail.charCount)} chars</span>,
+        },
+        ...baseRows(detail.timestamp),
+      ];
+      return <TextBody label="Injected content" text={detail.text} rows={rows} />;
+    }
     case "assistant-text": {
       const rows: KvRow[] = [
         ...(detail.model !== undefined
