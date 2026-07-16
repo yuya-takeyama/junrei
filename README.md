@@ -119,8 +119,8 @@ claude mcp add --transport http junrei http://localhost:7867/mcp
 
 ## How it works
 
-There is nothing to configure: Junrei discovers each agent's local session
-logs and reads them in place — nothing is sent anywhere:
+By default there is nothing to configure: Junrei discovers each agent's local
+session logs and reads them in place — nothing is sent anywhere:
 
 - **Claude Code**: `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`),
   plus subagent sidecar transcripts and a join against the Desktop app's
@@ -128,6 +128,21 @@ logs and reads them in place — nothing is sent anywhere:
 - **Codex CLI**: `$CODEX_HOME/sessions/**/*.jsonl` and
   `$CODEX_HOME/archived_sessions/`, with sub-agents resolved as their own
   linked session files.
+
+Optionally, Claude Code sessions can also be read directly from an S3 bucket
+— e.g. a remote environment (Claude Agent SDK on AWS AgentCore Runtime)
+uploading transcripts that mirror the local `~/.claude/projects/` layout.
+This is opt-in and off by default:
+
+- `JUNREI_S3_SOURCE_URI` — an `s3://bucket/` or `s3://bucket/prefix/` URI.
+  When set, Junrei lists and reads Claude Code sessions from that bucket
+  in addition to local sessions, merged into the same session list (no
+  local sync/mirror). Unset, behavior is unchanged.
+- `JUNREI_S3_ENDPOINT` — optional custom S3 endpoint (e.g. for MinIO,
+  LocalStack, or kumo); also enables path-style addressing. Region and
+  credentials are resolved via the AWS SDK's default chain.
+- `JUNREI_S3_LIST_TTL_MS` — how long the S3 object listing is cached before
+  a fresh `ListObjectsV2` sweep, in milliseconds (default `10000`).
 
 Architecture (pnpm workspace):
 
@@ -143,6 +158,17 @@ token counts (including tiered >200k and 5m/1h cache pricing where
 applicable). They are not your actual bill.
 
 ## Development
+
+`aqua.yaml` references a local (non-standard) registry (`aqua/kumo-registry.yaml`,
+for the `kumo` S3-compatible test server) — aqua v2 requires trusting it once
+before `aqua i -l` will install from it:
+
+```sh
+aqua policy allow aqua-policy.yaml
+```
+
+CI does the non-interactive equivalent via aqua-installer's `policy_allow`
+input, so this is a one-time local step only.
 
 ```sh
 aqua i -l

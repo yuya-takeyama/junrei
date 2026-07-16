@@ -38,6 +38,7 @@ import {
   buildSessionData,
   toolResultLength,
 } from "./session-data.js";
+import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 import { listSubagentRefs, type SubagentRef } from "./subagents.js";
 import { listWorkflowRuns, type WorkflowPhase, type WorkflowRun } from "./workflows.js";
 
@@ -101,15 +102,23 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   workflowRuns: ClaudeWorkflowRunSummary[];
 }
 
-/** Analyze one session file, including its subagent sidecar transcripts. */
-export async function analyzeClaudeSession(filePath: string): Promise<ClaudeSessionAnalysis> {
-  const transcript = await parseClaudeTranscriptFile(filePath);
+/**
+ * Analyze one session file, including its subagent sidecar transcripts.
+ * `store` resolves every read (transcript + sidecars) — defaults to the local
+ * filesystem; pass an S3-backed store (see `store.ts`) to analyze a session
+ * living in S3.
+ */
+export async function analyzeClaudeSession(
+  filePath: string,
+  store: ClaudeSessionStore = localClaudeSessionStore,
+): Promise<ClaudeSessionAnalysis> {
+  const transcript = await parseClaudeTranscriptFile(filePath, store);
   const data = buildSessionData(transcript);
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
 
   const { subagents, subagentCount, subagentTotals, subagentFileAccess, workflowRuns } =
-    await analyzeSubagents(filePath, data);
+    await analyzeSubagents(filePath, data, store);
   const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
     computeFileAccess(data),
     subagentFileAccess,
@@ -187,6 +196,7 @@ export async function analyzeClaudeSession(filePath: string): Promise<ClaudeSess
 async function analyzeSubagents(
   filePath: string,
   mainData: SessionData,
+  store: ClaudeSessionStore,
 ): Promise<{
   subagents: SubagentNode[];
   subagentCount: number;
@@ -206,8 +216,8 @@ async function analyzeSubagents(
   const subagentFileAccess = new Map<string, FileAccessAgg>();
 
   const [refs, workflowRuns] = await Promise.all([
-    listSubagentRefs(filePath),
-    listWorkflowRuns(filePath),
+    listSubagentRefs(filePath, store),
+    listWorkflowRuns(filePath, store),
   ]);
   const workflowRunSummaries = buildWorkflowRunSummaries(workflowRuns, refs, mainData);
   const workflowRunsById = new Map(workflowRuns.map((r) => [r.runId, r]));
@@ -255,7 +265,7 @@ async function analyzeSubagents(
   registerOwner(MAIN_OWNER, mainData);
 
   for (const { agentId, jsonlPath, meta, workflowRunId } of refs) {
-    const transcript = await parseClaudeTranscriptFile(jsonlPath);
+    const transcript = await parseClaudeTranscriptFile(jsonlPath, store);
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
     registerOwner(agentId, data);

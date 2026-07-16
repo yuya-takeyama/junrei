@@ -15,10 +15,16 @@
  * Every parse step is tolerant by design: a missing `workflows/` dir yields
  * `[]`; one corrupt/malformed run-state file is skipped (not fatal to the
  * rest); a file lacking even `runId` is dropped as unusable. Never throws.
+ *
+ * Discovery goes through a `ClaudeSessionStore` (`store.ts`) rather than
+ * `node:fs` directly, so it works the same whether `mainFilePath` is a local
+ * path or an S3-backed store's URI — see `subagents.ts`'s doc comment for the
+ * same rationale.
  */
 
-import { readdir, readFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { workflowsDirFor } from "./paths.js";
+import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 
 export interface WorkflowPhase {
   title: string;
@@ -59,34 +65,29 @@ export interface WorkflowRun {
   agents: Map<string, WorkflowAgentProgress>;
 }
 
-/** Directory containing per-run state files for a main session file. */
-export function workflowsDirFor(mainFilePath: string): string {
-  const sessionId = basename(mainFilePath, ".jsonl");
-  return join(dirname(mainFilePath), sessionId, "workflows");
-}
+export { workflowsDirFor } from "./paths.js";
 
 /**
  * List every Workflow-tool run recorded for a session, parsed from
- * `workflows/*.json` (the `scripts/` subdirectory holds `.js` files and is
- * skipped by the `.json` filter alone). Missing directory -> `[]`; a
- * corrupt/unreadable/unusable individual file is skipped, never fatal.
+ * `workflows/*.json` (the `scripts/` subdirectory holds `.js` files, and
+ * anything not a DIRECT child of `workflows/` is skipped — both by checking
+ * `dirname` against the workflows dir itself, not just the `.json` filter).
+ * Missing directory -> `[]`; a corrupt/unreadable/unusable individual file is
+ * skipped, never fatal.
  */
-export async function listWorkflowRuns(mainFilePath: string): Promise<WorkflowRun[]> {
+export async function listWorkflowRuns(
+  mainFilePath: string,
+  store: ClaudeSessionStore = localClaudeSessionStore,
+): Promise<WorkflowRun[]> {
   const dir = workflowsDirFor(mainFilePath);
-  let entries: string[];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return [];
-  }
+  const sidecarFiles = await store.listSidecarFiles(mainFilePath);
 
   const runs: WorkflowRun[] = [];
-  for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
-    const filePath = join(dir, entry);
+  for (const { path: filePath } of sidecarFiles) {
+    if (dirname(filePath) !== dir || !filePath.endsWith(".json")) continue;
     let raw: unknown;
     try {
-      raw = JSON.parse(await readFile(filePath, "utf8"));
+      raw = JSON.parse(await store.readFile(filePath));
     } catch {
       continue;
     }

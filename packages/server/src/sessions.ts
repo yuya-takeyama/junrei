@@ -1,5 +1,5 @@
 import type { SessionSource } from "@junrei/core";
-import { type ClaudeSessionListItem, claudeAdapter } from "./sources/claude.js";
+import { type ClaudeSessionListItem, claudeAdapter, s3ClaudeAdapter } from "./sources/claude.js";
 import { type CodexSessionListItem, codexAdapter } from "./sources/codex.js";
 import type { SessionListBounds } from "./sources/shared.js";
 
@@ -60,7 +60,18 @@ interface ListingAdapter {
   ): Promise<{ entries: { item: AnySessionListItem; sortMs: number }[]; total: number }>;
 }
 
-const registry: readonly ListingAdapter[] = [claudeAdapter, codexAdapter];
+/**
+ * `s3ClaudeAdapter` is only defined when `JUNREI_S3_SOURCE_URI` is set (see
+ * `sources/claude.ts`) — registered as its OWN entry (not merged into
+ * `claudeAdapter`) so S3 sessions show up in the merged list independently of
+ * local ones, including the accepted case where the same session id exists
+ * in both stores and both rows appear.
+ */
+const registry: readonly ListingAdapter[] = [
+  claudeAdapter,
+  ...(s3ClaudeAdapter !== undefined ? [s3ClaudeAdapter] : []),
+  codexAdapter,
+];
 
 /** One page of the merged session list, plus the full count for pagination. */
 export interface SessionListPage {

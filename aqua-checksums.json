@@ -56,6 +56,26 @@
       "algorithm": "sha256"
     },
     {
+      "id": "github_release/github.com/sivchari/kumo/v0.25.3/kumo_0.25.3_darwin_amd64.tar.gz",
+      "checksum": "37567DEB51DF3B82F2D26E01AF79765C47C45A5F509C23FE6C58DE65BEACF848",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sivchari/kumo/v0.25.3/kumo_0.25.3_darwin_arm64.tar.gz",
+      "checksum": "2FCB1B35591E26502BFBD6FD34ABFF298875BFF1A327E3BA316C0CC32DE42A63",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sivchari/kumo/v0.25.3/kumo_0.25.3_linux_amd64.tar.gz",
+      "checksum": "30FFC00C190BCCC1F73FD852B0200015E746CBC563D522276DB117B1ED3A4531",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/sivchari/kumo/v0.25.3/kumo_0.25.3_linux_arm64.tar.gz",
+      "checksum": "CCDBFC6051E4DCDC39ED8A75129FB0DA2FF15AAD3E7E908033DBE3DE2C241DF6",
+      "algorithm": "sha256"
+    },
+    {
       "id": "http/nodejs.org/dist/v24.18.0/node-v24.18.0-darwin-arm64.tar.gz",
       "checksum": "E1A97E14C99C803E96C7339403282EA05A499C32F8D83DEFE9EF5EC66F979ED1",
       "algorithm": "sha256"

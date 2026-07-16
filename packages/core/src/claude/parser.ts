@@ -1,7 +1,6 @@
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { parseJsonlLine } from "../shared/jsonl.js";
 import type { ParseWarning, TokenUsage } from "../shared/types.js";
+import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 import type {
   ApiErrorRecord,
   AssistantContentBlock,
@@ -36,17 +35,21 @@ function bool(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
-/** Parse one session JSONL file into lenient typed records. */
-export async function parseClaudeTranscriptFile(filePath: string): Promise<ClaudeTranscript> {
+/**
+ * Parse a session transcript's lines (already streamed from wherever they
+ * live — local disk, S3, ...) into lenient typed records. `filePath` is
+ * carried through only for provenance on the returned `ClaudeTranscript`, not
+ * used to read anything here — the actual bytes come entirely from `lines`.
+ */
+export async function parseClaudeTranscriptLines(
+  lines: AsyncIterable<string>,
+  filePath: string,
+): Promise<ClaudeTranscript> {
   const records: ClaudeSessionRecord[] = [];
   const warnings: ParseWarning[] = [];
-  const rl = createInterface({
-    input: createReadStream(filePath, { encoding: "utf8" }),
-    crlfDelay: Number.POSITIVE_INFINITY,
-  });
 
   let line = 0;
-  for await (const text of rl) {
+  for await (const text of lines) {
     line += 1;
     if (text.trim() === "") continue;
     const raw = parseJsonlLine(text);
@@ -61,6 +64,19 @@ export async function parseClaudeTranscriptFile(filePath: string): Promise<Claud
     records.push(normalizeRecord(raw, line));
   }
   return { filePath, records, warnings };
+}
+
+/**
+ * Parse one session JSONL file into lenient typed records — thin wrapper
+ * around `parseClaudeTranscriptLines` that opens `filePath` through a
+ * `ClaudeSessionStore` (local filesystem by default; pass an S3-backed store
+ * to parse a session living in S3, see `store.ts`).
+ */
+export async function parseClaudeTranscriptFile(
+  filePath: string,
+  store: ClaudeSessionStore = localClaudeSessionStore,
+): Promise<ClaudeTranscript> {
+  return parseClaudeTranscriptLines(store.openLines(filePath), filePath);
 }
 
 function normalizeRecord(raw: Record<string, unknown>, line: number): ClaudeSessionRecord {

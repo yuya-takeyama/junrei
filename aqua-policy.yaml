@@ -1,0 +1,16 @@
+---
+# Trusts the non-standard registry referenced from aqua.yaml. Required because
+# aqua v2 only allows the standard registry by default — see the
+# `aqua-tooling` skill and https://aquaproj.github.io/docs/guides/policy-as-code/.
+# Local: run `aqua policy allow aqua-policy.yaml` once. CI: aqua-installer's
+# `policy_allow: "true"` input (see .github/workflows/ci.yaml).
+registries:
+  - name: kumo-registry
+    type: local
+    path: aqua/kumo-registry.yaml
+  - type: standard
+    ref: semver(">= 0.0.0")
+
+packages:
+  - registry: kumo-registry
+  - registry: standard

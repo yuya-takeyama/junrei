@@ -16,12 +16,17 @@ jobs:
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.local/share/aquaproj-aqua
-          key: aqua-${{ runner.os }}-${{ hashFiles('aqua.yaml') }}
+          key: aqua-${{ runner.os }}-${{ hashFiles('aqua.yaml', 'aqua/*.yaml', 'aqua-checksums.json') }}
           restore-keys: |
             aqua-${{ runner.os }}-
       - uses: aquaproj/aqua-installer@11dd79b4e498d471a9385aa9fb7f62bb5f52a73c # v4.0.4
         with:
           aqua_version: v2.60.0
+          # aqua.yaml references a local (non-standard) registry — see
+          # aqua/kumo-registry.yaml — which aqua v2 requires explicit trust
+          # for via aqua-policy.yaml. This input runs the non-interactive
+          # equivalent of `aqua policy allow aqua-policy.yaml`.
+          policy_allow: "true"
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.local/share/pnpm/store

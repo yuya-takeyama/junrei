@@ -15,12 +15,27 @@
  * transcript). `listSubagentRefs` below scans both layouts and tags workflow
  * refs with `workflowRunId` so `analyze.ts` can enrich them from the run's
  * own state file (`claude/workflows.ts`).
+ *
+ * All discovery here goes through a `ClaudeSessionStore` (`store.ts`) rather
+ * than touching `node:fs` directly, so it works identically whether
+ * `mainFilePath` is a local absolute path or an S3-backed store's
+ * `s3://bucket/key` URI (see `store.ts`'s doc comment) — the store's
+ * `listSidecarFiles` sweep supplies the flat file list, and the path-shape
+ * matching (regex on basename, directory nesting) below is unchanged from
+ * when it ran directly against `readdir`.
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { parseClaudeTranscriptFile } from "./parser.js";
+import { joinPath, subagentsDirFor } from "./paths.js";
 import { buildSessionData, type SessionData } from "./session-data.js";
+import {
+  type ClaudeSessionStore,
+  type ClaudeSidecarFileRef,
+  localClaudeSessionStore,
+} from "./store.js";
+
+export { subagentsDirFor } from "./paths.js";
 
 export interface SubagentMeta {
   agentType?: string;
@@ -39,38 +54,48 @@ export interface SubagentRef {
   workflowRunId?: string;
 }
 
-/** Directory containing per-agent sidecar transcripts for a main session file. */
-export function subagentsDirFor(mainFilePath: string): string {
-  const sessionId = basename(mainFilePath, ".jsonl");
-  return join(dirname(mainFilePath), sessionId, "subagents");
+/** `agent-<id>.jsonl` -> `<id>`, `undefined` if `name` doesn't match. */
+function matchAgentFilename(name: string): string | undefined {
+  return /^agent-(.+)\.jsonl$/.exec(name)?.[1];
 }
 
-/** One level of `agent-<id>.jsonl` (+ optional `.meta.json` sibling) discovery, shared by both layouts. */
+/** Group a flat sidecar file list by directory, so agent+meta pairs in the same dir match without re-listing. */
+function groupByDir(files: readonly ClaudeSidecarFileRef[]): Map<string, Set<string>> {
+  const byDir = new Map<string, Set<string>>();
+  for (const { path } of files) {
+    const dir = dirname(path);
+    const set = byDir.get(dir);
+    if (set !== undefined) {
+      set.add(basename(path));
+    } else {
+      byDir.set(dir, new Set([basename(path)]));
+    }
+  }
+  return byDir;
+}
+
+/** One directory's `agent-<id>.jsonl` (+ optional `.meta.json` sibling) discovery, shared by both layouts. */
 async function scanAgentDir(
   dir: string,
+  namesInDir: ReadonlySet<string> | undefined,
+  store: ClaudeSessionStore,
 ): Promise<Array<{ agentId: string; jsonlPath: string; meta: SubagentMeta }>> {
-  let entries: string[];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return [];
-  }
-
+  if (namesInDir === undefined) return [];
   const refs: Array<{ agentId: string; jsonlPath: string; meta: SubagentMeta }> = [];
-  for (const entry of entries) {
-    const match = /^agent-(.+)\.jsonl$/.exec(entry);
-    if (match === null || match[1] === undefined) continue;
-    const agentId = match[1];
+  for (const name of namesInDir) {
+    const agentId = matchAgentFilename(name);
+    if (agentId === undefined) continue;
 
     let meta: SubagentMeta = {};
-    try {
-      meta = JSON.parse(
-        await readFile(join(dir, `agent-${agentId}.meta.json`), "utf8"),
-      ) as SubagentMeta;
-    } catch {
-      // Meta file is optional.
+    const metaName = `agent-${agentId}.meta.json`;
+    if (namesInDir.has(metaName)) {
+      try {
+        meta = JSON.parse(await store.readFile(joinPath(dir, metaName))) as SubagentMeta;
+      } catch {
+        // Meta file is optional / can be malformed.
+      }
     }
-    refs.push({ agentId, jsonlPath: join(dir, entry), meta });
+    refs.push({ agentId, jsonlPath: joinPath(dir, name), meta });
   }
   return refs;
 }
@@ -81,26 +106,26 @@ async function scanAgentDir(
  * nested one level deeper under `subagents/workflows/<runId>/` (tagged with
  * `workflowRunId`). Missing directories at any level yield `[]`, never throw.
  */
-export async function listSubagentRefs(mainFilePath: string): Promise<SubagentRef[]> {
+export async function listSubagentRefs(
+  mainFilePath: string,
+  store: ClaudeSessionStore = localClaudeSessionStore,
+): Promise<SubagentRef[]> {
   const subagentsDir = subagentsDirFor(mainFilePath);
-  const refs: SubagentRef[] = await scanAgentDir(subagentsDir);
+  const workflowsDir = joinPath(subagentsDir, "workflows");
+  const sidecarFiles = await store.listSidecarFiles(mainFilePath);
+  const byDir = groupByDir(sidecarFiles);
 
-  const workflowsDir = join(subagentsDir, "workflows");
-  let runIds: string[];
-  try {
-    runIds = await readdir(workflowsDir);
-  } catch {
-    return refs;
-  }
+  const refs: SubagentRef[] = await scanAgentDir(subagentsDir, byDir.get(subagentsDir), store);
 
-  for (const runId of runIds) {
-    const runDir = join(workflowsDir, runId);
-    try {
-      if (!(await stat(runDir)).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    for (const ref of await scanAgentDir(runDir)) {
+  // Run dirs are inferred from which directories actually contributed sidecar
+  // files (dirname one level under workflowsDir) — filesystem-driven, same as
+  // the original `readdir`-based scan, independent of whether a
+  // `workflows/<runId>.json` state file exists for that run (see
+  // `workflows.ts`).
+  for (const dir of byDir.keys()) {
+    if (dirname(dir) !== workflowsDir) continue;
+    const runId = basename(dir);
+    for (const ref of await scanAgentDir(dir, byDir.get(dir), store)) {
       refs.push({ ...ref, workflowRunId: runId });
     }
   }
@@ -118,19 +143,20 @@ export async function listSubagentRefs(mainFilePath: string): Promise<SubagentRe
 export async function loadSubagentSessionData(
   mainFilePath: string,
   agentId: string,
+  store: ClaudeSessionStore = localClaudeSessionStore,
 ): Promise<SessionData | undefined> {
-  const directPath = join(subagentsDirFor(mainFilePath), `agent-${agentId}.jsonl`);
+  const directPath = joinPath(subagentsDirFor(mainFilePath), `agent-${agentId}.jsonl`);
   try {
-    const transcript = await parseClaudeTranscriptFile(directPath);
+    const transcript = await parseClaudeTranscriptFile(directPath, store);
     return buildSessionData(transcript);
   } catch {
     // Not a classic top-level sidecar — fall through to the full scan below.
   }
 
-  const ref = (await listSubagentRefs(mainFilePath)).find((r) => r.agentId === agentId);
+  const ref = (await listSubagentRefs(mainFilePath, store)).find((r) => r.agentId === agentId);
   if (ref === undefined) return undefined;
   try {
-    const transcript = await parseClaudeTranscriptFile(ref.jsonlPath);
+    const transcript = await parseClaudeTranscriptFile(ref.jsonlPath, store);
     return buildSessionData(transcript);
   } catch {
     return undefined;
