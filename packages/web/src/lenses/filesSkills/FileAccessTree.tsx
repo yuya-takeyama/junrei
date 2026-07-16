@@ -6,6 +6,7 @@ import {
   type FileAccessEntryLike,
   flattenSections,
   REREAD_THRESHOLD,
+  TREE_CHEVRON_PX,
   TREE_INDENT_PX,
 } from "./fileTree.js";
 import { highlightSegments } from "./fuzzy.js";
@@ -177,7 +178,15 @@ export function FileAccessTree({ session }: Props) {
                   style={{ paddingLeft: `${row.depth * TREE_INDENT_PX}px` }}
                 >
                   {filtering ? (
-                    <span aria-hidden="true" style={{ marginRight: "4px" }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-block",
+                        width: "12px",
+                        marginRight: "4px",
+                        textAlign: "center",
+                      }}
+                    >
                       ▾
                     </span>
                   ) : (
@@ -207,7 +216,7 @@ export function FileAccessTree({ session }: Props) {
             <div className="ftg" key={row.key} style={style}>
               <span
                 className={`mono fs11${reread ? " rere" : ""}`}
-                style={{ paddingLeft: `${row.depth * TREE_INDENT_PX}px` }}
+                style={{ paddingLeft: `${row.depth * TREE_INDENT_PX + TREE_CHEVRON_PX}px` }}
               >
                 <FuzzyLabel
                   label={row.isDirectory ? `${row.name}/` : row.name}

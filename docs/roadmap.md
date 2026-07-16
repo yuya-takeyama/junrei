@@ -603,6 +603,12 @@ highlight amber via `.fzy-hl`, and sections/aggregates/counts narrow to the
 matched set), and SkillInvocationsPanel gets the same filter against skill
 names.
 
+Follow-up in #108: file rows now also pad by the 16px chevron column
+(`TREE_CHEVRON_PX`) directory rows render before their label, so a
+directory's children start visibly deeper than the directory's own label —
+previously a file at depth N+1 (15px) landed at its parent's label x
+(15·N + 16) and read as a sibling.
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped
