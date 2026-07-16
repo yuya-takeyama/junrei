@@ -6,9 +6,16 @@ checksum:
 registries:
   - type: standard
     ref: v4.533.1 # renovate: depName=aquaproj/aqua-registry
+  # Not in the standard registry — local registry entry, see aqua/kumo-registry.yaml.
+  - type: local
+    name: kumo-registry
+    path: aqua/kumo-registry.yaml
 
 # バージョンは .nvmrc と揃える（ユーザーのシェルは nvm、非対話シェルは aqua で解決）
 packages:
   - name: nodejs/node@v24.18.0
   - name: cli/cli@v2.96.0
   - name: pnpm/pnpm@v11.10.0
+  # AWS emulator (S3-compatible) used only by the S3-source kumo integration test.
+  - name: sivchari/kumo@v0.25.3
+    registry: kumo-registry

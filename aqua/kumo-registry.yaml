@@ -1,0 +1,16 @@
+packages:
+  - type: github_release
+    repo_owner: sivchari
+    repo_name: kumo
+    description: Single-binary AWS emulator (S3-compatible) used for the S3-source integration test.
+    asset: "kumo_{{trimV .Version}}_{{.OS}}_{{.Arch}}.tar.gz"
+    format: tar.gz
+    files:
+      - name: kumo
+    checksum:
+      type: github_release
+      asset: "kumo_{{trimV .Version}}_checksums.txt"
+      algorithm: sha256
+    supported_envs:
+      - darwin
+      - linux

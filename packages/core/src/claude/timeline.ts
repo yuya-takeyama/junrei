@@ -46,6 +46,7 @@ import type { TokenUsage } from "../shared/types.js";
 import { computeUsage } from "./metrics.js";
 import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
 import { asyncAgentLaunchToolUseIds } from "./session-data.js";
+import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 import { listSubagentRefs, loadSubagentSessionData, type SubagentRef } from "./subagents.js";
 import type {
   AssistantRecord,
@@ -177,8 +178,9 @@ interface ResolvedSubagentUsage {
 async function resolveSubagentUsage(
   ref: SubagentRef,
   mainFilePath: string,
+  store: ClaudeSessionStore,
 ): Promise<ResolvedSubagentUsage | undefined> {
-  const data = await loadSubagentSessionData(mainFilePath, ref.agentId);
+  const data = await loadSubagentSessionData(mainFilePath, ref.agentId, store);
   if (data === undefined) return undefined;
   const usage = computeUsage(data);
   const model = data.apiMessages.find((m) => m.model !== undefined)?.model;
@@ -200,10 +202,17 @@ async function resolveSubagentUsage(
 // buildClaudeTimeline
 // ---------------------------------------------------------------------------
 
-/** Ordered, log-derived reconstruction of an entire transcript for the Timeline lens. */
+/**
+ * Ordered, log-derived reconstruction of an entire transcript for the
+ * Timeline lens. `store` resolves sidecar subagent/workflow data (defaults to
+ * the local filesystem) — pass the SAME store `data`'s transcript itself came
+ * from, e.g. an S3-backed store for an S3 session (see `store.ts`), so
+ * subagent-launch/workflow enrichment reads from the right place.
+ */
 export async function buildClaudeTimeline(
   data: SessionData,
   opts: TimelineOptions = {},
+  store: ClaudeSessionStore = localClaudeSessionStore,
 ): Promise<TimelineEntry[]> {
   const toolCallsById = new Map(data.toolCalls.map((c) => [c.toolUseId, c]));
   const launchByTaskId = new Map(data.backgroundLaunches.map((l) => [l.taskId, l]));
@@ -213,7 +222,7 @@ export async function buildClaudeTimeline(
 
   const refByToolUseId = new Map<string, SubagentRef>();
   if (opts.mainFilePath !== undefined) {
-    for (const ref of await listSubagentRefs(opts.mainFilePath)) {
+    for (const ref of await listSubagentRefs(opts.mainFilePath, store)) {
       if (ref.meta.toolUseId !== undefined) refByToolUseId.set(ref.meta.toolUseId, ref);
     }
   }
@@ -271,10 +280,11 @@ export async function buildClaudeTimeline(
                 ref,
                 opts,
                 asyncLaunchIds.has(call.toolUseId),
+                store,
               );
               entries.push(entry);
             } else if (call.name === "Workflow") {
-              entries.push(await buildWorkflowToolCallEntry(call, opts));
+              entries.push(await buildWorkflowToolCallEntry(call, opts, store));
             } else {
               entries.push(buildToolCallEntry(call));
             }
@@ -410,13 +420,16 @@ function extractWorkflowRunId(resultText: string): string | undefined {
 async function resolveWorkflowRollup(
   runId: string,
   mainFilePath: string,
+  store: ClaudeSessionStore,
 ): Promise<{ agentCount: number; costUsd: number; costIsComplete: boolean } | undefined> {
-  const refs = (await listSubagentRefs(mainFilePath)).filter((r) => r.workflowRunId === runId);
+  const refs = (await listSubagentRefs(mainFilePath, store)).filter(
+    (r) => r.workflowRunId === runId,
+  );
   if (refs.length === 0) return undefined;
   let costUsd = 0;
   let costIsComplete = true;
   for (const ref of refs) {
-    const data = await loadSubagentSessionData(mainFilePath, ref.agentId);
+    const data = await loadSubagentSessionData(mainFilePath, ref.agentId, store);
     if (data === undefined) continue;
     const usage = computeUsage(data);
     costUsd += usage.total.costUsd;
@@ -436,14 +449,15 @@ async function resolveWorkflowRollup(
 async function buildWorkflowToolCallEntry(
   call: ToolCall,
   opts: TimelineOptions,
+  store: ClaudeSessionStore,
 ): Promise<ToolCallEntry> {
   const base = buildToolCallEntry(call);
   const runId = call.result !== undefined ? extractWorkflowRunId(call.result.text) : undefined;
   if (runId === undefined || opts.mainFilePath === undefined) return base;
 
   const [runs, rollup] = await Promise.all([
-    listWorkflowRuns(opts.mainFilePath),
-    resolveWorkflowRollup(runId, opts.mainFilePath),
+    listWorkflowRuns(opts.mainFilePath, store),
+    resolveWorkflowRollup(runId, opts.mainFilePath, store),
   ]);
   const run = runs.find((r) => r.runId === runId);
 
@@ -464,6 +478,7 @@ async function buildSubagentEntry(
   ref: SubagentRef | undefined,
   opts: TimelineOptions,
   isAsyncLaunch: boolean,
+  store: ClaudeSessionStore,
 ): Promise<SubagentLaunchEntry> {
   const input = asRecord(call.input);
   const agentType = ref?.meta.agentType ?? strField(input, "subagent_type");
@@ -493,7 +508,7 @@ async function buildSubagentEntry(
   };
 
   if (ref !== undefined && opts.mainFilePath !== undefined) {
-    const usage = await resolveSubagentUsage(ref, opts.mainFilePath);
+    const usage = await resolveSubagentUsage(ref, opts.mainFilePath, store);
     if (usage !== undefined) {
       if (usage.model !== undefined) entry.model = usage.model;
       entry.outputTokens = usage.outputTokens;
@@ -553,11 +568,17 @@ function buildTaskNotificationEntry(
 // getClaudeRecordDetail
 // ---------------------------------------------------------------------------
 
-/** Full record at one source line — for the Record detail (L3) slide-over. */
+/**
+ * Full record at one source line — for the Record detail (L3) slide-over.
+ * `store` resolves sidecar subagent/workflow data (defaults to the local
+ * filesystem) — see `buildClaudeTimeline`'s doc comment on passing the SAME
+ * store `data` came from.
+ */
 export async function getClaudeRecordDetail(
   data: SessionData,
   line: number,
   opts: TimelineOptions = {},
+  store: ClaudeSessionStore = localClaudeSessionStore,
 ): Promise<RecordDetail | undefined> {
   const record = data.records.find((r) => r.line === line);
   if (record === undefined) return undefined;
@@ -572,9 +593,9 @@ export async function getClaudeRecordDetail(
         line: record.line,
         ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
       };
-      if (isSubagentLaunchTool(call.name) || (await hasSubagentRef(call.toolUseId, opts))) {
-        const ref = await findSubagentRef(call.toolUseId, opts);
-        return buildSubagentDetail(call, ref, opts);
+      if (isSubagentLaunchTool(call.name) || (await hasSubagentRef(call.toolUseId, opts, store))) {
+        const ref = await findSubagentRef(call.toolUseId, opts, store);
+        return buildSubagentDetail(call, ref, opts, store);
       }
       return buildToolCallDetail(call);
     }
@@ -713,20 +734,26 @@ function buildToolCallDetail(call: ToolCall): ToolCallRecordDetail {
 async function findSubagentRef(
   toolUseId: string,
   opts: TimelineOptions,
+  store: ClaudeSessionStore,
 ): Promise<SubagentRef | undefined> {
   if (opts.mainFilePath === undefined) return undefined;
-  const refs = await listSubagentRefs(opts.mainFilePath);
+  const refs = await listSubagentRefs(opts.mainFilePath, store);
   return refs.find((r) => r.meta.toolUseId === toolUseId);
 }
 
-async function hasSubagentRef(toolUseId: string, opts: TimelineOptions): Promise<boolean> {
-  return (await findSubagentRef(toolUseId, opts)) !== undefined;
+async function hasSubagentRef(
+  toolUseId: string,
+  opts: TimelineOptions,
+  store: ClaudeSessionStore,
+): Promise<boolean> {
+  return (await findSubagentRef(toolUseId, opts, store)) !== undefined;
 }
 
 async function buildSubagentDetail(
   call: ToolCall,
   ref: SubagentRef | undefined,
   opts: TimelineOptions,
+  store: ClaudeSessionStore,
 ): Promise<SubagentLaunchRecordDetail> {
   const input = asRecord(call.input);
   const agentType = ref?.meta.agentType ?? strField(input, "subagent_type");
@@ -752,7 +779,7 @@ async function buildSubagentDetail(
   };
 
   if (ref !== undefined && opts.mainFilePath !== undefined) {
-    const usage = await resolveSubagentUsage(ref, opts.mainFilePath);
+    const usage = await resolveSubagentUsage(ref, opts.mainFilePath, store);
     if (usage !== undefined) {
       if (usage.model !== undefined) detail.model = usage.model;
       detail.outputTokens = usage.outputTokens;

@@ -16,13 +16,12 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import {
   type ClaudeSessionFileRef,
+  type ClaudeSessionStore,
   type CodexSessionFileRef,
   extractClaudeSearchFields,
   extractCodexSearchFields,
-  listClaudeSessionFiles,
   listSubagentRefs,
   parseJsonlLine,
-  resolveClaudeProjectsDirs,
   type SearchableField,
   type SearchFieldKind,
   type SessionSource,
@@ -34,6 +33,7 @@ import {
   MAX_LIST_LIMIT,
   type SessionSourceFilter,
 } from "./sessions.js";
+import { claudeStoreForFilePath, listAllClaudeRefs } from "./sources/claude.js";
 import { listCodexRefs } from "./sources/codex.js";
 
 export interface SearchParams {
@@ -244,11 +244,18 @@ interface FileScanResult {
   matchCount: number;
 }
 
-/** Stream-scan one Claude transcript (main session or subagent sidecar). `undefined` = unreadable. */
+/**
+ * Stream-scan one Claude transcript (main session or subagent sidecar).
+ * `undefined` = unreadable. Reads through `store` (local filesystem or an
+ * S3-backed store, picked per-file by `claudeStoreForFilePath`) rather than
+ * `node:fs` directly, so S3 sessions are searchable the same way local ones
+ * are.
+ */
 async function scanClaudeFile(
   filePath: string,
   matcher: Matcher,
   wanted: ReadonlySet<SearchFieldKind>,
+  store: ClaudeSessionStore,
 ): Promise<FileScanResult | undefined> {
   const rawGate = fastPathEligible(matcher.query)
     ? (line: string) =>
@@ -259,12 +266,8 @@ async function scanClaudeFile(
   const matches: RecordMatch[] = [];
   let matchCount = 0;
   try {
-    const rl = createInterface({
-      input: createReadStream(filePath, { encoding: "utf8" }),
-      crlfDelay: Number.POSITIVE_INFINITY,
-    });
     let line = 0;
-    for await (const text of rl) {
+    for await (const text of store.openLines(filePath)) {
       line += 1;
       if (rawGate !== undefined && !rawGate(text)) continue;
       const raw = parseJsonlLine(text);
@@ -455,11 +458,16 @@ export async function searchSessions(params: SearchParams): Promise<SearchRespon
 
   // File refs for the transcripts behind each list item. Claude items are
   // keyed by (projectDirName, sessionId) — the same id can exist in two
-  // projects; Codex ids are globally unique (see listCodexRefs' dedup).
+  // projects (or across the local + S3 stores — see `listAllClaudeRefs`);
+  // Codex ids are globally unique (see listCodexRefs' dedup). Local refs come
+  // first from `listAllClaudeRefs`, so a collision between a local and an S3
+  // session keeps the LOCAL ref (same precedence as single-session lookups
+  // elsewhere — see `sources/claude.ts`).
   const claudeRefs = new Map<string, ClaudeSessionFileRef>();
   if (source !== "codex") {
-    for (const ref of await listClaudeSessionFiles(await resolveClaudeProjectsDirs())) {
-      claudeRefs.set(`${ref.projectDirName}\u0000${ref.sessionId}`, ref);
+    for (const ref of await listAllClaudeRefs()) {
+      const key = `${ref.projectDirName}\u0000${ref.sessionId}`;
+      if (!claudeRefs.has(key)) claudeRefs.set(key, ref);
     }
   }
   const codexRefs = new Map<string, CodexSessionFileRef>();
@@ -476,6 +484,17 @@ export async function searchSessions(params: SearchParams): Promise<SearchRespon
     return ref === undefined ? undefined : { filePath: ref.filePath, mtimeMs: ref.mtimeMs };
   };
 
+  // A `sessionId` can appear TWICE in `items` — once from the local listing,
+  // once from the S3 listing (see `sources/claude.ts`'s `s3ClaudeAdapter` doc
+  // comment: both sources' rows are merged independently, accepted duplicate
+  // behavior) — and `refOf` resolves BOTH rows to the SAME local file (the
+  // ref map above prefers local). Without deduping, that one file gets
+  // scanned twice, producing two identical result cards and burning two
+  // `scanLimit` slots for one session. Dedup by `(source, sessionId)`,
+  // keeping the first candidate to survive the filters above — local wins
+  // since `claudeAdapter` is listed before `s3ClaudeAdapter` precisely when
+  // both resolve to the same underlying file.
+  const seenCandidates = new Set<string>();
   const filtered: Candidate[] = [];
   for (const item of items) {
     if (params.project !== undefined) {
@@ -487,6 +506,9 @@ export async function searchSessions(params: SearchParams): Promise<SearchRespon
     if (ref === undefined) continue; // Raced with deletion — nothing to scan.
     if (sinceMs !== undefined && ref.mtimeMs < sinceMs) continue;
     if (untilMs !== undefined && ref.mtimeMs > untilMs) continue;
+    const dedupeKey = `${item.source}\u0000${item.sessionId}`;
+    if (seenCandidates.has(dedupeKey)) continue;
+    seenCandidates.add(dedupeKey);
     filtered.push({ item, ...ref });
   }
   const candidates = filtered.slice(0, scanLimit);
@@ -532,10 +554,14 @@ export async function searchSessions(params: SearchParams): Promise<SearchRespon
     };
 
     if (candidate.item.source === "claude-code") {
-      absorb(await scanClaudeFile(candidate.filePath, matcher, wanted));
+      const store = claudeStoreForFilePath(candidate.filePath);
+      absorb(await scanClaudeFile(candidate.filePath, matcher, wanted, store));
       if (includeSubagents) {
-        for (const subagent of await listSubagentRefs(candidate.filePath)) {
-          absorb(await scanClaudeFile(subagent.jsonlPath, matcher, wanted), subagent.agentId);
+        for (const subagent of await listSubagentRefs(candidate.filePath, store)) {
+          absorb(
+            await scanClaudeFile(subagent.jsonlPath, matcher, wanted, store),
+            subagent.agentId,
+          );
         }
       }
     } else {

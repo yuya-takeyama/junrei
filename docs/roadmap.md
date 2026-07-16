@@ -646,6 +646,52 @@ the session and agent shells. Claude's isMeta injection records stay
 unexposed — its record detail skips them, so no link is rendered for Claude
 sessions.
 
+## S3 as an additional Claude session source (2026-07-17)
+
+🚧 A remote environment (Claude Agent SDK on AWS AgentCore Runtime) can upload
+session transcripts to S3 mirroring the local `~/.claude/projects/` layout;
+setting `JUNREI_S3_SOURCE_URI` (`s3://bucket/prefix/`) makes Junrei list and
+read those sessions directly from the bucket as an additional source, merged
+into the same session list — no local sync/mirror, and byte-for-byte
+unchanged behavior when the env var is unset.
+
+Introduced a minimal `ClaudeSessionStore` interface in `@junrei/core`
+(`claude/store.ts`: `listSessionFiles`/`findSessionFileById`/`openLines`/
+`readFile`/`listSidecarFiles`) and threaded it through `parser.ts`,
+`subagents.ts`, `workflows.ts`, `analyze.ts`, and `timeline.ts` — every fs
+touch in the Claude module now goes through a store, defaulting to a
+`localClaudeSessionStore` that's a pure refactor of the old direct-`node:fs`
+code (existing tests pass unmodified). `ClaudeSessionFileRef.filePath` is now
+documented as a store-scoped URI (local absolute path, or `s3://bucket/key`)
+and carries a new `changeToken` field (local: `String(mtimeMs)`, unchanged
+behavior) generalizing the server's mtime-keyed parse caches to an opaque
+string. A `joinPath` helper (`paths.ts`) replaces `node:path`'s `join` for any
+store-scoped path, since `path.join` collapses the `://` in an S3 URI.
+
+The S3 implementation itself (`@junrei/server`'s `sources/s3-store.ts`, the
+only file importing `@aws-sdk/client-s3` — never `@junrei/core`, which
+`@junrei/web` bundles via vite) does one paginated `ListObjectsV2` sweep
+under `<prefix>projects/` per TTL window (`JUNREI_S3_LIST_TTL_MS`, default
+10s) to answer every discovery query, derives session/sidecar structure from
+key shape, uses `ETag` as the change token (falling back to
+`LastModified`+`Size`), warns on a shrunk object size (possible remote
+rollback) or an unparseable/path-traversal key, and reads file contents via
+`GetObject`. `sources/claude.ts` builds one adapter bundle per store (local +
+optional S3) with independent caches; single-session lookups
+(`getSession`/`getTimeline`/etc.) try local first, then S3 — an accepted
+"local wins" precedence when the same session id exists in both. `search.ts`
+routes transcript scanning through the right store per file so S3 sessions
+are searchable too.
+
+Tests: server-side unit tests mock the S3 client at the `send` level
+(pagination, key parsing, TTL caching with fake timers, ETag invalidation,
+size-decrease/invalid-key warnings). One integration test spawns
+[kumo](https://github.com/sivchari/kumo) (a single-binary S3-compatible
+emulator, added to `aqua.yaml` via a local registry —
+`aqua/kumo-registry.yaml` + `aqua-policy.yaml`, since it isn't in the standard
+aqua registry), uploads the existing core fixtures, and exercises the store
+end to end; it skips gracefully when `kumo` isn't on `PATH`.
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped

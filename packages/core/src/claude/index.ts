@@ -34,7 +34,8 @@ export {
   computeTurnUsage,
   computeUsage,
 } from "./metrics.js";
-export { parseClaudeTranscriptFile } from "./parser.js";
+export { parseClaudeTranscriptFile, parseClaudeTranscriptLines } from "./parser.js";
+export { joinPath } from "./paths.js";
 export { extractClaudeSearchFields } from "./search.js";
 export type {
   ApiErrorLogEntry,
@@ -44,6 +45,8 @@ export type {
   UserPrompt,
 } from "./session-data.js";
 export { buildSessionData } from "./session-data.js";
+export type { ClaudeSessionStore, ClaudeSidecarFileRef } from "./store.js";
+export { localClaudeSessionStore } from "./store.js";
 export type { SubagentMeta, SubagentRef } from "./subagents.js";
 export { listSubagentRefs, loadSubagentSessionData, subagentsDirFor } from "./subagents.js";
 export { buildClaudeTimeline, getClaudeRecordDetail } from "./timeline.js";

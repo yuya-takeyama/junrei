@@ -5,6 +5,13 @@ import { basename, join } from "node:path";
 export interface ClaudeSessionFileRef {
   /** Session UUID (the JSONL file basename). */
   sessionId: string;
+  /**
+   * Store-scoped URI identifying this file — an absolute local path for
+   * `LocalClaudeSessionStore`, or an `s3://bucket/key` URI for an S3-backed
+   * store (see `store.ts`). Opaque to callers: pass it back to the SAME
+   * store's `openLines`/`readFile`, never parsed directly (except by the
+   * store that produced it).
+   */
   filePath: string;
   /** Munged project directory name under `projects/` (not reversible to a path). */
   projectDirName: string;
@@ -17,6 +24,15 @@ export interface ClaudeSessionFileRef {
    */
   birthtimeMs: number;
   sizeBytes: number;
+  /**
+   * Opaque change token for cache invalidation — a cache keyed by `filePath`
+   * is valid only while this token is unchanged (see `sources/claude.ts`'s
+   * `analyzeCached` in `@junrei/server`). Local: `String(mtimeMs)`, identical
+   * behavior to the old mtime-keyed cache. S3: the object's `ETag` (fallback
+   * `LastModified`+`Size`) — NEVER treat as a content hash (multipart ETags
+   * aren't MD5), it's a change marker only.
+   */
+  changeToken: string;
 }
 
 /**
@@ -79,6 +95,7 @@ export async function listClaudeSessionFiles(
             mtimeMs: info.mtimeMs,
             birthtimeMs: info.birthtimeMs,
             sizeBytes: info.size,
+            changeToken: String(info.mtimeMs),
           });
         } catch {
           // Race with deletion — skip.
@@ -128,6 +145,7 @@ export async function findClaudeSessionFileById(
             mtimeMs: info.mtimeMs,
             birthtimeMs: info.birthtimeMs,
             sizeBytes: info.size,
+            changeToken: String(info.mtimeMs),
           };
         }
       } catch {
