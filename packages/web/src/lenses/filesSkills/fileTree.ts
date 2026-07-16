@@ -13,6 +13,15 @@ export const REREAD_THRESHOLD = 3;
 /** Indent per compressed tree depth level — see `FileTreeNode.depth`. */
 export const TREE_INDENT_PX = 15;
 
+/**
+ * Width of the chevron column a directory row renders before its label
+ * (`.tree-toggle`: 12px + 4px margin). File rows pad by this too, so a
+ * label at depth N starts at the same x whether the row is a dir or a
+ * file — without it, a file at depth N+1 lands at its parent dir's label
+ * x (N·15 + 16 vs N·15 + 15) and reads as a sibling of the dir.
+ */
+export const TREE_CHEVRON_PX = 16;
+
 // ---------------------------------------------------------------------
 // Scope classification — Repository / Home / System
 // ---------------------------------------------------------------------
