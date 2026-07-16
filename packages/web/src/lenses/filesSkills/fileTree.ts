@@ -110,6 +110,43 @@ export function scopeRelativeSegments(
   return path.split("/").filter((p) => p !== "");
 }
 
+/**
+ * Display label for an injected-only entry whose path IS a scope root —
+ * after `relativeSegments` it would otherwise render as a file named ".".
+ * Only directory-keyed context injections produce such entries (Codex
+ * AGENTS.md merges, attributed to the header's `<cwd>` because the individual
+ * merged file paths never reach the rollout — see core's
+ * codex/files-skills.ts; Claude injections always name a real file), so the
+ * row is labeled as what it is instead.
+ */
+export const AGENTS_INJECTION_LABEL = "AGENTS.md instructions (merged)";
+
+/** Pushed into context without ever being read or edited — see `FileAccessAgg.injectedCount`. */
+function isInjectedOnly(entry: FileAccessEntryLike): boolean {
+  return (entry.injectedCount ?? 0) > 0 && entry.reads === 0 && entry.edits === 0;
+}
+
+/**
+ * `scopeRelativeSegments`, with the injected-only-root special case applied
+ * (see `AGENTS_INJECTION_LABEL`) — the segment list every display surface
+ * (tree insertion AND the fuzzy filter's match target) must share, so a
+ * relabeled row stays findable by its visible text. A root entry with real
+ * reads (e.g. an rg search that took cwd itself as its root) keeps "." and
+ * the existing `./` directory rendering.
+ */
+export function displaySegments(
+  entry: FileAccessEntryLike,
+  scope: FileScope,
+  cwd: string | undefined,
+  home: string | undefined,
+): string[] {
+  const segments = scopeRelativeSegments(entry.path, scope, cwd, home);
+  if (segments.length === 1 && segments[0] === "." && isInjectedOnly(entry)) {
+    return [AGENTS_INJECTION_LABEL];
+  }
+  return segments;
+}
+
 // ---------------------------------------------------------------------
 // Tree building — compact ("VSCode compact folders") directory tree per
 // scope, with per-directory aggregated read/edit counts.
@@ -246,13 +283,17 @@ function finalizeChildren(
       const match = matches?.get(entry.path);
       const matchedIndices =
         match !== undefined ? localizeMatchIndices(match, name.length) : undefined;
+      // A relabeled root injection (see AGENTS_INJECTION_LABEL) presents the
+      // injection, not the directory — the `/` suffix + `· dir` marker would
+      // misread a label that is no longer a path.
+      const isRootInjection = name === AGENTS_INJECTION_LABEL && isInjectedOnly(entry);
       return {
         kind: "file",
         key: entry.path,
         name,
         depth,
         entry,
-        isDirectory: isDirectoryOf(entry.path),
+        isDirectory: !isRootInjection && isDirectoryOf(entry.path),
         ...(matchedIndices !== undefined && { matchedIndices }),
       };
     })
@@ -291,7 +332,7 @@ export function buildScopeFileTree(
   };
   const root = emptyRawDir();
   for (const entry of entries) {
-    insertEntry(root, scopeRelativeSegments(entry.path, scope, cwd, home), entry);
+    insertEntry(root, displaySegments(entry, scope, cwd, home), entry);
   }
   return finalizeChildren(scope, root, 0, [], isDirectoryOf, matches);
 }
@@ -350,7 +391,7 @@ export function buildFileScopeSections(
 
     const matches = new Map<string, { displayPath: string; indices: readonly number[] }>();
     for (const entry of bucket) {
-      const displayPath = scopeRelativeSegments(entry.path, scope, cwd, home).join("/");
+      const displayPath = displaySegments(entry, scope, cwd, home).join("/");
       const indices = fuzzyMatch(displayPath, trimmedQuery);
       if (indices !== undefined) matches.set(entry.path, { displayPath, indices });
     }

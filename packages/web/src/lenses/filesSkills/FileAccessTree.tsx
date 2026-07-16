@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AnySessionJson } from "../../api.js";
-import { formatTime } from "../../format.js";
+import { formatTime, formatTokens } from "../../format.js";
 import {
   buildFileScopeSections,
   type FileAccessEntryLike,
@@ -23,12 +23,22 @@ const THREAD_LABEL: Record<AnySessionJson["fileAccess"][number]["threads"], stri
   both: "M+S",
 };
 
-/** Hover detail for the `inj N` marker — counts only in the row itself (see `FileAccessTree`'s doc comment), the char total goes in the tooltip. */
+/**
+ * Hover detail for the `inj N` marker — counts only in the row itself (see
+ * `FileAccessTree`'s doc comment), the char total goes in the tooltip. A
+ * Codex AGENTS.md merge that carried the `--- project-doc ---` separator
+ * additionally splits into its user-level / project-level halves.
+ */
 function injectedTitle(entry: FileAccessEntryLike): string {
   const count = entry.injectedCount ?? 0;
   const noun = count === 1 ? "injection" : "injections";
   const size = formatInjectedSize(entry.injectedChars);
-  return size !== undefined ? `${String(count)} ${noun}, ${size}` : `${String(count)} ${noun}`;
+  if (size === undefined) return `${String(count)} ${noun}`;
+  const split =
+    entry.injectedUserDocChars !== undefined && entry.injectedProjectDocChars !== undefined
+      ? ` (user ${formatTokens(entry.injectedUserDocChars)} · project ${formatTokens(entry.injectedProjectDocChars)})`
+      : "";
+  return `${String(count)} ${noun}, ${size}${split}`;
 }
 
 const DIR_MARKER_TITLE =

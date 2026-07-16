@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENTS_INJECTION_LABEL,
   buildFileScopeSections,
   buildScopeFileTree,
   type FileAccessEntryLike,
@@ -171,6 +172,43 @@ describe("buildScopeFileTree — isDirectory proof", () => {
     const files = srcNode.children as FileTreeFileRow[];
     expect(files.find((f) => f.name === "foo")?.isDirectory).toBe(false);
     expect(files.find((f) => f.name === "foobar.ts")?.isDirectory).toBe(false);
+  });
+});
+
+describe("buildScopeFileTree — injected-only root entry (Codex AGENTS.md merge)", () => {
+  it("relabels an injected-only entry whose path IS the scope root, instead of a file named '.'", () => {
+    const entries: FileAccessEntryLike[] = [
+      entry({ path: "/proj", injectedCount: 1, injectedChars: 79 }),
+      entry({ path: "/proj/src/index.ts", reads: 1 }),
+    ];
+    const nodes = buildScopeFileTree(entries, entries, "repo", "/proj", undefined);
+    const fileRow = nodes.find((n) => n.kind === "file") as FileTreeFileRow;
+    expect(fileRow.name).toBe(AGENTS_INJECTION_LABEL);
+    // The label presents the injection, not the directory — no `/` suffix or
+    // `· dir` marker, even though co-listed children prove the path is a dir.
+    expect(fileRow.isDirectory).toBe(false);
+  });
+
+  it("keeps '.' (directory rendering) for a root entry with real reads, e.g. an rg search rooted at cwd", () => {
+    const entries: FileAccessEntryLike[] = [
+      entry({ path: "/proj", reads: 2 }),
+      entry({ path: "/proj/src/index.ts", reads: 1 }),
+    ];
+    const nodes = buildScopeFileTree(entries, entries, "repo", "/proj", undefined);
+    const fileRow = nodes.find((n) => n.kind === "file") as FileTreeFileRow;
+    expect(fileRow.name).toBe(".");
+    expect(fileRow.isDirectory).toBe(true);
+  });
+
+  it("fuzzy-matches the relabeled row by its visible label", () => {
+    const entries: FileAccessEntryLike[] = [
+      entry({ path: "/proj", injectedCount: 1, injectedChars: 79 }),
+    ];
+    const sections = buildFileScopeSections(entries, "/proj", "agents");
+    expect(sections).toHaveLength(1);
+    const fileRow = sections[0]?.nodes[0] as FileTreeFileRow;
+    expect(fileRow.name).toBe(AGENTS_INJECTION_LABEL);
+    expect(fileRow.matchedIndices).toBeDefined();
   });
 });
 

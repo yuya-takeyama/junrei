@@ -112,6 +112,17 @@ export interface FileAccessAgg {
   injectedCount?: number;
   /** Cumulative injected character count, paired with `injectedCount`. */
   injectedChars?: number;
+  /**
+   * Codex AGENTS.md merges only (see `codex/files-skills.ts`): chars of the
+   * user-level (`~/.codex/AGENTS.md`) half of the injected doc. Present only
+   * when the `--- project-doc ---` separator proved both halves exist — a
+   * separator-less injection can't be attributed to either level honestly.
+   * The two halves don't sum to `injectedChars` (the separator itself is
+   * counted only there).
+   */
+  injectedUserDocChars?: number;
+  /** Paired with `injectedUserDocChars` — chars of the project-level AGENTS.md half. */
+  injectedProjectDocChars?: number;
   /** Earliest timestamp among this transcript's touches of the path. */
   firstTimestamp?: string;
   /** Earliest line among this transcript's touches of the path. */
@@ -131,6 +142,10 @@ export interface FileAccessEntry {
   injectedCount?: number;
   /** Cumulative injected character count, paired with `injectedCount`. */
   injectedChars?: number;
+  /** User-level AGENTS.md chars, main + every subagent, merged — see `FileAccessAgg.injectedUserDocChars`. */
+  injectedUserDocChars?: number;
+  /** Paired with `injectedUserDocChars` — chars of the project-level AGENTS.md half. */
+  injectedProjectDocChars?: number;
   /** Earliest timestamp across every transcript that touched this path. */
   firstTouchTimestamp?: string;
   /** Line of the first MAIN-transcript touch, if any — omitted when only subagents touched the path. */
@@ -173,6 +188,9 @@ export function mergeFileAccess(
     const edits = (m?.edits ?? 0) + (s?.edits ?? 0);
     const injectedCount = (m?.injectedCount ?? 0) + (s?.injectedCount ?? 0);
     const injectedChars = (m?.injectedChars ?? 0) + (s?.injectedChars ?? 0);
+    const injectedUserDocChars = (m?.injectedUserDocChars ?? 0) + (s?.injectedUserDocChars ?? 0);
+    const injectedProjectDocChars =
+      (m?.injectedProjectDocChars ?? 0) + (s?.injectedProjectDocChars ?? 0);
     const threads: FileAccessThread =
       m !== undefined && s !== undefined ? "both" : m !== undefined ? "main" : "subagent";
     let firstTouchTimestamp: string | undefined;
@@ -188,6 +206,8 @@ export function mergeFileAccess(
       edits,
       ...(injectedCount > 0 && { injectedCount }),
       ...(injectedChars > 0 && { injectedChars }),
+      ...(injectedUserDocChars > 0 && { injectedUserDocChars }),
+      ...(injectedProjectDocChars > 0 && { injectedProjectDocChars }),
       ...(firstTouchTimestamp !== undefined && { firstTouchTimestamp }),
       ...(m?.firstLine !== undefined && { firstTouchLine: m.firstLine }),
       threads,
@@ -231,6 +251,14 @@ export function foldFileAccess(
     }
     if (entry.injectedChars !== undefined) {
       existing.injectedChars = (existing.injectedChars ?? 0) + entry.injectedChars;
+    }
+    if (entry.injectedUserDocChars !== undefined) {
+      existing.injectedUserDocChars =
+        (existing.injectedUserDocChars ?? 0) + entry.injectedUserDocChars;
+    }
+    if (entry.injectedProjectDocChars !== undefined) {
+      existing.injectedProjectDocChars =
+        (existing.injectedProjectDocChars ?? 0) + entry.injectedProjectDocChars;
     }
     if (
       entry.firstTimestamp !== undefined &&

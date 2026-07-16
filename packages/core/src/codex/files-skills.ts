@@ -34,18 +34,26 @@
  *    `EMBEDDED_PATCH_HEADER_PATTERN`). MCP calls (`tools.mcp__*`) in the
  *    same program carry no file signal and are ignored.
  *
- * Unlike Claude (see `metrics.ts#computeFileAccess`), NO context-injection
- * tracking (`injectedCount`/`injectedChars`) is derived for Codex, on
- * purpose: the only injected-context marker Codex's rollout format exposes,
- * `# AGENTS.md instructions for <cwd>` (`isSyntheticUserText` in
- * `./analyze.ts`), names a DIRECTORY, never a single file — Codex merges
- * AGENTS.md from several directory levels, so there is no one honest path to
- * attribute the injection to. The `[$plugin:skill](path/to/SKILL.md)` marker
+ * Context-injection tracking (`injectedCount`/`injectedChars`) IS derived
+ * for Codex, but at DIRECTORY granularity: the only injected-context marker
+ * Codex's rollout format exposes, a synthetic `role:"user"` response_item
+ * starting with `# AGENTS.md instructions for <cwd>` (`isSyntheticUserText`
+ * in `./analyze.ts`), names a directory, never a single file — Codex merges
+ * AGENTS.md from several directory levels (root and nested,
+ * `AGENTS.override.md` included) into that one message, and the individual
+ * file paths never reach the log. So the injection is attributed to the
+ * header's `<cwd>` directory itself — the honest granularity — rather than
+ * to a fabricated `<cwd>/AGENTS.md` path. When the body carries the
+ * `--- project-doc ---` separator (emitted only when BOTH a user-level
+ * `~/.codex/AGENTS.md` and project-level docs exist), the two halves' sizes
+ * are additionally split into `injectedUserDocChars`/`injectedProjectDocChars`;
+ * without the separator no split is recorded, since a lone body could be
+ * either level. The `[$plugin:skill](path/to/SKILL.md)` marker
  * `computeCodexSkillInvocations` parses below DOES carry an honest path, but
  * it's the human's own mention syntax typed into their prompt, not a
  * harness-generated record proving the body was actually loaded (no matching
  * record measures its size, unlike Claude's isMeta injection) — so it's left
- * out rather than guessed at too.
+ * out rather than guessed at.
  */
 import type {
   FileAccessAgg,
@@ -400,6 +408,67 @@ function resolveAgainstCwd(path: string, cwd: string | undefined): string {
   return `${base}/${path}`;
 }
 
+// ---------------------------------------------------------------------------
+// AGENTS.md injection — directory-keyed injected-only entries
+// ---------------------------------------------------------------------------
+
+/**
+ * Header line of Codex's AGENTS.md context injection, captured up to the end
+ * of the first line. Must agree with the `# AGENTS.md instructions` prefix
+ * `isSyntheticUserText` (analyze.ts) uses to keep these same messages out of
+ * the prompt count.
+ */
+const AGENTS_INJECTION_HEADER_PATTERN = /^# AGENTS\.md instructions for ([^\n]+)/;
+
+/**
+ * Separator Codex places between the user-level `~/.codex/AGENTS.md` body
+ * and the project-level AGENTS.md bodies — present only when both exist.
+ */
+const PROJECT_DOC_SEPARATOR = "\n\n--- project-doc ---\n\n";
+
+/** One parsed AGENTS.md injection message — see `parseAgentsInjection`. */
+interface AgentsInjection {
+  /** The header's `<cwd>` directory, trailing slashes stripped so it can match the session cwd string exactly. */
+  directory: string;
+  /** Chars of the whole injected body (everything after the header line, trimmed). */
+  chars: number;
+  /** Set only when the `--- project-doc ---` separator is present — see the module doc. */
+  userDocChars?: number;
+  projectDocChars?: number;
+}
+
+/** `/a/b/` -> `/a/b`, but a bare `/` stays `/`. */
+function stripTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 1 && path.charAt(end - 1) === "/") end -= 1;
+  return path.slice(0, end);
+}
+
+/**
+ * Parse a synthetic `# AGENTS.md instructions for <cwd>` user message into a
+ * directory-keyed injection record, or `undefined` when `text` isn't one.
+ * The body is measured trimmed (the header is followed by a blank line that
+ * isn't doc content); when the separator is present, each half's size is the
+ * trimmed body's span on its side of it.
+ */
+function parseAgentsInjection(text: string): AgentsInjection | undefined {
+  const trimmed = text.trimStart();
+  const header = AGENTS_INJECTION_HEADER_PATTERN.exec(trimmed);
+  const rawDirectory = header?.[1]?.trim();
+  if (rawDirectory === undefined || rawDirectory === "") return undefined;
+  const directory = stripTrailingSlashes(rawDirectory);
+  const newline = trimmed.indexOf("\n");
+  const body = newline === -1 ? "" : trimmed.slice(newline + 1).trim();
+  const separatorAt = body.indexOf(PROJECT_DOC_SEPARATOR);
+  if (separatorAt === -1) return { directory, chars: body.length };
+  return {
+    directory,
+    chars: body.length,
+    userDocChars: separatorAt,
+    projectDocChars: body.length - separatorAt - PROJECT_DOC_SEPARATOR.length,
+  };
+}
+
 /**
  * Per-transcript file-access tally for a Codex rollout — same
  * `Map<string, FileAccessAgg>` shape `computeFileAccess` (metrics.ts)
@@ -411,12 +480,7 @@ export function computeCodexFileAccess(transcript: CodexTranscript): Map<string,
   const map = new Map<string, FileAccessAgg>();
   let cwd: string | undefined;
 
-  const touch = (
-    path: string,
-    kind: "read" | "edit",
-    line: number,
-    timestamp: string | undefined,
-  ) => {
+  const ensure = (path: string, line: number, timestamp: string | undefined): FileAccessAgg => {
     let entry = map.get(path);
     if (entry === undefined) {
       entry = {
@@ -428,8 +492,31 @@ export function computeCodexFileAccess(transcript: CodexTranscript): Map<string,
       };
       map.set(path, entry);
     }
+    return entry;
+  };
+
+  const touch = (
+    path: string,
+    kind: "read" | "edit",
+    line: number,
+    timestamp: string | undefined,
+  ) => {
+    const entry = ensure(path, line, timestamp);
     if (kind === "read") entry.reads += 1;
     else entry.edits += 1;
+  };
+
+  const inject = (injection: AgentsInjection, line: number, timestamp: string | undefined) => {
+    const entry = ensure(injection.directory, line, timestamp);
+    entry.injectedCount = (entry.injectedCount ?? 0) + 1;
+    entry.injectedChars = (entry.injectedChars ?? 0) + injection.chars;
+    if (injection.userDocChars !== undefined) {
+      entry.injectedUserDocChars = (entry.injectedUserDocChars ?? 0) + injection.userDocChars;
+    }
+    if (injection.projectDocChars !== undefined) {
+      entry.injectedProjectDocChars =
+        (entry.injectedProjectDocChars ?? 0) + injection.projectDocChars;
+    }
   };
 
   for (const record of transcript.records) {
@@ -443,6 +530,12 @@ export function computeCodexFileAccess(transcript: CodexTranscript): Map<string,
     }
     if (record.type !== "responseItem") continue;
     const item = record.item;
+
+    if (item.kind === "message" && item.role === "user") {
+      const injection = parseAgentsInjection(item.text);
+      if (injection !== undefined) inject(injection, record.line, record.timestamp);
+      continue;
+    }
 
     if (item.kind === "customToolCall" && item.name === "apply_patch" && item.input !== undefined) {
       for (const match of item.input.matchAll(PATCH_HEADER_PATTERN)) {
@@ -499,6 +592,14 @@ function toAggMap(entries: readonly FileAccessEntry[]): Map<string, FileAccessAg
       path: entry.path,
       reads: entry.reads,
       edits: entry.edits,
+      ...(entry.injectedCount !== undefined && { injectedCount: entry.injectedCount }),
+      ...(entry.injectedChars !== undefined && { injectedChars: entry.injectedChars }),
+      ...(entry.injectedUserDocChars !== undefined && {
+        injectedUserDocChars: entry.injectedUserDocChars,
+      }),
+      ...(entry.injectedProjectDocChars !== undefined && {
+        injectedProjectDocChars: entry.injectedProjectDocChars,
+      }),
       ...(entry.firstTouchTimestamp !== undefined && { firstTimestamp: entry.firstTouchTimestamp }),
       ...(entry.firstTouchLine !== undefined && { firstLine: entry.firstTouchLine }),
     });

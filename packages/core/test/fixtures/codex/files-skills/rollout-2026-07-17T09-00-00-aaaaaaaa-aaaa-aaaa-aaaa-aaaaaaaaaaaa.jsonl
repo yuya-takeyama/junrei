@@ -1,0 +1,8 @@
+{"timestamp":"2026-07-17T09:00:00.000Z","type":"session_meta","payload":{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","cwd":"/Users/test/agents-proj","originator":"codex_cli_rs","cli_version":"0.144.0","source":"exec"}}
+{"timestamp":"2026-07-17T09:00:01.000Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/Users/test/agents-proj","model":"gpt-5.5","effort":"medium"}}
+{"timestamp":"2026-07-17T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/test/agents-proj\n\nUser rules here.\n\n--- project-doc ---\n\nProject rules body.\n\nMore project rules."}]}}
+{"timestamp":"2026-07-17T09:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Please add a feature."}]}}
+{"timestamp":"2026-07-17T09:00:04.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n<cwd>/Users/test/agents-proj</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-07-17T09:00:05.000Z","type":"turn_context","payload":{"turn_id":"turn-2","cwd":"/Users/test/agents-proj/sub","model":"gpt-5.5","effort":"medium"}}
+{"timestamp":"2026-07-17T09:00:06.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/test/agents-proj/sub/\n\nSub project doc only."}]}}
+{"timestamp":"2026-07-17T09:00:07.000Z","type":"response_item","payload":{"type":"function_call","call_id":"call-a1","name":"exec_command","arguments":"{\"cmd\":\"cat notes.md\",\"workdir\":\"/Users/test/agents-proj/sub\"}"}}
