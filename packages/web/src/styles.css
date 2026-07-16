@@ -1450,3 +1450,28 @@ button.fb {
 .rere {
   color: var(--amb);
 }
+
+/* Fuzzy-filter matched-character highlight (FileAccessTree / SkillInvocationsPanel, fuzzy.ts's `highlightSegments`) — reuses `--amb`, the app's existing "this is highlighted/active" accent (see `.b-tab.on`, `.rere`), rather than adding a new token. */
+.fzy-hl {
+  color: var(--amb);
+  font-weight: 600;
+}
+
+/* Directory-row collapse toggle (FileAccessTree's compact tree) — an inline
+   chevron button, not a `.chip`/`.cp` pill, since it sits inside the `.ftg`
+   path cell rather than a header/toolbar. */
+.tree-toggle {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-right: 4px;
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  font: inherit;
+  color: var(--mut);
+  cursor: pointer;
+}
+.tree-toggle:hover {
+  color: var(--tx);
+}

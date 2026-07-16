@@ -586,6 +586,23 @@ message across lines with growing `output_tokens` — dedup now keeps the last
 occurrence, which is billing-correct (the motivating session's workflow
 agents: $13.05 under first-occurrence vs $17.39 correct).
 
+## Files & Skills file-tree rework (2026-07-16)
+
+Shipped in #107. The Files & skills lens's file list was a flat list grouped
+by directory-header rows — repo files interleaved with `~/` and `/` paths,
+nothing collapsible, nothing filterable. `fileTree.ts` now classifies each
+absolute path into Repository / Home / System scope sections (repo wins when
+the cwd itself sits under the guessed home prefix) and builds a per-scope
+compact directory tree (single-child chains fold into one `a/b/c/` row,
+VSCode compact-folders style) with per-directory aggregated reads/edits
+rendered muted on collapsible, default-expanded chevron rows. A new
+`fuzzy.ts` implements a case-insensitive subsequence matcher: the
+FileAccessTree header input filters files against their scope-relative paths
+(ancestors force-expand while filtering, matched basename characters
+highlight amber via `.fzy-hl`, and sections/aggregates/counts narrow to the
+matched set), and SkillInvocationsPanel gets the same filter against skill
+names.
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped
