@@ -1,10 +1,9 @@
 # Codex delegation controls
 
-As of 2026-07-17 the deployed Codex harness exposes **both** routing
-controls on `collaboration.spawn_agent`: predefined roles (`agent_type`) and
-per-call `model` / `reasoning_effort` overrides. Earlier stable releases
-(≤ `rust-v0.144.5`) had roles only — the schema has changed across releases
-before, so re-verify after every Codex upgrade (see the bottom section).
+`collaboration.spawn_agent` exposes two routing controls: predefined roles
+(`agent_type`) and per-call `model` / `reasoning_effort` overrides. The live
+spawn_agent schema is the source of truth for what is available — when a
+control is missing there, use the fallback section below.
 
 ## The routing model: roles for standing work, overrides for one-offs
 
@@ -73,8 +72,8 @@ source of truth.
 
 ## Writing the spawn message — GPT-5.6 prompting essentials
 
-Distilled from OpenAI's GPT-5.6 model guidance
-(developers.openai.com → API docs → guides → latest-model, read 2026-07-17):
+Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
+"latest model" guide):
 
 - **Outcome, not steps.** GPT-5.6 infers the intended level of work from
   context — give goal, domain context, hard constraints, success criteria,
@@ -89,14 +88,14 @@ Distilled from OpenAI's GPT-5.6 model guidance
 - **One autonomy policy, stated once.** Name the pre-approved safe actions
   (read files, edit in-scope code, run tests/gates) and the few things that
   need escalation (destructive ops, scope expansion, external writes).
-  Anti-pattern called out by the guide: scattering "ask first" / "do not
-  mutate" reminders causes needless pauses on safe, expected actions.
+  Anti-pattern: scattering "ask first" / "do not mutate" reminders causes
+  needless pauses on safe, expected actions.
 - **Buy depth with effort, not prompt scaffolding.** Do not write "think
   harder", "try several candidates", or self-reflection rituals — raising
   `reasoning_effort` (tiers: none/low/medium/high/xhigh/max) or pro mode
-  does that internally. Pick the tier via the role/decision table; when
-  migrating a working prompt, the guide suggests trying one effort level
-  lower and comparing — which is this skill's "verify cheap, then escalate".
+  does that internally. Pick the tier via the role/decision table; when a
+  prompt already works, try one effort level lower and compare — "verify
+  cheap, then escalate".
 - **Shape the return explicitly.** Say what to keep (conclusion first,
   evidence, material caveats, next action) and what to trim (repetition,
   intros, generic reassurance). This is how "return conclusions, not raw
@@ -169,13 +168,3 @@ message.
   overrides (V1).
 - `[profiles.*]` in config.toml do not re-apply to children; children inherit
   the parent's live-turn model unless a role pins one.
-
-## After upgrades
-
-The spawn_agent schema has changed across releases: per-call overrides were
-absent on stable ≤ `rust-v0.144.5` and arrived later via
-`features.multi_agent_v2.expose_spawn_agent_model_overrides` (default-on
-where present). After each Codex upgrade, re-check the live spawn_agent
-schema before assuming either control exists, and keep verifying the
-recorded child model in Junrei rather than trusting the schema, the role
-name, or the override you passed.

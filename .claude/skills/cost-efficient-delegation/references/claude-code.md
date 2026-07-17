@@ -11,7 +11,7 @@ Claude Code routes the model **per delegated call**: the `Agent` tool takes a
 - Precedence for a subagent's model:
   `CLAUDE_CODE_SUBAGENT_MODEL` > Agent-tool `model` > agent frontmatter
   `model` > inherit session model.
-- **SendMessage loses the model override** (observed 2026-07): continuing a
+- **SendMessage loses the model override**: continuing a
   spawned agent via `SendMessage` re-runs it on the session model, not the
   `model` passed at spawn. Prefer re-spawning with `model` set over long
   continuation chains; verify the recorded model in Junrei when a
@@ -39,7 +39,7 @@ delegation habits work in both harnesses.
 
 ## Measured example
 
-Claude Code session `621c4c87` (2026-07-13, shipped PR #78): chore delegation
+Claude Code session `621c4c87` (shipped PR #78): chore delegation
 was exemplary — Haiku Explore, Sonnet preview-verifier, and Sonnet pr-shepherd
 moved 39% of tokens for 4.9% of cost — yet the session still cost $23.5
 because implementation stayed in the Fable main loop (95% of spend; half of

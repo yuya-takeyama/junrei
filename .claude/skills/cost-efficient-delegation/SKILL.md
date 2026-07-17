@@ -54,10 +54,9 @@ request about delegation or cost), the orchestrator commits to:
 
 ## Pricing
 
-Per-MTok rates below are cached guidance. Verify the current source when exact
-cost matters. Rates come from Junrei's pricing snapshot at
-`packages/core/src/shared/pricing/prices.json`; Claude rates were cross-checked
-against measured session costs on 2026-07-13.
+Per-MTok rates below are cached guidance — when exact cost matters, verify
+against Junrei's pricing snapshot at
+`packages/core/src/shared/pricing/prices.json`.
 
 ### Claude family
 
