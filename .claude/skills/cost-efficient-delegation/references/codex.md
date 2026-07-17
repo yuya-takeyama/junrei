@@ -1,17 +1,27 @@
 # Codex delegation controls
 
-Facts below were source-verified against `openai/codex` at stable
-`rust-v0.144.5` and the official subagents docs on 2026-07-17. Re-verify after
-Codex upgrades (see "After upgrades" at the bottom).
+`collaboration.spawn_agent` exposes two routing controls: predefined roles
+(`agent_type`) and per-call `model` / `reasoning_effort` overrides. The live
+spawn_agent schema is the source of truth for what is available — when a
+control is missing there, use the fallback section below.
 
-## The routing model: predefined roles, not per-call params
+## The routing model: roles for standing work, overrides for one-offs
 
-On stable Codex, `spawn_agent` does **not** accept `model` or
-`reasoning_effort` — the flag that exposes them
-(`features.multi_agent_v2.expose_spawn_agent_model_overrides`) first shipped
-in `0.145.0-alpha.7` and is not in any stable release. Model routing therefore
-happens through **predefined agent roles**: TOML files that pin `model` and
-`model_reasoning_effort`, selected at spawn time via `agent_type`.
+- **Routine, recurring work → spawn a role.** A role TOML applies
+  `developer_instructions`, `sandbox_mode`, `model`, and
+  `model_reasoning_effort` in one place, so the spawn prompt only has to
+  carry the per-task specifics. The decision table in SKILL.md maps task
+  types to this repo's roles.
+- **One-off special routing → per-call override.** When no role fits, pass
+  `model` / `reasoning_effort` directly on `spawn_agent`. An override routes
+  the model only — no role instructions or sandbox come with it, so the
+  spawn message must carry the full contract (scope, verification, output
+  format, "do not spawn other agents").
+- Do not stack both for the same purpose: prefer the role; add an override
+  on top of `agent_type` only to deviate from the role's pinned tier for one
+  call, and state the reason in the spawn message.
+
+Role mechanics:
 
 - Project roles: `.codex/agents/*.toml` (this repo defines eight — table
   below). Personal roles: `~/.codex/agents/*.toml`.
@@ -21,31 +31,80 @@ happens through **predefined agent roles**: TOML files that pin `model` and
   overlay for that role.
 - A custom role with the same name **shadows** a built-in role. Built-ins:
   `default`, `explorer`, `worker`.
-- `agent_type` appears in the spawn_agent schema **automatically once at
-  least one custom role exists** — no feature flag needed.
 
-## Spawning a role — two hard rules
+## Spawning — two hard rules
 
-1. **Always pass `fork_turns: "none"` or a small number with `agent_type`.**
-   Omitted `fork_turns` defaults to `"all"` (full-history fork), and a
-   full-history fork **rejects** `agent_type` (and any model override) with an
-   error. `"none"` + a self-contained prompt is the default choice; a numeric
+1. **Always pass `fork_turns: "none"` or a small number.** Omitted
+   `fork_turns` defaults to `"all"` (full-history fork), and a full-history
+   fork **rejects** `agent_type` and the model overrides with an error.
+   `"none"` + a self-contained prompt is the default choice; a numeric
    last-N-turns value only when recent context is genuinely required.
-2. **Role selection needs the V2 spawn surface.** `gpt-5.6-sol` and
-   `gpt-5.6-terra` force multi-agent V2 on; **`gpt-5.6-luna` forces V1**, so a
-   Luna parent session cannot select roles at all. Other models use V1 unless
-   `features.multi_agent_v2.enabled = true` is set.
+2. **Routing needs the V2 spawn surface.** `gpt-5.6-sol` and
+   `gpt-5.6-terra` force multi-agent V2 on; **`gpt-5.6-luna` forces V1**, so
+   a Luna parent session can select neither roles nor overrides. Other
+   models use V1 unless `features.multi_agent_v2.enabled = true` is set.
 
-Call shape:
+Call shapes:
 
 ```
+# Standing chore → role
 spawn_agent {
   task_name: "verify sidebar fix",
   agent_type: "preview-verifier",
   fork_turns: "none",
   message: "<self-contained: objective, files, criteria, output contract>"
 }
+
+# One-off routing → per-call override
+spawn_agent {
+  task_name: "classify flaky-test log",
+  model: "gpt-5.6-luna",
+  reasoning_effort: "low",
+  fork_turns: "none",
+  message: "<self-contained: full contract — no role instructions apply>"
+}
 ```
+
+Whichever control you used, verify the **recorded** model of each child in
+Junrei afterwards (session detail → Subagent tree, or `get_subagent_tree`) —
+the observed model, not the role name or the override you passed, is the
+source of truth.
+
+## Writing the spawn message — GPT-5.6 prompting essentials
+
+Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
+"latest model" guide):
+
+- **Outcome, not steps.** GPT-5.6 infers the intended level of work from
+  context — give goal, domain context, hard constraints, success criteria,
+  and output format; do not script every step. Say explicitly what the
+  worker should do when it hits ambiguity (decide and note it, or stop and
+  report).
+- **Lean beats long, state each instruction once.** In a sample of OpenAI
+  internal coding-agent runs, leaner prompts scored ~10–15% better at
+  33–67% lower cost (directional). For roles this means: the standing
+  contract lives in
+  `developer_instructions`; the spawn message carries only per-task
+  specifics — never repeat the role's rules in the message.
+- **One autonomy policy, stated once.** Name the pre-approved safe actions
+  (read files, edit in-scope code, run tests/gates) and the few things that
+  need escalation (destructive ops, scope expansion, external writes).
+  Anti-pattern: scattering "ask first" / "do not mutate" reminders causes
+  needless pauses on safe, expected actions.
+- **Buy depth with effort, not prompt scaffolding.** Do not write "think
+  harder", "try several candidates", or self-reflection rituals — raising
+  `reasoning_effort` (tiers: none/low/medium/high/xhigh/max) does that
+  internally. Pick the tier via the role/decision table.
+- **Shape the return explicitly.** Say what to keep (conclusion first,
+  evidence, material caveats, next action) and what to trim (repetition,
+  intros, generic reassurance). This is how "return conclusions, not raw
+  context" is enforced on the worker side.
+- **Tool-heavy bounded stages: spell out the routing.** Parallel or
+  dependent calls alone do not justify GPT-5.6's programmatic tool calling
+  — reserve it for bounded stages that filter/join/aggregate results, and
+  state which stage, which tools, the output schema, and stop/retry limits;
+  generic "use tools efficiently" lines do nothing. Keep direct calls
+  wherever each result changes the next decision.
 
 ## This repo's roles
 
@@ -64,11 +123,11 @@ Escalate by re-spawning the failed bounded subtask as `expert` — do not move
 the whole workflow to Sol, and do not retry the same prompt on the same role
 expecting a different outcome.
 
-## Fallback when roles are not selectable
+## Fallback when neither roles nor overrides are selectable
 
-On a V1 surface (Luna parent, or `agent_type` absent for any reason), the
-child inherits the parent's live-turn model and no cheaper tier can be
-claimed:
+On a V1 surface (Luna parent, or `agent_type` / the override params absent
+for any reason), the child inherits the parent's live-turn model and no
+cheaper tier can be claimed:
 
 1. **Do not spawn merely to obtain a cheaper tier** — spawn only for real
    parallelism or context isolation.
@@ -105,18 +164,7 @@ message.
 
 - Start routine worker sessions with `codex --model gpt-5.6-terra` or
   `codex --model gpt-5.6-luna`; reserve `gpt-5.6-sol` for orchestration and
-  the hardest tasks. Remember: a Luna parent cannot spawn roles (V1).
+  the hardest tasks. Remember: a Luna parent can select neither roles nor
+  overrides (V1).
 - `[profiles.*]` in config.toml do not re-apply to children; children inherit
   the parent's live-turn model unless a role pins one.
-
-## After upgrades
-
-Once `0.145.0`+ reaches stable, `expose_spawn_agent_model_overrides`
-(default-on when present) adds per-call `model` / `reasoning_effort` to
-spawn_agent. Roles remain the durable mechanism for standing chores
-(instructions + sandbox + model in one place); per-call overrides become the
-escape hatch for one-off routing. The `fork_turns` restriction applies to
-per-call overrides too. Re-check the spawn_agent schema after each Codex
-upgrade, and keep verifying the recorded child model in Junrei (session
-detail → Subagent tree) — the observed model, not the role name, is the
-source of truth.
