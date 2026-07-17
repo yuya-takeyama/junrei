@@ -150,7 +150,7 @@ it searches from 7868/5874 upward for free API/Web ports and prints the resolved
 Web, API, and MCP URLs before starting the servers. The Vite proxy always uses
 the same resolved API port.
 
-### Session log parsing notes (observed CC 2.1.138–2.1.202)
+### Session log parsing notes (observed CC 2.1.138–2.1.209)
 
 - Record types: `user`, `assistant`, `system` (subtypes `compact_boundary`,
   `api_error`, `stop_hook_summary`, `local_command`), `attachment`, plus metadata
@@ -180,6 +180,16 @@ the same resolved API port.
   Junrei reads that store as a title fallback (`loadClaudeDesktopTitles`,
   override dir with `JUNREI_CLAUDE_DESKTOP_SESSIONS_DIR`); a transcript's own
   title records win when both exist.
+- Context injections are NOT persisted by current Claude Code (verified on
+  CC 2.1.202–2.1.209 transcripts, 2026-07): the `<system-reminder>` blocks
+  the harness prepends to a user turn — including the
+  `Contents of <abs-path> (<label>):` headers carrying CLAUDE.md and the
+  auto-memory MEMORY.md — never reach the transcript JSONL; the first user
+  message records only the command/prompt content. Injected-file detection
+  (`CONTENTS_OF_HEADER` → `fileAccess.injectedCount`/`injectedChars`, #40)
+  therefore fires only on older-format transcripts and is kept for
+  legacy-log compatibility; on current logs CLAUDE.md legitimately never
+  appears in the Files & skills lens (data absence, not a Junrei bug).
 
 ## MCP interface (v1)
 

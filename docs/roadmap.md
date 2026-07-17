@@ -115,6 +115,8 @@ extract — so the missing signals shipped as one same-day PR series instead.
 - ✅ Injected files in `fileAccess` — "Contents of `<path>`" system-reminder
   blocks (CLAUDE.md/MEMORY.md) + SKILL.md injections tracked as
   `injectedCount`/`injectedChars`; file tree shows "· inj N" markers (#40)
+  — CLAUDE.md/MEMORY.md detection is legacy-format-only as of CC ~2.1.2xx;
+  see "CLAUDE.md injection detection is legacy-only (2026-07-17)" below
 - ✅ Multi-model subagents surfaced in Orchestration (activeModels badges +
   per-model breakdown in detail panel) — makes SendMessage model-override
   cost leaks visible at tree level (#41)
@@ -691,6 +693,39 @@ emulator, added to `aqua.yaml` via a local registry —
 `aqua/kumo-registry.yaml` + `aqua-policy.yaml`, since it isn't in the standard
 aqua registry), uploads the existing core fixtures, and exercises the store
 end to end; it skips gracefully when `kumo` isn't on `PATH`.
+
+## CLAUDE.md injection detection is legacy-only (2026-07-17)
+
+Investigated why CLAUDE.md stopped appearing in the Files & skills lens. Not
+a Junrei bug — the data no longer exists: current Claude Code (verified on
+CC 2.1.202–2.1.209 transcripts) does not persist the `<system-reminder>`
+context injections — including the "Contents of `<abs-path>` (`<label>`):"
+headers carrying CLAUDE.md and the auto-memory MEMORY.md — into the
+transcript JSONL. The first user message records only the command/prompt
+content blocks. Verified across all local `~/.claude/projects/*/*.jsonl`
+transcripts written since 2026-07-01: zero genuine headers and zero
+`<system-reminder>` strings (the only hits were investigation sessions
+quoting the regex/fixtures themselves). The `CONTENTS_OF_HEADER` matcher and
+the `injectedCount`/`injectedChars` tally (#40) still work on older-format
+transcripts and stay in place for legacy-log compatibility. SKILL.md
+injection tracking is unaffected (it derives from `isMeta` injection
+records, which are still written).
+
+Options considered for restoring CLAUDE.md/MEMORY.md visibility on current
+logs:
+
+- (a) Disk-based inference: at analysis time, read the conventional paths
+  (`<cwd>/CLAUDE.md`, `~/.claude/CLAUDE.md`, the project auto-memory
+  `MEMORY.md`) and show them as "presumably injected" rows with char counts.
+  Problem: today's disk state can differ from what the session actually saw
+  (files edited since, sessions run under other configurations), so every
+  such row would need an explicit "estimated from current disk state, not
+  from the log" caveat in both UI and MCP output — and it breaks the
+  quantitative-data principle that metrics are reproducible from session
+  data alone.
+- (b) Document the limitation and do nothing else (chosen for now): the
+  lens stays strictly log-derived; injected CLAUDE.md/MEMORY.md rows simply
+  don't exist for current-format sessions.
 
 ## Later (post-v1)
 
