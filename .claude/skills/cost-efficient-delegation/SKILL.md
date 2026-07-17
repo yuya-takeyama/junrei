@@ -1,6 +1,6 @@
 ---
 name: cost-efficient-delegation
-description: Cost-efficient model delegation playbook for Claude Code and Codex. Use BEFORE spawning agents or workflows, when starting research/exploration/multi-step implementation, or when discussing cost or model selection. Routes Claude Fable/Opus/Sonnet/Haiku and Codex GPT-5.6 Sol/Terra/Luna without inventing unsupported tool parameters.
+description: Cost-efficient model delegation playbook for Claude Code and Codex. Use BEFORE spawning agents or workflows, when starting research/exploration/multi-step implementation, or when discussing cost or model selection. Routes Claude Fable/Opus/Sonnet/Haiku per call and Codex GPT-5.6 Sol/Terra/Luna via predefined .codex/agents roles.
 ---
 
 # Cost-Efficient Model Delegation
@@ -9,19 +9,22 @@ The strongest session model is the **orchestrator**: it plans, decomposes,
 judges, and verifies. Delegate execution to the cheapest model that can do the
 job well, but only through controls the current harness actually exposes.
 
-## Detect the harness before delegating
+## Route by harness
 
-- **Claude Code** uses `Agent(...)` / `Workflow agent(...)`. Pass an explicit
-  `model` and `effort` on every delegated call unless the task genuinely needs
-  the orchestrator tier.
-- **Codex** uses `collaboration.spawn_agent`. Read the tool schema available in
-  the current session before launching. If it exposes `model` and `effort`, set
-  them from the table below. If it does not, do not pass unsupported arguments
-  or claim that a cheaper model was selected: routing is not caller-controlled
-  on that surface.
-- A model selector on the parent session (`codex --model ...`, a Codex app
-  model picker, or project config) does not prove that a particular child used
-  that model. Verify the recorded model in Junrei after delegation.
+The two harnesses route models in opposite ways — read the matching reference
+before the first delegation of a session:
+
+- **Claude Code** (`Agent` tool / Workflow `agent(...)`): routing is
+  **per call** — pass an explicit `model` (+ `effort`) on every delegated
+  call. Mechanics, precedence, and gotchas: `references/claude-code.md`.
+- **Codex** (`collaboration.spawn_agent`): the spawn call does **not** take a
+  model — routing happens through **predefined roles** in
+  `.codex/agents/*.toml`, each pinning `model` and reasoning effort, selected
+  at spawn time. This repo's roles, spawn mechanics, and the no-roles
+  fallback: `references/codex.md`.
+- A model selector on the parent session (`codex --model ...`, an app model
+  picker, project config) does not prove what a child ran. Verify the
+  recorded model in Junrei after delegation (see Measure it).
 
 ## Pricing
 
@@ -58,21 +61,22 @@ when their individual tasks are easy.
 
 ## Decision table
 
-Use the Codex column when model selection is exposed by the current surface.
-Otherwise follow the Codex fallback section below.
+The Claude column is the `model` to pass per call; the Codex column is the
+role (from `.codex/agents/`) to spawn — each role pins its own model and
+effort, shown for reference. The effort column is the Claude-side value.
 
-| Delegated task | Claude | Codex | effort |
+| Delegated task | Claude | Codex role | effort |
 |---|---|---|---|
-| File/codebase exploration, find where X is | `haiku` | `gpt-5.6-luna` | low |
-| Simple summarization, classification, status lookup | `haiku` | `gpt-5.6-luna` | low |
-| Mechanical edits, formatting, lint fixes | `sonnet` | `gpt-5.6-luna` | low |
-| Web research, docs synthesis, log analysis | `sonnet` | `gpt-5.6-terra` | medium |
-| Test scaffolding and routine test repair | `sonnet` | `gpt-5.6-terra` | medium |
-| Feature implementation with a clear spec | `sonnet` | `gpt-5.6-terra` | high |
-| UI/preview verification | `sonnet` | `gpt-5.6-terra` | medium |
-| Commit/push/PR/CI-watch chores | `sonnet` | `gpt-5.6-luna` | low |
-| Hard implementation or tricky debugging | `opus` | `gpt-5.6-sol` | high/xhigh |
-| Adversarial review from fresh context | `opus` | `gpt-5.6-sol` | high |
+| File/codebase exploration, find where X is | `haiku` | `scout` (luna) | low |
+| Simple summarization, classification, status lookup | `haiku` | `scout` (luna) | low |
+| Mechanical edits, formatting, lint fixes | `sonnet` | `mechanic` (luna) | low |
+| Web research, docs synthesis, log analysis | `sonnet` | `researcher` (terra) | medium |
+| Test scaffolding and routine test repair | `sonnet` | `implementer` (terra) | medium |
+| Feature implementation with a clear spec | `sonnet` | `implementer` (terra) | high |
+| UI/preview verification | `sonnet` (preview-verifier) | `preview-verifier` (terra) | medium |
+| Commit/push/PR/CI-watch chores | `sonnet` (pr-shepherd) | `pr-shepherd` (luna) | low |
+| Hard implementation or tricky debugging | `opus` | `expert` (sol) | high/xhigh |
+| Adversarial review from fresh context | `opus` | `reviewer` (sol) | high |
 | Architecture or ambiguous planning | keep on orchestrator | keep on orchestrator | xhigh |
 
 Rules of thumb:
@@ -101,87 +105,17 @@ Rules of thumb:
   actually edit. Reading the same files in both threads pays twice and
   permanently fattens the main context.
 
-## Claude Code controls
-
-Pass the model through the `Agent` tool's `model` parameter or
-`agent(prompt, {model, effort})` in Workflow scripts. For standing roles, keep
-the model in agent frontmatter:
-
-- UI verification: `sonnet` via `.claude/agents/preview-verifier.md`.
-- Commit, rebase, push, PR, and CI watch: `sonnet` via
-  `.claude/agents/pr-shepherd.md`.
-
-Never omit `model` unless the delegated task needs orchestrator-tier reasoning.
-Omitting it inherits the expensive session model.
-
-Precedence for a Claude Code subagent model:
-`CLAUDE_CODE_SUBAGENT_MODEL` > Agent-tool `model` > agent frontmatter `model` >
-inherit session model.
-
-## Codex controls and fallback
-
-When `collaboration.spawn_agent` exposes `model` / `effort`, pass the GPT-5.6
-choice from the decision table explicitly. When it does not:
-
-1. **Do not spawn merely to obtain a cheaper tier.** The call cannot guarantee
-   that outcome. Spawn only for real parallelism or context isolation.
-2. **Minimize inherited context with `fork_turns`.** Use `"none"` for a fully
-   self-contained prompt, a small numeric value for recent context, and
-   `"all"` only when the complete conversation is required.
-3. **Keep the task bounded.** One objective, relevant paths, constraints,
-   verification, and a text-only result contract. Ask for summaries instead
-   of raw tool output.
-4. **Prefer a cheaper parent for routine standalone work.** When the user or
-   current workflow explicitly authorizes a separate task/session, select
-   `gpt-5.6-luna` or `gpt-5.6-terra` at task creation. Do not create a
-   user-owned Codex task solely as an implementation detail without that
-   authorization.
-5. **Escalate by restarting the bounded task on Sol**, not by moving the whole
-   workflow to Sol, when Luna/Terra fails for a reasoning-related cause.
-
-This fallback still saves context and orchestration overhead, but it is not a
-claim of model-tier savings. Report the actual recorded child model when cost
-is material.
-
-## Session-level setup for humans
-
-### Claude Code
-
-- `CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude` pins all subagents. It overrides
-  per-call and frontmatter choices, so do not combine it with per-call tuning.
-- Use `--append-system-prompt` for a session-wide delegation policy.
-- An advisor or `opusplan` setup can keep planning strong while execution uses
-  a cheaper tier.
-
-### Codex
-
-- Start a routine worker session with `codex --model gpt-5.6-terra` or
-  `codex --model gpt-5.6-luna`; reserve `gpt-5.6-sol` for orchestration and the
-  hardest tasks.
-- Set reasoning effort only where the current Codex surface exposes it. Do not
-  invent an `effort` field on `spawn_agent` when the schema lacks one.
-- Re-check the collaboration tool schema after Codex upgrades; per-agent model
-  routing may become available independently of the parent model picker.
-
 ## Measure it
 
 This repo is the measuring tool. After significant delegation, check:
 
 - Junrei UI -> session detail -> **Cost by model** and **Subagent tree**.
 - Junrei MCP -> `get_subagent_tree` / `get_session_summary`.
-- For Codex, compare the intended tier with the model recorded on each child;
-  lack of a selector means the observed model, not the prompt wording, is the
-  source of truth.
+- For Codex, compare the intended role's pinned model with the model recorded
+  on each child; the observed model, not the prompt wording or the role name,
+  is the source of truth.
 
 Use the measured model mix, cost, return size, and duplicated exploration to
 adjust future routing. A cheaper model with a precise prompt is the target;
-more agents are not automatically more efficient.
-
-Measured example (Claude Code session `621c4c87`, 2026-07-13, shipped PR #78):
-chore delegation was exemplary — Haiku Explore, Sonnet preview-verifier, and
-Sonnet pr-shepherd moved 39% of tokens for 4.9% of cost — yet the session
-still cost $23.5 because implementation stayed in the Fable main loop (95% of
-spend; half of that was cache writes on a ~220k context, and the main loop
-duplicated its own Explore agent's reads). The two rules above ("orchestrator
-stops touching files", "never explore in parallel with your own scout") come
-from that session.
+more agents are not automatically more efficient. A measured Claude Code
+example is in `references/claude-code.md`.
