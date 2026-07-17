@@ -601,6 +601,13 @@ const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
  * both bare and wrapped in a `<system-reminder>` block. Anchored at line start
  * with a trailing ":" after a parenthesized label so ordinary prose never
  * matches, and only absolute paths qualify.
+ *
+ * Legacy-format transcripts only: current Claude Code (observed on CC
+ * 2.1.202–2.1.209) no longer persists these injections to the transcript
+ * JSONL — the first user message records only the command/prompt content —
+ * so on current logs this matches nothing and CLAUDE.md/MEMORY.md never
+ * appear as injected files. Kept for older transcripts; see
+ * docs/design.md "Session log parsing notes".
  */
 const CONTENTS_OF_HEADER = /^Contents of (\/.+?) \([^)]*\):$/gm;
 
