@@ -19,7 +19,7 @@ control is missing there, use the fallback section below.
   format, "do not spawn other agents").
 - Do not stack both for the same purpose: prefer the role; add an override
   on top of `agent_type` only to deviate from the role's pinned tier for one
-  call, and say why in the task record.
+  call, and state the reason in the spawn message.
 
 Role mechanics:
 
@@ -80,9 +80,10 @@ Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
   and output format; do not script every step. Say explicitly what the
   worker should do when it hits ambiguity (decide and note it, or stop and
   report).
-- **Lean beats long, state each instruction once.** OpenAI's own
-  coding-agent evals scored ~10–15% better with leaner prompts at 33–67%
-  lower cost. For roles this means: the standing contract lives in
+- **Lean beats long, state each instruction once.** In a sample of OpenAI
+  internal coding-agent runs, leaner prompts scored ~10–15% better at
+  33–67% lower cost (directional). For roles this means: the standing
+  contract lives in
   `developer_instructions`; the spawn message carries only per-task
   specifics — never repeat the role's rules in the message.
 - **One autonomy policy, stated once.** Name the pre-approved safe actions
@@ -92,19 +93,18 @@ Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
   needless pauses on safe, expected actions.
 - **Buy depth with effort, not prompt scaffolding.** Do not write "think
   harder", "try several candidates", or self-reflection rituals — raising
-  `reasoning_effort` (tiers: none/low/medium/high/xhigh/max) or pro mode
-  does that internally. Pick the tier via the role/decision table; when a
-  prompt already works, try one effort level lower and compare — "verify
-  cheap, then escalate".
+  `reasoning_effort` (tiers: none/low/medium/high/xhigh/max) does that
+  internally. Pick the tier via the role/decision table.
 - **Shape the return explicitly.** Say what to keep (conclusion first,
   evidence, material caveats, next action) and what to trim (repetition,
   intros, generic reassurance). This is how "return conclusions, not raw
   context" is enforced on the worker side.
-- **Tool-heavy bounded stages: spell out the routing.** If the worker should
-  batch tool work (e.g. GPT-5.6's programmatic tool calling), state which
-  stage, which tools, the output schema, and stop/retry limits — generic
-  "use tools efficiently" lines do nothing. Keep direct calls wherever each
-  result changes the next decision.
+- **Tool-heavy bounded stages: spell out the routing.** Parallel or
+  dependent calls alone do not justify GPT-5.6's programmatic tool calling
+  — reserve it for bounded stages that filter/join/aggregate results, and
+  state which stage, which tools, the output schema, and stop/retry limits;
+  generic "use tools efficiently" lines do nothing. Keep direct calls
+  wherever each result changes the next decision.
 
 ## This repo's roles
 

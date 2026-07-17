@@ -37,6 +37,13 @@ delegation habits work in both harnesses.
 - An advisor or `opusplan` setup can keep planning strong while execution uses
   a cheaper tier.
 
+## Cache economics
+
+All Claude tiers: cache read = 0.1x input; cache write = 1.25x input at
+5-minute TTL, 2x input at 1-hour TTL. The Claude Code main loop uses 1-hour
+writes ($20/MTok on Fable), which is what makes a fat main context a
+recurring per-turn cost.
+
 ## Measured example
 
 Claude Code session `621c4c87` (shipped PR #78): chore delegation
