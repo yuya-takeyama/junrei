@@ -2,3 +2,7 @@
 # This repo has no AGENTS.md; let Codex fall back to CLAUDE.md as the
 # per-directory project instructions file so both tools share one source.
 project_doc_fallback_filenames = ["CLAUDE.md"]
+
+# Subagent model routing happens via the predefined roles in .codex/agents/
+# (each pins model + reasoning effort; agent_type is auto-exposed once roles
+# exist). See .claude/skills/cost-efficient-delegation/references/codex.md.
