@@ -3,10 +3,9 @@
 ## Model cost policy
 
 The main session often runs on an expensive orchestrator model. **Before
-spawning any subagent or workflow, read
-`.claude/skills/cost-efficient-delegation/SKILL.md`** (on Claude Code, load
-the `cost-efficient-delegation` skill) and follow its routing and skill
-contract. Harness-specific mechanics live in the skill's `references/`.
+spawning any subagent or workflow, load the `cost-efficient-delegation`
+skill** and follow its routing and skill contract. Harness-specific
+mechanics live in the skill's `references/`.
 
 ## CI fallback policy
 
