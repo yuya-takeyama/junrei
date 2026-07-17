@@ -4,12 +4,14 @@
 
 The main session often runs on an expensive orchestrator model (Claude Fable 5
 or Codex GPT-5.6 Sol). **Before spawning any subagent or workflow, load the
-`cost-efficient-delegation` skill** and follow its harness-specific routing.
-For Claude Code, pass an explicit `model` (+ `effort`) per delegated call. For
-Codex, `spawn_agent` takes no model on the stable surface — spawn one of the
-predefined roles in `.codex/agents/` (each pins model + reasoning effort) via
-`agent_type`, always with `fork_turns: "none"` or a small number (the default
-`"all"` rejects `agent_type`). Use a self-contained prompt, then verify the
+`cost-efficient-delegation` skill** and follow its harness-specific routing
+and skill contract (main loop plans/integrates/reviews; execution is
+delegated). For Claude Code, pass an explicit `model` (+ `effort`) per
+delegated call. For Codex, spawn a predefined role from `.codex/agents/`
+(instructions + sandbox + model + effort in one place) via `agent_type` for
+standing work, or pass the per-call `model` / `reasoning_effort` override for
+one-off routing — always with `fork_turns: "none"` or a small number (the
+default `"all"` rejects both). Use a self-contained prompt, then verify the
 recorded model in Junrei. Keep planning and judgment in the main loop.
 
 On Claude Code, delegate routine preview/UI verification to the
@@ -19,9 +21,9 @@ verdict instead. Likewise, delegate commit → rebase → push → PR → CI-wat
 chores to the `pr-shepherd` agent (`.claude/agents/pr-shepherd.md`): prepare
 the tree and the messages in the main loop, then hand off execution. On Codex,
 the same chores route to the `preview-verifier` and `pr-shepherd` roles in
-`.codex/agents/`; roles are unavailable only from a Luna parent (V1 surface) —
-in that case spawn only for parallelism or context isolation and do not claim
-a cheaper tier.
+`.codex/agents/`; roles and per-call overrides are unavailable only from a
+Luna parent (V1 surface) — in that case spawn only for parallelism or context
+isolation and do not claim a cheaper tier.
 
 After significant multi-agent work, check the real spend with Junrei itself
 (session detail → Cost by model / Subagent tree, or the `get_subagent_tree` MCP

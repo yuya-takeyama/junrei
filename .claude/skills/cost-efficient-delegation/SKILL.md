@@ -1,6 +1,6 @@
 ---
 name: cost-efficient-delegation
-description: Cost-efficient model delegation playbook for Claude Code and Codex. Use BEFORE spawning agents or workflows, when starting research/exploration/multi-step implementation, or when discussing cost or model selection. Routes Claude Fable/Opus/Sonnet/Haiku per call and Codex GPT-5.6 Sol/Terra/Luna via predefined .codex/agents roles.
+description: Cost-efficient model delegation playbook for Claude Code and Codex. Use BEFORE spawning agents or workflows, when starting research/exploration/multi-step implementation, or when discussing cost or model selection. Routes Claude Fable/Opus/Sonnet/Haiku per call, and Codex GPT-5.6 Sol/Terra/Luna via predefined .codex/agents roles plus per-call overrides. Invoking it commits the main loop to plan/integrate/review only.
 ---
 
 # Cost-Efficient Model Delegation
@@ -17,14 +17,40 @@ before the first delegation of a session:
 - **Claude Code** (`Agent` tool / Workflow `agent(...)`): routing is
   **per call** — pass an explicit `model` (+ `effort`) on every delegated
   call. Mechanics, precedence, and gotchas: `references/claude-code.md`.
-- **Codex** (`collaboration.spawn_agent`): the spawn call does **not** take a
-  model — routing happens through **predefined roles** in
-  `.codex/agents/*.toml`, each pinning `model` and reasoning effort, selected
-  at spawn time. This repo's roles, spawn mechanics, and the no-roles
-  fallback: `references/codex.md`.
+- **Codex** (`collaboration.spawn_agent`): two controls. For standing chores,
+  spawn a **predefined role** from `.codex/agents/*.toml` via `agent_type` —
+  a role applies instructions, sandbox, model, and reasoning effort in one
+  place. For one-off routing that no role covers, pass the per-call `model` /
+  `reasoning_effort` **overrides** on `spawn_agent`. Either way, always pass
+  `fork_turns: "none"` (or a small number) with a self-contained prompt — the
+  default `"all"` rejects both `agent_type` and overrides. This repo's roles,
+  spawn mechanics, and fallbacks: `references/codex.md`.
 - A model selector on the parent session (`codex --model ...`, an app model
   picker, project config) does not prove what a child ran. Verify the
   recorded model in Junrei after delegation (see Measure it).
+
+## Skill contract
+
+Invoking this skill **is** the delegation decision, not a hint. When the
+skill is explicitly loaded (slash command, CLAUDE.md policy, or a direct
+request about delegation or cost), the orchestrator commits to:
+
+- **Main loop = planning, integration, review.** Once the spec is clear, the
+  orchestrator does not edit files, run gates, or drive browsers itself.
+- **One implementer per work item.** Clear implementation goes to a single
+  implementation-tier worker with a self-contained prompt; split across
+  workers only when the pieces are truly independent.
+- **UI verification goes to `preview-verifier`; commit/push/PR/CI chores go
+  to `pr-shepherd`.** Both harnesses define these as standing roles.
+- **Do not delegate trivia.** A task the orchestrator finishes in about five
+  tool calls (a one-line fix, a quick status check, reading one file) costs
+  less inline than the spawn overhead plus handoff.
+- **At most 2 concurrent workers by default**; go wider only with explicit
+  user intent. Nested spawning is forbidden — state that in every spawn
+  prompt.
+- **Workers return conclusions, not context**: verdicts, summaries, and
+  file:line pointers — never raw logs, DOM dumps, screenshots, or full
+  search output.
 
 ## Pricing
 
