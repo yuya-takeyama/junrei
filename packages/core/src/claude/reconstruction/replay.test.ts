@@ -50,6 +50,15 @@ describe("parseReconstructionRecords", () => {
     );
     expect(records.map((r) => r.line)).toEqual([1, 3]);
   });
+
+  it("captures the assistant record's own message.model", async () => {
+    const records = await parseReconstructionRecords(
+      linesOf([
+        `{"type":"assistant","requestId":"req_1","message":{"id":"m1","model":"claude-fable-5","content":[{"type":"text","text":"ok"}]}}`,
+      ]),
+    );
+    expect(records[0]).toMatchObject({ type: "assistant", model: "claude-fable-5" });
+  });
 });
 
 describe("buildTurns", () => {
@@ -121,6 +130,27 @@ describe("buildTurns", () => {
 
     // Thinking is gone; only the text block remains on the assistant turn.
     expect(sources(turns[1]?.blocks ?? [])).toEqual(["assistant-text"]);
+  });
+
+  it("makes a genuine block-array user prompt (text/image) into a user turn", () => {
+    // Regression for Defect 2: an array-form first prompt with NO tool_result
+    // blocks previously produced no turn at all (empty messages array).
+    const records: ReconstructionRecord[] = [
+      { type: "queue-operation", line: 1 },
+      {
+        type: "user",
+        line: 2,
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } },
+          { type: "text", text: "look" },
+        ],
+      },
+      { type: "assistant", line: 3, messageId: "mA", blocks: [{ type: "text", text: "ok" }] },
+    ];
+    const { turns } = buildTurns(records);
+    expect(turns[0]?.role).toBe("user");
+    expect(sources(turns[0]?.blocks ?? [])).toEqual(["user-block", "user-block"]);
+    expect(turns[1]?.role).toBe("assistant");
   });
 
   it("flags task-notification user turns", () => {

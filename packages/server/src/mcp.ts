@@ -5,6 +5,7 @@ import {
   loadReconstructionInput,
   localClaudeSessionStore,
   type ReconstructedMessageBlock,
+  type ReconstructedParams,
   type ReconstructedRequest,
   type ReconstructedSection,
   type ReconstructedSystemBlock,
@@ -486,6 +487,34 @@ function cappedSection(section: ReconstructedSection<unknown>, maxChars: number)
   };
 }
 
+/**
+ * `params` — per-key output shaping: each entry's `value` is capped with the
+ * SAME explicit `valueTruncated`/`valueFullCharCount` contract every other
+ * section uses, while its own `confidence`/`provenance`/`note` carry through
+ * uncapped. The section-level `confidence`/`provenance`/`note` (present only in
+ * the "no template params" case) pass through too.
+ */
+function cappedParams(params: ReconstructedParams, maxChars: number) {
+  const entries: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(params.entries)) {
+    const capped = entry.value !== undefined ? capInputField(entry.value, maxChars) : undefined;
+    entries[key] = {
+      ...(capped !== undefined && { value: capped.input }),
+      valueTruncated: capped?.truncated ?? false,
+      ...(capped?.fullCharCount !== undefined && { valueFullCharCount: capped.fullCharCount }),
+      confidence: entry.confidence,
+      provenance: entry.provenance,
+      ...(entry.note !== undefined && { note: entry.note }),
+    };
+  }
+  return {
+    entries,
+    ...(params.confidence !== undefined && { confidence: params.confidence }),
+    ...(params.provenance !== undefined && { provenance: params.provenance }),
+    ...(params.note !== undefined && { note: params.note }),
+  };
+}
+
 function cappedReconstructedRequest(request: ReconstructedRequest, maxChars: number) {
   return {
     ...(request.requestId !== undefined && { requestId: request.requestId }),
@@ -493,7 +522,7 @@ function cappedReconstructedRequest(request: ReconstructedRequest, maxChars: num
     targetLine: request.targetLine,
     system: request.system.map((block) => cappedSystemBlock(block, maxChars)),
     tools: cappedSection(request.tools, maxChars),
-    params: cappedSection(request.params, maxChars),
+    params: cappedParams(request.params, maxChars),
     messages: request.messages.map((message) => ({
       role: message.role,
       content: message.content.map((block) => cappedMessageBlock(block, maxChars)),
@@ -1103,7 +1132,16 @@ export function createMcpServer(): McpServer {
         "may have drifted since the session actually ran — check such a block's `driftDetected` " +
         "flag (in `provenance`, backed by per-file mtimes in `provenance.files`) before treating " +
         "it as what the session really saw; `unknown` — not recoverable from any available " +
-        "input (e.g. the per-launch billing-header system block, a missing template). Called " +
+        "input (e.g. the per-launch billing-header system block, a missing template). `params` is " +
+        "NOT one template-confidence blob but a PER-KEY map: `params.entries` keyed by wire param " +
+        "name (`model`, `max_tokens`, `thinking`, `context_management`, `stream`, ...), each key " +
+        "carrying its OWN confidence + provenance. In particular `model` comes from the target " +
+        "assistant record's own log line (confidence `exact`, provenance that log line) whenever " +
+        "the log records it, OVERRIDING the template's captured default — so a session that ran " +
+        "on a different model than the template capture reports its REAL model, never a stale " +
+        "default; every other params key stays `template`. A key with neither a template default " +
+        "nor a log value is `unknown`, declared. When no template supplied params, `entries` is " +
+        "empty or model-only and a section-level `confidence: unknown` declares the gap. Called " +
         "with neither `requestId` nor `line`, this returns the DISCOVERY listing instead of a " +
         "full reconstruction: every reconstructable request in the session as " +
         "`{requestId?, ordinal, targetLine}` — call again with one of those to fetch the actual " +

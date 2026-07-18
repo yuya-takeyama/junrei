@@ -58,6 +58,8 @@ export type {
   ReconstructableRequestRef,
   ReconstructedMessage,
   ReconstructedMessageBlock,
+  ReconstructedParamEntry,
+  ReconstructedParams,
   ReconstructedRequest,
   ReconstructedSection,
   ReconstructedSystemBlock,

@@ -79,12 +79,49 @@ export interface ReconstructedMessage {
   content: ReconstructedMessageBlock[];
 }
 
-/** A whole request section (`tools`/`params`) that is present-or-declared-absent. */
+/** A whole request section (today just `tools`) that is present-or-declared-absent. */
 export interface ReconstructedSection<T> {
   /** Present when a template supplied this section. */
   value?: T;
   confidence: ConfidenceClass;
   provenance: Provenance;
+  note?: string;
+}
+
+/**
+ * One reconstructed generation-param entry (`model`, `max_tokens`, ...) with
+ * its OWN confidence + provenance — so a value the LOG records deterministically
+ * can override the template's captured default for that single key while every
+ * other key stays `template`.
+ */
+export interface ReconstructedParamEntry {
+  /** The reconstructed value; ABSENT (undefined) for a declared-unknown entry. */
+  value?: unknown;
+  confidence: ConfidenceClass;
+  provenance: Provenance;
+  note?: string;
+}
+
+/**
+ * The reconstructed generation params as a PER-KEY confidence-labelled map,
+ * NOT a single template-confidence section. `entries` is keyed by wire param
+ * name (`model`, `max_tokens`, `thinking`, `context_management`, `stream`,
+ * ...); each key carries its own confidence + provenance. Today `model` is
+ * overlaid from the target assistant record's own `model` field (confidence
+ * `exact`, provenance the log line) and OVERRIDES the template's captured
+ * default — so a session that ran on a different model than the template
+ * capture reports its real model, not a stale default; every other key stays
+ * `template`. The section-level `confidence`/`provenance`/`note` describe the
+ * WHOLE section only in the "no template params" case (mirroring an unknown
+ * `ReconstructedSection`): non-model params are unrecoverable without a
+ * template even though a log-derived `model` may still be present. When a
+ * template supplied params, the section-level fields are omitted and every key
+ * is described by its own entry.
+ */
+export interface ReconstructedParams {
+  entries: Record<string, ReconstructedParamEntry>;
+  confidence?: ConfidenceClass;
+  provenance?: Provenance;
   note?: string;
 }
 
@@ -98,7 +135,7 @@ export interface ReconstructedRequest {
   targetLine: number;
   system: ReconstructedSystemBlock[];
   tools: ReconstructedSection<unknown[]>;
-  params: ReconstructedSection<Record<string, unknown>>;
+  params: ReconstructedParams;
   messages: ReconstructedMessage[];
   /** Union of normalization rule ids that shaped this reconstruction. */
   appliedRules: string[];
@@ -144,6 +181,14 @@ export interface ReconAssistantRecord {
   version?: string;
   requestId?: string;
   messageId?: string;
+  /**
+   * The record's own `message.model` — the model the request ACTUALLY ran on,
+   * as the log records it per turn. Overlaid over the template's captured
+   * default in the reconstructed `params.entries.model` (confidence `exact`),
+   * so a session that ran on a different model than the template capture is
+   * never misreported. Absent only when the log line carries no `model`.
+   */
+  model?: string;
   /** Raw `message.content` blocks, preserved (including thinking/caller). */
   blocks: ReconContentBlock[];
 }

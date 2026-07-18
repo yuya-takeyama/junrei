@@ -105,6 +105,11 @@ function normalizeRecord(
     if (requestId !== undefined) record.requestId = requestId;
     const messageId = asString(message.id);
     if (messageId !== undefined) record.messageId = messageId;
+    // The model the request ACTUALLY ran on, recorded per assistant turn — the
+    // recon parser reads the raw line directly, so `message.model` is available
+    // here without the drill-down raw-line recovery other paths need.
+    const model = asString(message.model);
+    if (model !== undefined) record.model = model;
     return record;
   }
 
@@ -146,6 +151,7 @@ export async function parseReconstructionRecords(
 
 export type ReplayBlock =
   | { source: "user-string"; text: string; line: number; isTaskNotification: boolean }
+  | { source: "user-block"; block: ReconContentBlock; line: number }
   | { source: "assistant-text"; text: string; line: number }
   | { source: "tool-use"; block: ReconContentBlock; line: number }
   | { source: "tool-result"; block: ReconContentBlock; line: number }
@@ -258,6 +264,29 @@ export function buildTurns(records: ReconstructionRecord[]): ReplayResult {
         });
         lastUserTurnIndex = turnIndex;
         openToolResultTurn = null;
+        continue;
+      }
+      // A user record's block-array content is EITHER a loop-continuation
+      // (top-level `tool_result` blocks, grouped below by owner assistant
+      // message) OR a genuine user prompt sent as blocks (text/image/...). A
+      // genuine prompt has no `tool_result` blocks — it must still become a
+      // user turn (the wire sends its blocks verbatim); the pre-fix code only
+      // ever handled the string and tool_result forms, so an array-form first
+      // prompt produced NO turn at all.
+      if (!content.some((block) => block.type === "tool_result")) {
+        if (content.length > 0) {
+          const turnIndex = turns.length;
+          turns.push({
+            role: "user",
+            blocks: content.map((block) => ({
+              source: "user-block" as const,
+              block,
+              line: rec.line,
+            })),
+          });
+          lastUserTurnIndex = turnIndex;
+          openToolResultTurn = null;
+        }
         continue;
       }
       for (const block of content) {
