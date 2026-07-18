@@ -1235,4 +1235,651 @@ describe("MCP tools", () => {
       expect(textOf(result)).toContain("Session not found");
     });
   });
+
+  describe("get_bash_stats", () => {
+    // Fixture session 11111111 (CLAUDE_SESSION_ID) has exactly 3 Bash calls in
+    // its MAIN transcript: two identical failing "pnpm test" calls (line 5,
+    // line 8 — the second is a same-command rerun after the first's error)
+    // and one run_in_background "sleep 10 && pnpm build" (line 23, completed
+    // at line 25). Its only subagent (aaaa111122223333f) has no Bash calls at
+    // all, so `includeSubagents: false` naturally reproduces the same totals
+    // for THIS fixture — see the isolated-fixture describe block below for a
+    // test where the two actually diverge.
+    it("returns joint main+subagent rankings, waste, and background summaries by default", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sessionId: string;
+        includeSubagents: boolean;
+        totals: {
+          calls: number;
+          errors: number;
+          inputChars: number;
+          resultChars: number;
+          estimatedTokens: number;
+        };
+        byCommand: {
+          items: Array<{ family: string; subcommand?: string; calls: number; sharePct: number }>;
+          totalCount: number;
+          truncated: boolean;
+        };
+        programFrequency: { items: Array<{ program: string; count: number }> };
+        heavyHitters: Array<{ resultChars: number; line: number; thread: string }>;
+        background: {
+          byStatus: { completed: number; failed: number; unresolved: number };
+          tasks: { items: Array<{ taskId: string; status: string; wallClockMs?: number }> };
+        };
+        waste: {
+          nearDuplicates: { items: unknown[] };
+          largeResults: { items: unknown[] };
+          rerunAfterError: {
+            items: Array<{
+              pattern: string;
+              count: number;
+              occurrences: Array<{ thread: string; errorLine: number; rerunLine: number }>;
+            }>;
+          };
+          bashAsRead: { items: unknown[] };
+        };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+
+      expect(body.includeSubagents).toBe(true);
+      expect(body.totals).toEqual({
+        calls: 3,
+        errors: 2,
+        inputChars: 40,
+        resultChars: 97,
+        estimatedTokens: 35,
+      });
+
+      expect(body.byCommand.items).toEqual([
+        expect.objectContaining({ family: "pnpm", subcommand: "test", calls: 2, sharePct: 51.5 }),
+        expect.objectContaining({ family: "sleep", calls: 1, sharePct: 48.5 }),
+      ]);
+      expect(body.byCommand.totalCount).toBe(2);
+      expect(body.byCommand.truncated).toBe(false);
+
+      // "sleep 10 && pnpm build" contributes a SECOND "pnpm" segment on top
+      // of the two whole "pnpm test" calls — programFrequency counts every
+      // pipeline/list segment, not just each call's primary command.
+      const pnpmFreq = body.programFrequency.items.find((p) => p.program === "pnpm");
+      expect(pnpmFreq?.count).toBe(3);
+
+      expect(body.heavyHitters[0]).toMatchObject({ resultChars: 47, line: 23, thread: "main" });
+      expect(body.heavyHitters[1]).toMatchObject({ resultChars: 25, line: 5 });
+      expect(body.heavyHitters[2]).toMatchObject({ resultChars: 25, line: 8 });
+
+      expect(body.background.byStatus).toEqual({ completed: 1, failed: 0, unresolved: 0 });
+      expect(body.background.tasks.items).toHaveLength(1);
+      expect(body.background.tasks.items[0]).toMatchObject({
+        taskId: "bgtask01",
+        status: "completed",
+        wallClockMs: 15000,
+      });
+
+      expect(body.waste.rerunAfterError.items).toEqual([
+        {
+          pattern: "pnpm test",
+          count: 1,
+          occurrences: [{ thread: "main", errorLine: 5, rerunLine: 8 }],
+        },
+      ]);
+      // "pnpm test" occurs only twice — below nearDuplicates' >=3 threshold.
+      expect(body.waste.nearDuplicates.items).toEqual([]);
+      expect(body.waste.largeResults.items).toEqual([]);
+      expect(body.waste.bashAsRead.items).toEqual([]);
+
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("caps byCommand to topCommands while totalCount/truncated stay accurate", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topCommands: 1 },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        byCommand: { items: unknown[]; totalCount: number; truncated: boolean };
+      };
+      expect(body.byCommand.items).toHaveLength(1);
+      expect(body.byCommand.totalCount).toBe(2);
+      expect(body.byCommand.truncated).toBe(true);
+    });
+
+    it("includeSubagents: false recomputes main-thread-only totals (same value here — this fixture's subagent has no Bash calls)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, includeSubagents: false },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        includeSubagents: boolean;
+        totals: { calls: number };
+      };
+      expect(body.includeSubagents).toBe(false);
+      expect(body.totals.calls).toBe(3);
+    });
+
+    it("rejects topCommands out of bounds (min 1, max 100)", async () => {
+      // Zod schema validation failures surface as a resolved CallToolResult
+      // with isError: true (the MCP client wraps the JSON-RPC InvalidParams
+      // error), not a rejected promise.
+      client = await connect();
+      const tooSmall = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topCommands: 0 },
+      });
+      expect(tooSmall.isError).toBe(true);
+      expect(textOf(tooSmall)).toContain("topCommands");
+
+      const tooLarge = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topCommands: 101 },
+      });
+      expect(tooLarge.isError).toBe(true);
+      expect(textOf(tooLarge)).toContain("topCommands");
+    });
+
+    it("rejects Codex sessions clearly", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+
+    it("404s clearly for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: "does-not-exist" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+
+    it("returns zeroed stats (not an error) for a session with no Bash calls", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: "22222222-2222-2222-2222-222222222222",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        totals: {
+          calls: number;
+          errors: number;
+          inputChars: number;
+          resultChars: number;
+          estimatedTokens: number;
+        };
+        byCommand: { items: unknown[] };
+        heavyHitters: unknown[];
+        background: { tasks: { items: unknown[] } };
+      };
+      expect(body.totals).toEqual({
+        calls: 0,
+        errors: 0,
+        inputChars: 0,
+        resultChars: 0,
+        estimatedTokens: 0,
+      });
+      expect(body.byCommand.items).toEqual([]);
+      expect(body.heavyHitters).toEqual([]);
+      expect(body.background.tasks.items).toEqual([]);
+    });
+  });
+
+  describe("get_tool_calls", () => {
+    it("lists Bash calls with family/subcommand and exact per-item metrics, sorted by line by default", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, toolName: "Bash" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        totalCount: number;
+        toolCalls: Array<{
+          toolUseId: string;
+          line: number;
+          toolName: string;
+          thread: string;
+          status: string;
+          resultChars: number;
+          durationMs?: number;
+          inputSummary: string;
+          family?: string;
+          subcommand?: string;
+        }>;
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.totalCount).toBe(3);
+      expect(body.toolCalls.map((c) => c.line)).toEqual([5, 8, 23]);
+
+      const bash1 = body.toolCalls.find((c) => c.toolUseId === "toolu_bash1");
+      expect(bash1).toMatchObject({
+        line: 5,
+        toolName: "Bash",
+        thread: "main",
+        status: "error",
+        resultChars: 25,
+        durationMs: 2000,
+        inputSummary: "pnpm test",
+        family: "pnpm",
+        subcommand: "test",
+      });
+
+      const bgBash = body.toolCalls.find((c) => c.toolUseId === "toolu_bgbash1");
+      expect(bgBash).toMatchObject({ family: "sleep", resultChars: 47 });
+      expect(bgBash?.subcommand).toBeUndefined();
+
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("sorts by resultChars descending when requested", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolName: "Bash",
+          sort: "resultChars",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        toolCalls: Array<{ toolUseId: string; resultChars: number }>;
+      };
+      expect(body.toolCalls.map((c) => c.resultChars)).toEqual([47, 25, 25]);
+      expect(body.toolCalls[0]?.toolUseId).toBe("toolu_bgbash1");
+      // Tie broken by line ascending: bash1 (line 5) before bash2 (line 8).
+      expect(body.toolCalls[1]?.toolUseId).toBe("toolu_bash1");
+      expect(body.toolCalls[2]?.toolUseId).toBe("toolu_bash2");
+    });
+
+    it("filters by status", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolName: "Bash",
+          status: "error",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        totalCount: number;
+        toolCalls: Array<{ status: string }>;
+      };
+      expect(body.totalCount).toBe(2);
+      expect(body.toolCalls.every((c) => c.status === "error")).toBe(true);
+    });
+
+    it("filters by exact toolName", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolName: "Read",
+          thread: "main",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        totalCount: number;
+        toolCalls: Array<{ toolName: string }>;
+      };
+      expect(body.totalCount).toBe(4);
+      expect(body.toolCalls.every((c) => c.toolName === "Read")).toBe(true);
+    });
+
+    it("paginates with limit/offset while totalCount reflects the full post-filter match count", async () => {
+      client = await connect();
+      const full = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, thread: "main" },
+      });
+      const fullBody = JSON.parse(textOf(full)) as {
+        totalCount: number;
+        toolCalls: Array<{ toolUseId: string }>;
+      };
+      // Every main-thread tool call in the fixture.
+      expect(fullBody.totalCount).toBe(11);
+      expect(fullBody.toolCalls).toHaveLength(11);
+
+      const page = await client.callTool({
+        name: "get_tool_calls",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          thread: "main",
+          limit: 3,
+          offset: 2,
+        },
+      });
+      const pageBody = JSON.parse(textOf(page)) as {
+        totalCount: number;
+        toolCalls: Array<{ toolUseId: string }>;
+      };
+      expect(pageBody.totalCount).toBe(11);
+      expect(pageBody.toolCalls).toHaveLength(3);
+      expect(pageBody.toolCalls.map((c) => c.toolUseId)).toEqual(
+        fullBody.toolCalls.slice(2, 5).map((c) => c.toolUseId),
+      );
+    });
+
+    it("rejects limit/offset out of bounds", async () => {
+      // See the analogous get_bash_stats bounds test: zod validation
+      // failures come back as isError: true, not a rejected promise.
+      client = await connect();
+      const limitTooSmall = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, limit: 0 },
+      });
+      expect(limitTooSmall.isError).toBe(true);
+
+      const limitTooLarge = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, limit: 201 },
+      });
+      expect(limitTooLarge.isError).toBe(true);
+
+      const negativeOffset = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, offset: -1 },
+      });
+      expect(negativeOffset.isError).toBe(true);
+    });
+
+    it("rejects Codex sessions clearly", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+
+    it("404s clearly for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: "does-not-exist" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+
+    it("returns an empty result (not an error) when no calls match toolName", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: {
+          source: "claude-code",
+          sessionId: "22222222-2222-2222-2222-222222222222",
+          toolName: "Bash",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { totalCount: number; toolCalls: unknown[] };
+      expect(body.totalCount).toBe(0);
+      expect(body.toolCalls).toEqual([]);
+    });
+  });
+
+  describe("get_bash_stats / get_tool_calls — isolated fixture with a subagent Bash call", () => {
+    // The shared CLAUDE_SESSION_ID fixture's only subagent carries no Bash
+    // calls (see the comment on get_bash_stats' first test above), so it
+    // can't exercise `includeSubagents: false` actually DIFFERING from the
+    // default, or `get_tool_calls`' subagent thread walking returning a Bash
+    // call. This block builds a small, self-contained session (main + one
+    // subagent, each with exactly one Bash call) in a temp dir and merges it
+    // into CLAUDE_CONFIG_DIR alongside the shared fixtures (comma-separated —
+    // see `resolveClaudeProjectsDirs`), so it never touches the fixtures the
+    // rest of this file — or other test files — depend on.
+    const BASH_FIXTURE_SESSION_ID = "99999999-9999-9999-9999-999999999999";
+    const BASH_FIXTURE_AGENT_ID = "subagent0000000001";
+    const BASH_FIXTURE_PROJECT_DIR = "-tmp-bash-fixture-proj";
+
+    let bashFixtureDir: string | undefined;
+    let previousConfigDirForFixture: string | undefined;
+
+    beforeAll(async () => {
+      previousConfigDirForFixture = process.env.CLAUDE_CONFIG_DIR;
+      bashFixtureDir = await mkdtemp(join(tmpdir(), "junrei-mcp-bashstats-fixture-"));
+      const projectDir = join(bashFixtureDir, "projects", BASH_FIXTURE_PROJECT_DIR);
+      const subagentsDir = join(projectDir, BASH_FIXTURE_SESSION_ID, "subagents");
+      await mkdir(projectDir, { recursive: true });
+      await mkdir(subagentsDir, { recursive: true });
+
+      const mainLines = [
+        {
+          type: "user",
+          uuid: "u1",
+          parentUuid: null,
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T00:00:00.000Z",
+          isSidechain: false,
+          cwd: "/tmp/bash-fixture",
+          version: "2.1.202",
+          message: { role: "user", content: "run a command" },
+        },
+        {
+          type: "assistant",
+          uuid: "a1",
+          parentUuid: "u1",
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T00:00:01.000Z",
+          isSidechain: false,
+          requestId: "req_1",
+          message: {
+            id: "msg_1",
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_main_bash1",
+                name: "Bash",
+                input: { command: "echo hi" },
+              },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: "user",
+          uuid: "u2",
+          parentUuid: "a1",
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T00:00:02.000Z",
+          isSidechain: false,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_main_bash1",
+                is_error: null,
+                content: "hi",
+              },
+            ],
+          },
+        },
+      ];
+      await writeFile(
+        join(projectDir, `${BASH_FIXTURE_SESSION_ID}.jsonl`),
+        `${mainLines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      );
+
+      const subLines = [
+        {
+          type: "user",
+          uuid: "su1",
+          parentUuid: null,
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          agentId: BASH_FIXTURE_AGENT_ID,
+          timestamp: "2026-07-18T00:00:10.000Z",
+          isSidechain: true,
+          message: { role: "user", content: "run a command too" },
+        },
+        {
+          type: "assistant",
+          uuid: "sa1",
+          parentUuid: "su1",
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          agentId: BASH_FIXTURE_AGENT_ID,
+          timestamp: "2026-07-18T00:00:11.000Z",
+          isSidechain: true,
+          requestId: "sa_req_1",
+          message: {
+            id: "sa_msg_1",
+            role: "assistant",
+            model: "claude-haiku-4-5-20251001",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_sub_bash1",
+                name: "Bash",
+                input: { command: "ls -la" },
+              },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: "user",
+          uuid: "su2",
+          parentUuid: "sa1",
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          agentId: BASH_FIXTURE_AGENT_ID,
+          timestamp: "2026-07-18T00:00:12.000Z",
+          isSidechain: true,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_sub_bash1",
+                is_error: null,
+                content: "total 0",
+              },
+            ],
+          },
+        },
+      ];
+      await writeFile(
+        join(subagentsDir, `agent-${BASH_FIXTURE_AGENT_ID}.jsonl`),
+        `${subLines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      );
+
+      process.env.CLAUDE_CONFIG_DIR = `${CLAUDE_FIXTURES_DIR},${bashFixtureDir}`;
+    });
+
+    afterAll(async () => {
+      if (previousConfigDirForFixture === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDirForFixture;
+      }
+      if (bashFixtureDir !== undefined) {
+        await rm(bashFixtureDir, { recursive: true, force: true });
+      }
+    });
+
+    it("includeSubagents true (default) counts the subagent's Bash call; false counts main-thread only", async () => {
+      client = await connect();
+
+      const withSub = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: BASH_FIXTURE_SESSION_ID },
+      });
+      expect(withSub.isError).not.toBe(true);
+      const withSubBody = JSON.parse(textOf(withSub)) as { totals: { calls: number } };
+      expect(withSubBody.totals.calls).toBe(2);
+
+      const mainOnly = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          includeSubagents: false,
+        },
+      });
+      expect(mainOnly.isError).not.toBe(true);
+      const mainOnlyBody = JSON.parse(textOf(mainOnly)) as { totals: { calls: number } };
+      expect(mainOnlyBody.totals.calls).toBe(1);
+    });
+
+    it("get_tool_calls thread filter walks the subagent sidecar transcript", async () => {
+      client = await connect();
+
+      const all = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "claude-code", sessionId: BASH_FIXTURE_SESSION_ID, thread: "all" },
+      });
+      expect(all.isError).not.toBe(true);
+      const allBody = JSON.parse(textOf(all)) as {
+        totalCount: number;
+        toolCalls: Array<{ thread: string }>;
+      };
+      expect(allBody.totalCount).toBe(2);
+      expect(allBody.toolCalls.map((c) => c.thread).sort()).toEqual(
+        ["main", BASH_FIXTURE_AGENT_ID].sort(),
+      );
+
+      const subagentsOnly = await client.callTool({
+        name: "get_tool_calls",
+        arguments: {
+          source: "claude-code",
+          sessionId: BASH_FIXTURE_SESSION_ID,
+          thread: "subagents",
+        },
+      });
+      expect(subagentsOnly.isError).not.toBe(true);
+      const subagentsBody = JSON.parse(textOf(subagentsOnly)) as {
+        totalCount: number;
+        toolCalls: Array<{ thread: string; toolUseId: string; family?: string }>;
+      };
+      expect(subagentsBody.totalCount).toBe(1);
+      expect(subagentsBody.toolCalls[0]).toMatchObject({
+        thread: BASH_FIXTURE_AGENT_ID,
+        toolUseId: "toolu_sub_bash1",
+        family: "ls",
+      });
+    });
+  });
 });

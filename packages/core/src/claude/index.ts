@@ -80,7 +80,12 @@ export type { ClaudeSessionStore, ClaudeSidecarFileRef } from "./store.js";
 export { localClaudeSessionStore } from "./store.js";
 export type { SubagentMeta, SubagentRef } from "./subagents.js";
 export { listSubagentRefs, loadSubagentSessionData, subagentsDirFor } from "./subagents.js";
-export { buildClaudeTimeline, getClaudeRecordDetail, getClaudeToolCallDetail } from "./timeline.js";
+export {
+  buildClaudeTimeline,
+  getClaudeRecordDetail,
+  getClaudeToolCallDetail,
+  summarizeToolInput,
+} from "./timeline.js";
 export type {
   AssistantRecord,
   ClaudeSessionRecord,

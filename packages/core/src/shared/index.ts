@@ -75,4 +75,5 @@ export type {
   UserEntry,
   UserRecordDetail,
 } from "./timeline.js";
+export { durationBetween } from "./timeline.js";
 export type { ParseWarning, TokenUsage } from "./types.js";

@@ -120,6 +120,7 @@ export {
   getAgentSession,
   getClaudeLastActivityAt,
   getSession,
+  getSessionData,
   getSessionRecordDetail,
   getSessionToolCallDetail,
   getTimeline,

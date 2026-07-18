@@ -114,6 +114,8 @@ claude mcp add --transport http junrei http://localhost:7867/mcp
 | `find_repetitions` | Repeated tool calls, re-reads, and repeated failures. | Claude Code only |
 | `get_subagent_tree` | Subagent/sub-agent execution tree with per-node usage and cost. | Claude Code + Codex |
 | `get_task_executions` | Every Bash command and Agent run, with duration and outcome. | Claude Code only |
+| `get_bash_stats` | Bash-command analytics: rankings by command family, program frequency, heavy hitters, background task outcomes, and waste signals (near-duplicates, reruns after error, oversized results). | Claude Code only |
+| `get_tool_calls` | Paginated, filterable listing of tool calls in a session, for discovering a `toolUseId` to drill into. | Claude Code only |
 | `get_first_prompt` | The first user prompt of a session. | Claude Code + Codex |
 | `get_repo_overview` | Repo-level rollup across every session in a repo: cost timeline, per-model breakdown, top sessions. | Claude Code + Codex |
 | `get_session_observability` | Claude Code's own OTel export for a session, parsed: authoritative cost, api-request latency, tool-decision/health events. Opt-in — see [OTel ingestion](#otel-ingestion-opt-in). | Claude Code only |

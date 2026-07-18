@@ -116,6 +116,7 @@ interface ClaudeAdapterBundle {
   getToolCallDetail(key: ClaudeSessionKey, toolUseId: string): Promise<ToolCallDetail | undefined>;
   getLastActivityAt(sessionId: string): Promise<string | undefined>;
   getAgentSession(sessionId: string, agentId: string): Promise<ClaudeSessionAnalysis | undefined>;
+  getSessionData(key: ClaudeSessionKey): Promise<SessionData | undefined>;
 }
 
 function toListItem(
@@ -448,6 +449,24 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
     }
   }
 
+  /**
+   * Raw (parsed but not analyzed) main-thread `SessionData` — for the
+   * `get_bash_stats` MCP tool's `includeSubagents: false` recompute path
+   * (`computeBashStats` needs per-thread `SessionData`, not the joint
+   * `ClaudeSessionAnalysis.bashStats`) and `get_tool_calls`'s main-thread
+   * listing. Scoped exactly like `getDetail` (ref resolution + cache), just
+   * short of the full `analyzeClaudeSession` pass.
+   */
+  async function getSessionData(key: ClaudeSessionKey): Promise<SessionData | undefined> {
+    const ref = await store.findSessionFileById(key.id);
+    if (ref === undefined) return undefined;
+    try {
+      return await sessionDataCached(ref);
+    } catch {
+      return undefined;
+    }
+  }
+
   return {
     listItems,
     getDetail,
@@ -456,6 +475,7 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
     getToolCallDetail,
     getLastActivityAt,
     getAgentSession,
+    getSessionData,
   };
 }
 
@@ -541,6 +561,19 @@ export async function getSessionToolCallDetail(
   return firstDefined([
     () => localBundle.getToolCallDetail({ id: sessionId }, toolUseId),
     () => s3Bundle?.getToolCallDetail({ id: sessionId }, toolUseId) ?? Promise.resolve(undefined),
+  ]);
+}
+
+/**
+ * Local-first, S3-fallback lookup for one session's raw main-thread
+ * `SessionData` — see `ClaudeAdapterBundle.getSessionData`'s doc comment for
+ * why the `get_bash_stats`/`get_tool_calls` MCP tools need this short of the
+ * full `ClaudeSessionAnalysis`.
+ */
+export async function getSessionData(sessionId: string): Promise<SessionData | undefined> {
+  return firstDefined([
+    () => localBundle.getSessionData({ id: sessionId }),
+    () => s3Bundle?.getSessionData({ id: sessionId }) ?? Promise.resolve(undefined),
   ]);
 }
 
