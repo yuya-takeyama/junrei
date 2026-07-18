@@ -141,7 +141,18 @@ describe("reconstructRequest labelling", () => {
       confidence: "template",
       provenance: { kind: "template", cliVersion: "9.9.9" },
     });
-    expect(req?.params.confidence).toBe("template");
+    // params is now a PER-KEY map, not a single template-confidence section:
+    // template keys stay `template`; no section-level confidence when a
+    // template supplied params.
+    expect(req?.params.entries.max_tokens).toEqual({
+      value: 1000,
+      confidence: "template",
+      provenance: { kind: "template", cliVersion: "9.9.9" },
+    });
+    expect(req?.params.entries.stream?.confidence).toBe("template");
+    // These fixtures carry no template `model` and no log `model` → declared unknown.
+    expect(req?.params.entries.model?.confidence).toBe("unknown");
+    expect(req?.params.confidence).toBeUndefined();
     expect(req?.limitations).toContain(
       "subagent (sidechain) requests are not supported: reconstruction covers main-loop requests only",
     );
@@ -186,5 +197,126 @@ describe("reconstructRequest labelling", () => {
     expect(diskBlock?.confidence).toBe("unknown");
     expect(diskBlock?.provenance).toMatchObject({ kind: "declared-absent" });
     expect(req?.limitations.some((l) => l.includes("disk-context provider"))).toBe(true);
+  });
+});
+
+describe("reconstructRequest params model overlay (Defect 1)", () => {
+  // A session whose assistant record ran on a DIFFERENT model than the template
+  // captured — the log is the source of truth for which model the turn used.
+  function recordsWithModel(): ReconstructionRecord[] {
+    return [
+      { type: "user", line: 1, content: "hi", version: "9.9.9", timestamp: TS0 },
+      {
+        type: "assistant",
+        line: 2,
+        requestId: "req_1",
+        messageId: "m1",
+        model: "claude-fable-5",
+        blocks: [{ type: "text", text: "reply" }],
+        timestamp: TS0,
+      },
+    ];
+  }
+  const templateWithModel: ReconstructionTemplateProvider = {
+    getTemplate: async (cliVersion) =>
+      cliVersion === "9.9.9"
+        ? {
+            cliVersion: "9.9.9",
+            capturedValues: { cwd: "/captured/proj", sessionId: "captured-sess" },
+            system: [{ text: "sys" }],
+            params: { model: "claude-haiku-4-5", max_tokens: 1000 },
+          }
+        : undefined,
+  };
+
+  it("overlays the log-recorded model as `exact`, overriding the template default", async () => {
+    const records = recordsWithModel();
+    const session = deriveReconstructionSessionMeta("sess-1", records);
+    const req = await reconstructRequest({ records, session }, "req_1", {
+      template: templateWithModel,
+    });
+    // model: exact, from the target assistant record's own log line (line 2),
+    // NOT the template's captured "claude-haiku-4-5".
+    expect(req?.params.entries.model?.value).toBe("claude-fable-5");
+    expect(req?.params.entries.model?.confidence).toBe("exact");
+    expect(req?.params.entries.model?.provenance).toEqual({ kind: "log", lines: [2] });
+    // Non-model template keys stay `template`.
+    expect(req?.params.entries.max_tokens).toEqual({
+      value: 1000,
+      confidence: "template",
+      provenance: { kind: "template", cliVersion: "9.9.9" },
+    });
+    expect(req?.params.confidence).toBeUndefined();
+  });
+
+  it("overlays the log model even with NO template (model-only entries, section unknown)", async () => {
+    const records = recordsWithModel();
+    const session = deriveReconstructionSessionMeta("sess-1", records);
+    const req = await reconstructRequest({ records, session }, "req_1");
+    expect(req?.params.entries.model?.value).toBe("claude-fable-5");
+    expect(req?.params.entries.model?.confidence).toBe("exact");
+    // Everything else about params is unrecoverable without a template.
+    expect(req?.params.confidence).toBe("unknown");
+  });
+
+  it("declares model unknown when neither the log nor a template carries it", async () => {
+    const records: ReconstructionRecord[] = [
+      { type: "user", line: 1, content: "hi", version: "9.9.9", timestamp: TS0 },
+      {
+        type: "assistant",
+        line: 2,
+        requestId: "req_1",
+        messageId: "m1",
+        blocks: [{ type: "text", text: "reply" }],
+      },
+    ];
+    const session = deriveReconstructionSessionMeta("sess-1", records);
+    const req = await reconstructRequest({ records, session }, "req_1");
+    expect(req?.params.entries.model?.confidence).toBe("unknown");
+    expect(req?.params.entries.model?.provenance).toMatchObject({ kind: "declared-absent" });
+    expect(req?.params.entries.model?.value).toBeUndefined();
+  });
+});
+
+describe("reconstructRequest first-turn array-form prompt (Defect 2)", () => {
+  // A first user prompt sent as a BLOCK ARRAY (image + text) rather than a bare
+  // string — the shape that previously produced an empty `messages` array.
+  it("includes the first user turn when its content is a block array", async () => {
+    const records: ReconstructionRecord[] = [
+      { type: "queue-operation", line: 1 },
+      {
+        type: "user",
+        line: 2,
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } },
+          { type: "text", text: "look at this" },
+        ],
+        version: "9.9.9",
+        timestamp: TS0,
+      },
+      {
+        type: "assistant",
+        line: 3,
+        requestId: "req_1",
+        messageId: "m1",
+        model: "claude-fable-5",
+        blocks: [{ type: "text", text: "ok" }],
+        timestamp: TS0,
+      },
+    ];
+    const session = deriveReconstructionSessionMeta("sess-1", records);
+    const req = await reconstructRequest({ records, session }, "req_1");
+    // The first request must carry the first user prompt — not an empty array.
+    expect(req?.messages.length).toBeGreaterThan(0);
+    const first = req?.messages[0];
+    expect(first?.role).toBe("user");
+    expect(first?.content.map((b) => b.wireType)).toEqual(["image", "text"]);
+    expect(first?.content.every((b) => b.confidence === "exact")).toBe(true);
+    expect((first?.content[1]?.value as { text: string }).text).toBe("look at this");
+    // The image block is preserved verbatim from the log.
+    expect(first?.content[0]?.value).toEqual({
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "AA==" },
+    });
   });
 });

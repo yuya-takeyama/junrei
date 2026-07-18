@@ -38,6 +38,8 @@ import type {
   ReconstructableRequestRef,
   ReconstructedMessage,
   ReconstructedMessageBlock,
+  ReconstructedParamEntry,
+  ReconstructedParams,
   ReconstructedRequest,
   ReconstructedSection,
   ReconstructedSystemBlock,
@@ -161,6 +163,19 @@ function materializeBlock(block: ReplayBlock, ctx: MaterializeContext): Reconstr
       }
       return result;
     }
+    case "user-block": {
+      // A genuine user-prompt block sent as-is on the wire (text/image/...).
+      // Byte-exact from the log, minus the wire-only cache_control marker.
+      const cacheStripped = applyCacheControlStrip(block.block);
+      if (cacheStripped.applied) ctx.appliedRules.add(RULE_CACHE_CONTROL_STRIP);
+      return {
+        wireType: block.block.type,
+        value: cacheStripped.block,
+        confidence: "exact",
+        provenance: { kind: "log", lines: [block.line] },
+        ...(cacheStripped.applied && { appliedRules: [RULE_CACHE_CONTROL_STRIP] }),
+      };
+    }
     case "assistant-text":
       return {
         wireType: "text",
@@ -283,27 +298,105 @@ function materializeMessages(turns: ReplayTurn[], ctx: MaterializeContext): Reco
 interface TemplateSections {
   system: ReconstructedSystemBlock[];
   tools: ReconstructedSection<unknown[]>;
-  params: ReconstructedSection<Record<string, unknown>>;
+  params: ReconstructedParams;
+}
+
+/**
+ * Build the per-key `params` map: template-captured defaults (each `template`),
+ * with the LOG-recorded `model` overlaid on top (`exact`, provenance the target
+ * assistant record's own line) so a session that ran on a different model than
+ * the template capture reports its real model. A key with neither a template
+ * default nor a log value (today only `model` can be log-derived) is declared
+ * `unknown`. The section-level fields describe the whole section ONLY when no
+ * template params exist (non-model params are then unrecoverable).
+ */
+function buildParamsSection(
+  template: ReconstructionTemplate | undefined,
+  cliVersion: string | undefined,
+  logModel: string | undefined,
+  targetLine: number,
+): ReconstructedParams {
+  const entries: Record<string, ReconstructedParamEntry> = {};
+  const templateParams = template !== undefined ? template.params : undefined;
+  if (template !== undefined && templateParams !== undefined) {
+    const provenance: Provenance = { kind: "template", cliVersion: template.cliVersion };
+    for (const [key, value] of Object.entries(templateParams)) {
+      entries[key] = { value, confidence: "template", provenance };
+    }
+  }
+
+  if (logModel !== undefined) {
+    // Log wins over any template default — this is the whole point of Defect 1.
+    entries.model = {
+      value: logModel,
+      confidence: "exact",
+      provenance: { kind: "log", lines: [targetLine] },
+      note:
+        entries.model !== undefined
+          ? "model taken from the target assistant record's own log line, overriding the template's captured default"
+          : "model taken from the target assistant record's own log line",
+    };
+  } else if (entries.model === undefined) {
+    entries.model = {
+      confidence: "unknown",
+      provenance: {
+        kind: "declared-absent",
+        reason: "no log-recorded model and no template default for the request model",
+      },
+      note: "the target assistant record carries no model field and no template supplied one",
+    };
+  }
+
+  if (template === undefined) {
+    const reason =
+      cliVersion !== undefined
+        ? `no reconstruction template for CLI version ${cliVersion}`
+        : "session CLI version is unknown; no reconstruction template selected";
+    return {
+      entries,
+      confidence: "unknown",
+      provenance: { kind: "declared-absent", reason },
+      note: "generation params other than a log-derived model require a per-CLI-version reconstruction template",
+    };
+  }
+  if (templateParams === undefined) {
+    return {
+      entries,
+      confidence: "unknown",
+      provenance: {
+        kind: "declared-absent",
+        reason: `template for CLI version ${template.cliVersion} carries no params`,
+      },
+      note: "the template supplied no generation params; only a log-derived model (if any) is available",
+    };
+  }
+  return { entries };
 }
 
 function buildTemplateSections(
   template: ReconstructionTemplate | undefined,
   cliVersion: string | undefined,
   session: ReconstructionSessionMeta,
+  logModel: string | undefined,
+  targetLine: number,
   limitations: string[],
 ): TemplateSections {
+  const params = buildParamsSection(template, cliVersion, logModel, targetLine);
   if (template === undefined) {
     const reason =
       cliVersion !== undefined
         ? `no reconstruction template for CLI version ${cliVersion}`
         : "session CLI version is unknown; no reconstruction template selected";
-    uniquePush(limitations, `${reason}: system prompt, tools, and generation params are unknown`);
+    uniquePush(
+      limitations,
+      `${reason}: system prompt and tools are unknown; generation params other than a log-derived model are unknown`,
+    );
     const provenance: Provenance = { kind: "declared-absent", reason };
     const note = "requires a per-CLI-version reconstruction template";
     return {
       system: [{ confidence: "unknown", provenance, note: `system prompt ${note}` }],
       tools: { confidence: "unknown", provenance, note: `tool schemas ${note}` },
-      params: { confidence: "unknown", provenance, note: `generation params ${note}` },
+      params,
     };
   }
 
@@ -349,16 +442,6 @@ function buildTemplateSections(
           provenance: {
             kind: "declared-absent",
             reason: `template for CLI version ${template.cliVersion} carries no tools array`,
-          },
-        };
-  const params: ReconstructedSection<Record<string, unknown>> =
-    template.params !== undefined
-      ? { value: template.params, confidence: "template", provenance: templateProvenance }
-      : {
-          confidence: "unknown",
-          provenance: {
-            kind: "declared-absent",
-            reason: `template for CLI version ${template.cliVersion} carries no params`,
           },
         };
   return { system, tools, params };
@@ -428,6 +511,8 @@ export async function reconstructRequest(
     template,
     cliVersion,
     input.session,
+    targetRecord?.model,
+    group.targetLine,
     limitations,
   );
 

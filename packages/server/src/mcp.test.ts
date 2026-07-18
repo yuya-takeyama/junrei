@@ -820,7 +820,10 @@ describe("MCP tools", () => {
       const body = JSON.parse(textOf(result)) as {
         system: Array<{ text?: string; confidence: string }>;
         tools: { value?: unknown; confidence: string };
-        params: { value?: unknown; confidence: string };
+        params: {
+          entries: Record<string, { value?: unknown; confidence: string }>;
+          confidence?: string;
+        };
         limitations: string[];
       };
       expect(body.system).toHaveLength(1);
@@ -828,7 +831,11 @@ describe("MCP tools", () => {
       expect(body.system[0]?.text).toBeUndefined();
       expect(body.tools.confidence).toBe("unknown");
       expect(body.tools.value).toBeUndefined();
+      // No template ⇒ the section is section-level `unknown`, but the log-derived
+      // model is STILL overlaid per-key (exact) — that's Defect 1's whole point.
       expect(body.params.confidence).toBe("unknown");
+      expect(body.params.entries.model?.value).toBe("claude-fable-5");
+      expect(body.params.entries.model?.confidence).toBe("exact");
       expect(body.limitations.some((l) => l.includes("no reconstruction template"))).toBe(true);
     });
 
@@ -848,7 +855,13 @@ describe("MCP tools", () => {
         targetLine: number;
         system: Array<{ text?: string; confidence: string; provenance: { kind: string } }>;
         tools: { value?: unknown[]; confidence: string };
-        params: { value?: Record<string, unknown>; confidence: string };
+        params: {
+          entries: Record<
+            string,
+            { value?: unknown; confidence: string; provenance: { kind: string; lines?: number[] } }
+          >;
+          confidence?: string;
+        };
         messages: Array<{
           role: string;
           content: Array<{ wireType: string; value?: unknown; confidence: string }>;
@@ -875,8 +888,17 @@ describe("MCP tools", () => {
 
       expect(body.tools.confidence).toBe("template");
       expect(body.tools.value).toEqual(SYNTHETIC_TEMPLATE.tools);
-      expect(body.params.confidence).toBe("template");
-      expect(body.params.value).toEqual(SYNTHETIC_TEMPLATE.params);
+      // params is now a PER-KEY map: template keys stay `template`; the model is
+      // overlaid from the target assistant record's own log line (line 2 → req_1)
+      // as `exact`, overriding any template default. No section-level confidence
+      // when a template supplied params.
+      expect(body.params.confidence).toBeUndefined();
+      expect(body.params.entries.max_tokens?.value).toBe(999);
+      expect(body.params.entries.max_tokens?.confidence).toBe("template");
+      expect(body.params.entries.stream?.confidence).toBe("template");
+      expect(body.params.entries.model?.value).toBe("claude-fable-5");
+      expect(body.params.entries.model?.confidence).toBe("exact");
+      expect(body.params.entries.model?.provenance).toMatchObject({ kind: "log", lines: [2] });
 
       // The one prior turn (line 1) replays byte-exact from the log.
       expect(body.messages.length).toBeGreaterThan(0);

@@ -216,7 +216,7 @@ function compareMessages(wireMessages, reconMessages, buckets, mismatches) {
   }
 }
 
-/** Whole-value comparison for `tools`/`params` — always counted against the FULL wire value, even when the reconstruction has nothing (declared `unknown`). */
+/** Whole-value comparison for `tools` — always counted against the FULL wire value, even when the reconstruction has nothing (declared `unknown`). */
 function compareSection(name, wireValue, reconSection, buckets, mismatches) {
   if (wireValue === undefined) return;
   const bytes = byteLen(wireValue);
@@ -230,6 +230,38 @@ function compareSection(name, wireValue, reconSection, buckets, mismatches) {
         reconSection.note ??
         (reconSection.confidence === "unknown" ? "declared unknown" : "value differs"),
     });
+  }
+}
+
+/**
+ * `params` — PER-KEY comparison (the reconstruction now labels each generation
+ * param separately in `params.entries`, overlaying the log-recorded `model`
+ * (exact) over the template defaults (template)). Each wire param field's bytes
+ * are bucketed by the confidence of the entry that produced it — falling back
+ * to the section-level confidence (the "no template params" case) when no
+ * per-key entry exists — and counted matched only when the entry's value
+ * deep-equals the wire value. NOTE: `model` now comes from the log line, so in
+ * a capture run whose log echoes the RESOLVED, date-suffixed model id
+ * (`claude-haiku-4-5-20251001`) while the request carried the alias
+ * (`claude-haiku-4-5`), the `model` bytes count as exact-but-unmatched — a
+ * capture-run artifact, not a reconstruction defect.
+ */
+function compareParams(wireParams, reconParams, buckets, mismatches) {
+  const entries = reconParams.entries ?? {};
+  for (const [key, wireValue] of Object.entries(wireParams)) {
+    const bytes = byteLen(wireValue);
+    const entry = entries[key];
+    const confidence = entry?.confidence ?? reconParams.confidence ?? "unknown";
+    const matched = entry?.value !== undefined && deepEqual(entry.value, wireValue);
+    addBucket(buckets, confidence, bytes, matched);
+    if (!matched) {
+      mismatches.push({
+        section: "params",
+        key,
+        confidence,
+        reason: entry?.note ?? (confidence === "unknown" ? "declared unknown" : "value differs"),
+      });
+    }
   }
 }
 
@@ -303,13 +335,7 @@ async function main() {
     const wireParams = Object.fromEntries(
       PARAM_FIELDS.filter((f) => f in entry.reqBody).map((f) => [f, entry.reqBody[f]]),
     );
-    compareSection(
-      "params",
-      Object.keys(wireParams).length > 0 ? wireParams : undefined,
-      reconstructed.params,
-      buckets,
-      mismatches,
-    );
+    compareParams(wireParams, reconstructed.params, buckets, mismatches);
 
     for (const file of collectDriftFiles(reconstructed.system)) driftFiles.add(file);
     for (const msg of reconstructed.messages) {
