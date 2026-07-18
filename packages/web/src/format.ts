@@ -1,19 +1,22 @@
-interface CacheableTokenTotals {
-  inputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-}
-
 /**
  * Fraction of "effective input" tokens (input + cache-read + cache-creation)
- * actually served from cache — shared by the session-level stat strip (L1,
- * `shell/StatStrip.tsx`) and the agent detail shell (L3, `AgentShell.tsx`) so
- * both compute "cache hit" identically instead of duplicating the formula.
+ * actually served from cache — used by the session-level stat strip (L1,
+ * `shell/StatStrip.tsx`), the agent detail shell (L3, `AgentShell.tsx`), and
+ * the Trends screen. Re-exported (not redefined) from `@junrei/core`'s
+ * `shared/metrics.ts`, which promoted this formula out of its original home
+ * here (Phase 1 of the trends feature) so the server-side trends aggregate
+ * shares the exact same definition — keeping the re-export means every
+ * existing `from "./format.js"` import site keeps working unchanged.
+ *
+ * Imported from the `@junrei/core/shared` subpath, NOT the package root:
+ * the root barrel (`core/src/index.ts`) transitively re-exports `claude/`,
+ * which imports `node:fs/promises` at module scope. Vite externalizes that
+ * for the browser and the stub throws on property access, so a root import
+ * here would crash the entire web app at mount. `shared/` is a self-contained
+ * subtree with no Node-builtin or `claude/`/`codex/` imports — the
+ * browser-safe surface.
  */
-export function cacheHitRate(totals: CacheableTokenTotals): number {
-  const denominator = totals.inputTokens + totals.cacheReadTokens + totals.cacheCreationTokens;
-  return denominator > 0 ? totals.cacheReadTokens / denominator : 0;
-}
+export { cacheHitRate } from "@junrei/core/shared";
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;

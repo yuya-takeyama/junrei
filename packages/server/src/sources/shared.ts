@@ -141,15 +141,19 @@ export interface SessionListItemBase {
   /** Slim main-vs-subagents cost/token split — see `DelegationLite`. */
   delegation: DelegationLite;
   /**
-   * Sum of subagent `returnedChars` for this session, plus how many
-   * subagents contributed one — see `sumSubagentReturns`. Feeds the trends
-   * aggregate's per-day `subagentReturn` bucket (`@junrei/core`'s
-   * `computeTrends`). Claude only: Codex's own `SubagentNode`s never
-   * populate `returnedChars` (no parent-side tool_result to measure — see
-   * `codex/orchestration.ts`), so `codexAdapter`'s list items simply never
-   * set this rather than reporting a fake all-zero count.
+   * Sum of subagent `returnedChars` for this session, how many subagents
+   * contributed one, and the single largest one (`maxChars`) — see
+   * `sumSubagentReturns`. Feeds the trends aggregate's per-day
+   * `subagentReturn` bucket (`@junrei/core`'s `computeTrends`), where
+   * `maxChars` rolls up as a MAX (not a sum) across sessions — the mean
+   * (`totalChars`/`count`) alone would hide a one-off huge-context-dump leak
+   * exactly like `maxChars` exists to surface. Claude only: Codex's own
+   * `SubagentNode`s never populate `returnedChars` (no parent-side
+   * tool_result to measure — see `codex/orchestration.ts`), so
+   * `codexAdapter`'s list items simply never set this rather than reporting
+   * a fake all-zero count.
    */
-  subagentReturn?: { count: number; totalChars: number };
+  subagentReturn?: { count: number; totalChars: number; maxChars: number };
 }
 
 /**
@@ -218,30 +222,33 @@ export function mixFromUsageTree(
 /**
  * Sum of `SubagentNode.returnedChars` across every node in a subagent forest
  * that resolved one (recursively, via `children`), paired with how many
- * nodes contributed — feeds `SessionListItemBase.subagentReturn`, which in
- * turn feeds the trends aggregate's per-day `subagentReturn` bucket
- * (`@junrei/core`'s `computeTrends`). Returns `undefined` (not an all-zero
- * object) when nothing in the forest resolved a `returnedChars` — same "no
- * data" convention `DelegationSummary`'s optional `costUsd` fields use, and
- * the reason `codexAdapter`'s list items simply never call this: Codex's own
+ * nodes contributed and the single largest `returnedChars` seen — feeds
+ * `SessionListItemBase.subagentReturn`, which in turn feeds the trends
+ * aggregate's per-day `subagentReturn` bucket (`@junrei/core`'s
+ * `computeTrends`). Returns `undefined` (not an all-zero object) when
+ * nothing in the forest resolved a `returnedChars` — same "no data"
+ * convention `DelegationSummary`'s optional `costUsd` fields use, and the
+ * reason `codexAdapter`'s list items simply never call this: Codex's own
  * `SubagentNode`s never populate `returnedChars` (see
  * `codex/orchestration.ts`), so every call here would return `undefined`
  * anyway.
  */
 export function sumSubagentReturns(
   forest: readonly SubagentNode[],
-): { count: number; totalChars: number } | undefined {
+): { count: number; totalChars: number; maxChars: number } | undefined {
   let count = 0;
   let totalChars = 0;
+  let maxChars = 0;
   const visit = (nodes: readonly SubagentNode[]) => {
     for (const node of nodes) {
       if (node.returnedChars !== undefined) {
         count += 1;
         totalChars += node.returnedChars;
+        maxChars = Math.max(maxChars, node.returnedChars);
       }
       visit(node.children);
     }
   };
   visit(forest);
-  return count > 0 ? { count, totalChars } : undefined;
+  return count > 0 ? { count, totalChars, maxChars } : undefined;
 }

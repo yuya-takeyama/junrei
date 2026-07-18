@@ -8,7 +8,11 @@ file tracks only what is in progress or ahead.
 ## In progress
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped
-  (#42, #43); cross-repo/global trends still open
+  (#42, #43); multi-day trend aggregation (`computeTrends` in `@junrei/core`,
+  `GET /api/trends`, #138) and its `/trends` web screen (KPI deltas vs the
+  prior window, daily cost-by-model + delegation-split charts, efficiency
+  small multiples, cadence panel, anomalies panel) have both shipped; MCP
+  tool exposure of the same aggregation is still open
 
 ### S3 as an additional Claude session source (2026-07-17)
 

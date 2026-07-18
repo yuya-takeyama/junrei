@@ -4,6 +4,7 @@ import type { ModelMixEntry, SessionListItem } from "./api.js";
 import { client } from "./api.js";
 import {
   DATE_FILTER_PRESET_DAYS,
+  type DateFilter,
   dateFilterFetchBounds,
   dateFilterFromSelectValue,
   dateFilterSelectValue,
@@ -16,6 +17,7 @@ import { classifyModel, MODEL_CLASS_ORDER } from "./modelClass.js";
 import { OverviewBand } from "./OverviewBand.js";
 import {
   ALL_REPOS,
+  parseDayParam,
   parseListPage,
   parseRepoParam,
   parseSourceTab,
@@ -92,7 +94,6 @@ export function SessionList() {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useStoredDateFilter();
   const [searchParams, setSearchParams] = useSearchParams();
   // Persisted in the URL (`?source=`/`?repo=`/`?page=`) rather than component
   // state so a reload or shared link keeps the selection — same pattern as
@@ -101,6 +102,17 @@ export function SessionList() {
   const sourceTab = parseSourceTab(searchParams.get("source"));
   const repoFilter = parseRepoParam(searchParams.get("repo"));
   const page = parseListPage(searchParams.get("page"));
+  // A Trends-screen drill-down link (`router.ts`'s `sessionListDayFilterPath`)
+  // seeds the date filter's INITIAL value with a single-day custom range —
+  // read once, at mount, via `useStoredDateFilter`'s lazy initializer (see
+  // its own doc comment for why this doesn't clobber a returning viewer's
+  // stored preference). Computed with `useState` (not read fresh every
+  // render) for the same "seeds initial state once" reason.
+  const [initialDayFilter] = useState<DateFilter | undefined>(() => {
+    const day = parseDayParam(searchParams.get("day"));
+    return day === undefined ? undefined : { kind: "custom", from: day, to: day };
+  });
+  const [dateFilter, setDateFilter] = useStoredDateFilter(initialDayFilter);
 
   // Server-side date bounds for the CURRENT date filter (default: last 7
   // days — see `DEFAULT_DATE_FILTER`), memoized on `dateFilter` alone so the
@@ -206,7 +218,14 @@ export function SessionList() {
     <div>
       <Band
         left={<span className="mono fs11 mut">{"// agent statistics analyzer"}</span>}
-        right={<span className="mono fs11 mut">local · ~/.claude · ~/.codex</span>}
+        right={
+          <>
+            <Link className="linkc mono fs11" to="/trends">
+              → trends
+            </Link>
+            <span className="mono fs11 mut">local · ~/.claude · ~/.codex</span>
+          </>
+        }
       />
       <div className="fx ac jb hpad gap12" style={{ padding: "18px 28px 14px", flexWrap: "wrap" }}>
         <h1 className="ttl" style={{ fontSize: "20px" }}>
