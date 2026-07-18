@@ -102,6 +102,15 @@ describe("analyzeClaudeSession", () => {
         status: "completed",
       }),
     ]);
+
+    // v2 PR A's $ weighting: the main thread is tagged with its own
+    // dominant-by-input-tokens model (this fixture only ever uses one model,
+    // `"claude-fable-5"` — see `analysis.models`), so byThread/heavyHitters
+    // can be priced.
+    expect(analysis.bashStats.byThread).toEqual([
+      expect.objectContaining({ thread: "main", model: "claude-fable-5", calls: 3 }),
+    ]);
+    expect(analysis.bashStats.totals.estUsd).toBeGreaterThan(0);
   });
 
   it("detects repetitions: identical runs, file re-reads, repeated failures", async () => {

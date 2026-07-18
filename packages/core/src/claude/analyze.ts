@@ -1,7 +1,12 @@
 import { basename, dirname } from "node:path";
 import { computeDelegationSummary } from "../shared/delegation.js";
 import type { FileAccessAgg, TokenTotals } from "../shared/metrics.js";
-import { foldFileAccess, mergeFileAccess, mergeUsageByModel } from "../shared/metrics.js";
+import {
+  dominantModelByInputTokens,
+  foldFileAccess,
+  mergeFileAccess,
+  mergeUsageByModel,
+} from "../shared/metrics.js";
 import { deriveRepoIdentity } from "../shared/repo.js";
 import type { SessionAnalysisCore } from "../shared/session-analysis.js";
 import type { SubagentNode, SubagentStatus } from "../shared/subagent-node.js";
@@ -133,9 +138,17 @@ export async function analyzeClaudeSession(
     computeFileAccess(data),
     subagentFileAccess,
   );
-  const bashStats = computeBashStats([{ thread: MAIN_OWNER, data }, ...subagentBashThreads]);
-
+  // Computed BEFORE `bashStats` (moved up from its original post-bashStats
+  // position) so the main thread's dominant-by-input-tokens model
+  // (`dominantModelByInputTokens`) is available for `computeBashStats`'s $
+  // weighting — see `BashStatsThread.model`'s doc comment.
   const usage = computeUsage(data);
+  const mainModel = dominantModelByInputTokens(usage.byModel);
+  const bashStats = computeBashStats([
+    { thread: MAIN_OWNER, data, ...(mainModel !== undefined && { model: mainModel }) },
+    ...subagentBashThreads,
+  ]);
+
   const totalUsage = {
     inputTokens: usage.total.inputTokens + subagentTotals.inputTokens,
     outputTokens: usage.total.outputTokens + subagentTotals.outputTokens,
@@ -292,7 +305,15 @@ async function analyzeSubagents(
     registerOwner(agentId, data);
     endsAtRestByAgentId.set(agentId, transcriptEndsAtRest(data));
     foldFileAccess(subagentFileAccess, computeFileAccess(data));
-    subagentBashThreads.push({ thread: agentId, data });
+
+    // Transcript's own `message.model` — NEVER the workflow run-state's
+    // `workflowProgress[].model`, which can carry harness decorations (e.g.
+    // `claude-opus-4-8[1m]`) the transcript's own field never does. Computed
+    // here (moved up from its original post-push position) so the SAME value
+    // both feeds `SubagentNode.model` below AND tags this subagent's own
+    // `BashStatsThread.model` for `computeBashStats`'s $ weighting.
+    const model = data.apiMessages.find((m) => m.model !== undefined)?.model;
+    subagentBashThreads.push({ thread: agentId, data, ...(model !== undefined && { model }) });
 
     subagentTotals.inputTokens += usage.total.inputTokens;
     subagentTotals.outputTokens += usage.total.outputTokens;
@@ -301,10 +322,6 @@ async function analyzeSubagents(
     subagentTotals.costUsd += usage.total.costUsd;
     if (!usage.total.costIsComplete) subagentTotals.costIsComplete = false;
 
-    // Transcript's own `message.model` — NEVER the workflow run-state's
-    // `workflowProgress[].model`, which can carry harness decorations (e.g.
-    // `claude-opus-4-8[1m]`) the transcript's own field never does.
-    const model = data.apiMessages.find((m) => m.model !== undefined)?.model;
     const promptPreview = data.userPrompts[0]?.text.slice(0, PROMPT_PREVIEW_LIMIT);
     const toolErrorCount = data.toolCalls.filter((c) => c.result?.isError === true).length;
     const workflowProgress =

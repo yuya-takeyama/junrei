@@ -5,7 +5,7 @@ import type {
   TokenTotals,
   UsageSummary,
 } from "../shared/metrics.js";
-import { mergeFileAccess } from "../shared/metrics.js";
+import { dominantModelByInputTokens, mergeFileAccess } from "../shared/metrics.js";
 import { estimateCostComponents } from "../shared/pricing/pricing.js";
 import { deriveRepoIdentity, normalizeRepoUrl } from "../shared/repo.js";
 import type { CompactionEvent, SessionAnalysisCore } from "../shared/session-analysis.js";
@@ -439,8 +439,11 @@ export function analyzeCodexSession(
   // "own-thread value, overridden at serve time" pattern as `fileAccess`
   // above; `getCodexSession` (server) re-derives the joint main+forest value
   // once this session's descendant sub-agent threads are known — see
-  // `bash-stats.ts`'s module doc comment.
-  const bashStats = computeCodexBashStats(transcript);
+  // `bash-stats.ts`'s module doc comment. Tagged with this session's own
+  // dominant-by-input-tokens model (v2 PR A's $ weighting) — per-agent forest
+  // models are a server-side concern (the forest is only known there) and
+  // stay out of scope for this main-thread-only recompute.
+  const bashStats = computeCodexBashStats(transcript, dominantModelByInputTokens(usage.byModel));
   const userTurnCount =
     eventUserMessageCount > 0 ? eventUserMessageCount : fallbackUserMessageCount;
   if (firstUserPrompt === undefined) {
