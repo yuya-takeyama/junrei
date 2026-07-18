@@ -146,9 +146,10 @@ confidence class:
 | `unknown` | not recoverable (billing header, hidden calls) | negligible |
 
 This delivers prompt-level analysis for **all sessions, past and future,
-with zero ToS exposure**. It deliberately revisits the roadmap's earlier
-"CLAUDE.md disk-based inference: rejected" decision (2026-07-17): the
-objection was that disk state isn't reproducible from session data alone.
+with zero ToS exposure**. It deliberately revisits the earlier
+"CLAUDE.md disk-based inference: rejected" decision (2026-07-17, see
+[roadmap-archive](../roadmap-archive.md)): the objection was that disk state
+isn't reproducible from session data alone.
 The confidence classes answer it — `exact`/`template` blocks *are*
 reproducible (template inputs are pinned, versioned captures), and
 `disk-contingent` blocks are explicitly labeled rather than silently
