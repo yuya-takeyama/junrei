@@ -34,6 +34,12 @@ jobs:
           restore-keys: |
             pnpm-store-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm test
