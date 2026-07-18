@@ -1475,3 +1475,54 @@ button.fb {
 .tree-toggle:hover {
   color: var(--tx);
 }
+
+/* ---------------------------------------------------------------------
+   Bash lens (L2) — command ranking, context consumption (stat tiles +
+   heavy hitters), waste detection. Quantitative only, no advice/hint prose
+   (see Bash.tsx's doc comment) — Claude-only, see router.ts's `Lens` doc
+   comment for why it's absent from `CODEX_LENSES`.
+   --------------------------------------------------------------------- */
+
+/* Command ranking table (panel 1) — command label, calls, errors, total/avg
+   result chars, est. tokens, share%. */
+.bcmd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 44px 84px 84px 84px 60px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.bcmd.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+
+/* Heavy hitters table (panel 2) — rank, command, thread badge, result chars, line. */
+.bhh {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 64px 84px 56px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.bhh.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+
+/* Flat per-call waste lists (panel 3: large results, bash-as-read) —
+   command, result chars, thread, line. */
+.bflat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px 64px 56px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.bflat.hdr {
+  border-bottom: 1px solid var(--bd);
+}

@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { type AnySessionJson, fetchSessionDetail, type SessionRef } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
+import { Bash } from "./lenses/Bash.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
 import { Orchestration } from "./lenses/Orchestration.js";
@@ -10,6 +11,7 @@ import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
 import {
+  agentRecordPath,
   isLegacyClaudeProjectScopedUrl,
   LENSES_BY_SOURCE,
   normalizeLens,
@@ -161,6 +163,15 @@ interface Props {
  * presence (see `Timeline.tsx`'s `turnGroupable`), and `normalizeLens`
  * redirects the old `"turns"` URL segment to `"timeline"` so bookmarks keep
  * working.
+ *
+ * "bash" is the one lens that ISN'T source-uniform: Claude-only (see
+ * `router.ts`'s `Lens` doc comment), so its render branch below additionally
+ * narrows on `session.source === "claude-code"` — for a Codex session, "bash"
+ * is absent from `CODEX_LENSES`, so `lensAvailable` is already false and the
+ * "isn't available for this session" fallback above renders instead; the
+ * extra narrow here is just what lets `Bash` take a Claude-only `SessionJson`
+ * prop instead of the `AnySessionJson` union, matching every other
+ * Claude-only panel in this app.
  */
 export function SessionShell({ source }: Props) {
   const { id: idParam, lens: lensParam } = useParams<"id" | "lens">();
@@ -285,6 +296,32 @@ export function SessionShell({ source }: Props) {
             }}
           />
         )}
+        {error === null &&
+          session !== null &&
+          lens === "bash" &&
+          session.source === "claude-code" && (
+            <Bash
+              session={session}
+              onOpenRecord={(line, agentId) => {
+                // Heavy hitters rank Bash calls across every thread (see
+                // `HeavyHittersTable`'s doc comment), so most rows belong to
+                // a subagent — routing every click through the main-session
+                // `recordPath` 404s for those (the server's `/record/:line`
+                // route resolves lines within ONE transcript, scoped by its
+                // `?agent=` query param — see `app.ts`). `agentRecordPath`
+                // targets the agent shell at this same "bash" lens value;
+                // that shell has no bash content of its own yet (shows a
+                // placeholder), but the record slide-over itself renders
+                // unconditionally there regardless of which lens is active
+                // (see `AgentShell.tsx`), so it still opens correctly on top.
+                navigate(
+                  agentId !== undefined
+                    ? agentRecordPath(ref, agentId, lens, line)
+                    : recordPath(ref, lens, line),
+                );
+              }}
+            />
+          )}
       </div>
       {record !== undefined && (
         <RecordDetail sessionRef={ref} line={record} closeHref={closeRecordHref} />

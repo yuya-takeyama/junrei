@@ -56,6 +56,31 @@ emulator, added to `aqua.yaml` via a local registry —
 aqua registry), uploads the existing core fixtures, and exercises the store
 end to end; it skips gracefully when `kumo` isn't on `PATH`.
 
+### Bash-command analysis (2026-07-18)
+
+Per-command Bash analytics for Claude Code sessions: result-char/token-heavy
+command ranking, top-10 heavy hitters, and quantitative waste detection
+(near-duplicate reruns, oversized results, rerun-after-error, Bash calls
+standing in for Read) — every entry attributed per thread (main vs.
+subagent), estimated-token figures always marked as estimates
+(`Math.ceil(chars / 4)`, not a real tokenizer).
+
+- ✅ Core: `computeBashStats` in `@junrei/core` (`claude/bash-stats.ts`) — one
+  joint pass over every thread's `Bash` tool calls, feeding
+  `ClaudeSessionAnalysis.bashStats` (#128)
+- ✅ MCP: `get_bash_stats` + `get_tool_calls` surface the same data to
+  analyzing agents (#131)
+- ✅ Fix: `hasOutputRedirect` narrowed to stdout-only, so a call redirecting
+  only stderr (`2> file`) still counts as a `bashAsRead` candidate (#134)
+- ✅ Web: "Bash" lens tab (Claude sessions only, `Lens` union in
+  `router.ts`) — command ranking table, a context-consumption stat row +
+  heavy hitters table, and the four waste subsections; quantitative only,
+  no advice/hint prose
+- ⬜ Codex shell-call support — `parseShellCommand`/`primaryCommand`
+  (`shared/shell/parser.ts`) are already harness-agnostic (see
+  `bash-stats.ts`'s module doc comment), but no Codex tool-call source feeds
+  them yet, so the "Bash" tab stays Claude-only until then
+
 ## Open items
 
 - ⬜ Docs refreshed; README quick start (v1 M4)
