@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/start.mjs",
+    "capture": "pnpm --filter @junrei/capture-proxy start",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",

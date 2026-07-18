@@ -116,8 +116,37 @@ describe("buildSourceCompleteness", () => {
     ]);
   });
 
+  it("returns the claude-wire-capture table verbatim (content/latency authoritative)", () => {
+    const result = buildSourceCompleteness(["claude-wire-capture"]);
+    expect(result.sources).toEqual([
+      {
+        source: "claude-wire-capture",
+        dimensions: {
+          content: {
+            status: "authoritative",
+            note: "captured wire bytes; auth headers redacted at write",
+          },
+          coverage: {
+            status: "partial",
+            note: "only requests made while the capture proxy was active",
+          },
+          authHeaders: { status: "absent", note: "redacted at write time" },
+          hiddenApiCalls: {
+            status: "partial",
+            note: "visible only when routed through the proxy",
+          },
+          latency: { status: "authoritative", note: "measured at the proxy" },
+        },
+      },
+    ]);
+  });
+
   it("every dimension's status is one of the declared vocabulary", () => {
-    const result = buildSourceCompleteness(["claude-session-jsonl", "codex-session-jsonl"]);
+    const result = buildSourceCompleteness([
+      "claude-session-jsonl",
+      "codex-session-jsonl",
+      "claude-wire-capture",
+    ]);
     for (const entry of result.sources) {
       for (const dimension of Object.values(entry.dimensions)) {
         expect(VALID_STATUSES).toContain(dimension.status);
@@ -126,13 +155,32 @@ describe("buildSourceCompleteness", () => {
   });
 
   it("every note is present and reasonably short (~80 chars)", () => {
-    const result = buildSourceCompleteness(["claude-session-jsonl", "codex-session-jsonl"]);
+    const result = buildSourceCompleteness([
+      "claude-session-jsonl",
+      "codex-session-jsonl",
+      "claude-wire-capture",
+    ]);
     for (const entry of result.sources) {
       for (const dimension of Object.values(entry.dimensions)) {
         expect(dimension.note).toBeDefined();
         expect(dimension.note?.length ?? 0).toBeLessThanOrEqual(90);
       }
     }
+  });
+
+  it("orders claude-session-jsonl, then claude-otel, then claude-wire-capture, then codex", () => {
+    const result = buildSourceCompleteness([
+      "codex-session-jsonl",
+      "claude-wire-capture",
+      "claude-otel",
+      "claude-session-jsonl",
+    ]);
+    expect(result.sources.map((s) => s.source)).toEqual([
+      "claude-session-jsonl",
+      "claude-otel",
+      "claude-wire-capture",
+      "codex-session-jsonl",
+    ]);
   });
 
   it("orders claude before codex regardless of input order", () => {

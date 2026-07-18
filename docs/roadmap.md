@@ -104,7 +104,13 @@ decision record: [milestones/goshuin.md](./milestones/goshuin.md).
     production code; calibrated on capture run A: exact+template = 92.95%
     of wire bytes (bar ≥ 85%), drift detection verified on a real
     post-session change
-  - ⬜ D: wire-capture ingestion (opt-in, local-only)
+  - ✅ D: wire-capture ingestion — `@junrei/capture-proxy` (localhost-only
+    pass-through bin, redact-at-write with sentinel-scan tests, mandatory
+    ToS banner, `~/.junrei/captures/` per-session JSONL), MCP
+    `get_actual_request` + `get_hidden_calls` (log-requestId join, measured
+    latency, hidden-call detection); `claude-wire-capture`
+    sourceCompleteness entry; byte-for-byte parity tests prove disabled ==
+    unchanged
   - ✅ E: OTel ingestion — opt-in (`JUNREI_OTEL_DIR`) OTLP http/json
     receiver on the junrei server, per-session JSONL storage, MCP
     `get_session_observability` (authoritative `cost_usd` with costBasis

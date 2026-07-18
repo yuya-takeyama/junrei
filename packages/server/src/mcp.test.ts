@@ -1882,4 +1882,217 @@ describe("MCP tools", () => {
       });
     });
   });
+
+  describe("get_actual_request / get_hidden_calls", () => {
+    // CLAUDE_SESSION_ID's fixture log records req_1..req_10/req_7b (main) and
+    // req_sa1/req_sa2 (subagent sidecar). We write a capture file for it with:
+    //  - req_1     : a LOGGED main-loop call (also captured) — never "hidden".
+    //  - req_hidden: a captured call whose id is NOT in the log — the hidden one.
+    //  - req_sa1   : a captured SUBAGENT call, logged in the sidecar — not hidden
+    //                (proves the join reads sidecar transcripts, not just main).
+    const LONG_BODY_TEXT = "Z".repeat(400);
+    const CAPTURE_LINES = [
+      {
+        requestId: "req_1",
+        method: "POST",
+        path: "/v1/messages",
+        status: 200,
+        latencyMs: 123,
+        isSubagent: false,
+        requestBody: { model: "claude-fable-5", system: [{ text: LONG_BODY_TEXT }] },
+        requestBytes: 450,
+        responseBody: "event: message_stop\ndata: {}\n\n",
+        assembledMessage: {
+          model: "claude-fable-5",
+          usage: { input_tokens: 100, output_tokens: 5 },
+        },
+        responseBytes: 640,
+      },
+      {
+        requestId: "req_hidden",
+        method: "POST",
+        path: "/v1/messages",
+        status: 200,
+        latencyMs: 80,
+        isSubagent: false,
+        requestBody: { system: [{ text: "kicked off a Claude Code agent classifier" }] },
+        requestBytes: 150,
+        responseBody: null,
+        assembledMessage: { model: "claude-haiku", usage: { input_tokens: 50, output_tokens: 2 } },
+        responseBytes: 120,
+      },
+      {
+        requestId: "req_sa1",
+        method: "POST",
+        path: "/v1/messages",
+        status: 200,
+        latencyMs: 60,
+        isSubagent: true,
+        requestBody: { system: [{ text: "hdr cc_is_subagent=true" }] },
+        requestBytes: 90,
+        responseBody: null,
+        assembledMessage: { model: "claude-fable-5", usage: { output_tokens: 3 } },
+        responseBytes: 300,
+      },
+    ];
+
+    let capturesDir: string | undefined;
+    let previousCapturesDir: string | undefined;
+
+    beforeAll(async () => {
+      previousCapturesDir = process.env.JUNREI_CAPTURES_DIR;
+      capturesDir = await mkdtemp(join(tmpdir(), "junrei-mcp-captures-"));
+      await writeFile(
+        join(capturesDir, `${CLAUDE_SESSION_ID}.jsonl`),
+        `${CAPTURE_LINES.map((l) => JSON.stringify(l)).join("\n")}\n`,
+      );
+      process.env.JUNREI_CAPTURES_DIR = capturesDir;
+    });
+
+    afterAll(async () => {
+      if (capturesDir !== undefined) await rm(capturesDir, { recursive: true, force: true });
+      if (previousCapturesDir === undefined) delete process.env.JUNREI_CAPTURES_DIR;
+      else process.env.JUNREI_CAPTURES_DIR = previousCapturesDir;
+    });
+
+    it("get_actual_request returns the captured body + response meta + latency, joined by requestId", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_actual_request",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, requestId: "req_1" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        captureAvailable: boolean;
+        isSubagent: boolean;
+        latencyMs: number;
+        request: { body: { model?: string }; bodyTruncated: boolean; requestBytes: number };
+        response: { status: number; model: string; usage: unknown; responseBytes: number };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.captureAvailable).toBe(true);
+      expect(body.isSubagent).toBe(false);
+      expect(body.latencyMs).toBe(123);
+      expect(body.request.body.model).toBe("claude-fable-5");
+      expect(body.request.bodyTruncated).toBe(false);
+      expect(body.request.requestBytes).toBe(450);
+      expect(body.response.status).toBe(200);
+      expect(body.response.model).toBe("claude-fable-5");
+      expect(body.response.usage).toEqual({ input_tokens: 100, output_tokens: 5 });
+      expect(body.response.responseBytes).toBe(640);
+      // Declares both the log (for the join) and the wire capture (for the bytes).
+      expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+        "claude-session-jsonl",
+        "claude-wire-capture",
+      ]);
+    });
+
+    it("get_actual_request caps the request body with explicit truncation flags", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_actual_request",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          requestId: "req_1",
+          maxCharsPerField: 200,
+        },
+      });
+      const body = JSON.parse(textOf(result)) as {
+        request: { body: unknown; bodyTruncated: boolean; bodyFullCharCount: number };
+      };
+      expect(body.request.bodyTruncated).toBe(true);
+      expect(body.request.bodyFullCharCount).toBeGreaterThan(200);
+      expect(typeof body.request.body).toBe("string"); // capped → stringified
+    });
+
+    it("get_actual_request declares requestNotCaptured for an uncaptured requestId (non-error)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_actual_request",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, requestId: "req_nope" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        captureAvailable: boolean;
+        requestNotCaptured: boolean;
+      };
+      expect(body.captureAvailable).toBe(true);
+      expect(body.requestNotCaptured).toBe(true);
+    });
+
+    it("get_actual_request declares captureAvailable:false for a session with no capture file", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_actual_request",
+        arguments: {
+          source: "claude-code",
+          sessionId: "22222222-2222-2222-2222-222222222222",
+          requestId: "req_1",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { captureAvailable: boolean; note: string };
+      expect(body.captureAvailable).toBe(false);
+      expect(body.note).toContain("not captured");
+    });
+
+    it("get_actual_request is rejected for Codex sessions", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_actual_request",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, requestId: "req_1" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+
+    it("get_hidden_calls surfaces only captured calls absent from the log (main + sidecar joined)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_hidden_calls",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        captureAvailable: boolean;
+        hiddenCalls: Array<{ requestId: string; model?: string; isSubagent: boolean }>;
+        counts: {
+          capturedRequestCount: number;
+          capturedWithRequestId: number;
+          loggedRequestIdCount: number;
+          hiddenCallCount: number;
+        };
+      };
+      expect(body.captureAvailable).toBe(true);
+      // req_1 is logged; req_sa1 is logged in the sidecar; only req_hidden is hidden.
+      expect(body.hiddenCalls.map((c) => c.requestId)).toEqual(["req_hidden"]);
+      expect(body.hiddenCalls[0]?.model).toBe("claude-haiku");
+      expect(body.counts.capturedRequestCount).toBe(3);
+      expect(body.counts.hiddenCallCount).toBe(1);
+      // The log records at least the 11 main + 2 sidecar requestIds.
+      expect(body.counts.loggedRequestIdCount).toBeGreaterThanOrEqual(13);
+    });
+
+    it("get_hidden_calls declares captureAvailable:false for a session with no capture file", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_hidden_calls",
+        arguments: { source: "claude-code", sessionId: "22222222-2222-2222-2222-222222222222" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { captureAvailable: boolean };
+      expect(body.captureAvailable).toBe(false);
+    });
+
+    it("get_hidden_calls is rejected for Codex sessions", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_hidden_calls",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+  });
 });

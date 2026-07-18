@@ -18,7 +18,8 @@
  *    recorded per-turn but not re-sent in later requests).
  *  - `estimate` — derived (e.g. cost = token counts x a pricing table).
  *  - `authoritative` — recorded directly by the source of truth, not
- *    derived/estimated (e.g. OTel's billing-computed `cost_usd`, vs. the
+ *    derived/estimated (e.g. OTel's billing-computed `cost_usd`, or wire
+ *    capture's own measured latency and captured wire bytes, vs. the
  *    session log's pricing-table `estimate`).
  *  - `absent` — never recorded by this source at all.
  *  - `not-recorded` — happens outside what this source observes (e.g.
@@ -34,8 +35,12 @@ export type CompletenessStatus =
   | "not-recorded"
   | "unknown";
 
-/** Session-log formats (and OTel, a Claude-Code-only side channel) `sourceCompleteness` can describe. */
-export type SourceKind = "claude-session-jsonl" | "claude-otel" | "codex-session-jsonl";
+/** Session-log formats, plus Claude-Code-only side channels (OTel, wire capture) `sourceCompleteness` can describe. */
+export type SourceKind =
+  | "claude-session-jsonl"
+  | "claude-otel"
+  | "claude-wire-capture"
+  | "codex-session-jsonl";
 
 export interface SourceCompletenessEntry {
   source: SourceKind;
@@ -112,17 +117,38 @@ const CLAUDE_OTEL_DIMENSIONS: SourceCompletenessEntry["dimensions"] = Object.fre
   },
 });
 
+/**
+ * Claude Code wire capture (Goshuin Phase D — the opt-in local pass-through
+ * proxy, `@junrei/capture-proxy`). Unlike the session log, the capture IS the
+ * actual wire bytes, so `content`/`latency` are `authoritative` — this is the
+ * calibration ground truth. Its blind spot is the inverse of the log's:
+ * coverage is `partial` (only requests made while the proxy was running are
+ * seen), and auth headers are deliberately `absent` (redacted at write time).
+ */
+const CLAUDE_WIRE_CAPTURE_DIMENSIONS: SourceCompletenessEntry["dimensions"] = Object.freeze({
+  content: { status: "authoritative", note: "captured wire bytes; auth headers redacted at write" },
+  coverage: { status: "partial", note: "only requests made while the capture proxy was active" },
+  authHeaders: { status: "absent", note: "redacted at write time" },
+  hiddenApiCalls: { status: "partial", note: "visible only when routed through the proxy" },
+  latency: { status: "authoritative", note: "measured at the proxy" },
+});
+
 const SOURCE_TABLES: Readonly<Record<SourceKind, SourceCompletenessEntry["dimensions"]>> =
   Object.freeze({
     "claude-session-jsonl": CLAUDE_DIMENSIONS,
     "claude-otel": CLAUDE_OTEL_DIMENSIONS,
     "codex-session-jsonl": CODEX_DIMENSIONS,
+    "claude-wire-capture": CLAUDE_WIRE_CAPTURE_DIMENSIONS,
   });
 
-/** Stable declaration order regardless of input order — both claude entries before codex. */
+/**
+ * Stable declaration order regardless of input order — Claude session log,
+ * then its OTel and wire-capture side channels, then Codex.
+ */
 const SOURCE_ORDER: readonly SourceKind[] = Object.freeze([
   "claude-session-jsonl",
   "claude-otel",
+  "claude-wire-capture",
   "codex-session-jsonl",
 ]);
 

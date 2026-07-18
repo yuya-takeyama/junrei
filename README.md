@@ -119,6 +119,8 @@ claude mcp add --transport http junrei http://localhost:7867/mcp
 | `get_first_prompt` | The first user prompt of a session. | Claude Code + Codex |
 | `get_repo_overview` | Repo-level rollup across every session in a repo: cost timeline, per-model breakdown, top sessions. | Claude Code + Codex |
 | `get_session_observability` | Claude Code's own OTel export for a session, parsed: authoritative cost, api-request latency, tool-decision/health events. Opt-in — see [OTel ingestion](#otel-ingestion-opt-in). | Claude Code only |
+| `get_actual_request` | The actual captured wire request/response for a `requestId` (opt-in wire capture): request body, response meta, measured latency, `isSubagent`. | Claude Code only |
+| `get_hidden_calls` | Captured API calls whose `requestId` never appears in the session log — the structural cost-undercount evidence (opt-in wire capture). | Claude Code only |
 
 ## How it works
 
@@ -194,6 +196,61 @@ Costs are **estimates**: list-price rates from a bundled snapshot of
 LiteLLM's `model_prices_and_context_window.json`, multiplied by observed
 token counts (including tiered >200k and 5m/1h cache pricing where
 applicable). They are not your actual bill.
+
+## Wire capture (opt-in, local-only)
+
+The session log is a lossy record: it never captures per-request latency, and
+some background API calls (e.g. a task-state classifier) are invisible to it,
+so log-based cost accounting structurally undercounts. **Wire capture** closes
+that gap by recording the actual API traffic — but it is strictly opt-in and
+runs only on your own machine.
+
+`junrei-capture-proxy` is a tiny localhost pass-through proxy. It binds
+`127.0.0.1` **only** (never a public interface), forwards every request to
+`https://api.anthropic.com` unchanged (SSE streams through untouched), and tees
+a copy of each exchange to `~/.junrei/captures/<sessionId>.jsonl`.
+
+**Security / ToS — read before enabling:**
+
+- It captures your **full API traffic, including prompt contents**. Treat the
+  files under `~/.junrei/captures/` as **sensitive**: never commit or share
+  them.
+- **Auth headers are redacted at write time** — `authorization`, `x-api-key`,
+  cookies, and any header whose name contains `token`/`secret` are replaced
+  with `[redacted]` before anything touches disk. The pass-through to the API
+  stays byte-faithful; only the stored copy is redacted.
+- For Anthropic **subscription (OAuth)** accounts, routing traffic through a
+  local proxy sits in a **documented ToS gray zone** (see
+  [docs/milestones/goshuin.md](docs/milestones/goshuin.md)) — it is entirely
+  your own local, opt-in choice. **API-key** usage carries no such caveat.
+- **Retention is user-managed**: delete `~/.junrei/captures` anytime.
+
+Setup — start the proxy, then point a Claude Code session at it:
+
+```sh
+pnpm capture
+# then, in another shell, run Claude Code through the proxy:
+ANTHROPIC_BASE_URL=http://localhost:7967 claude
+```
+
+The proxy prints a full banner (including the exact `ANTHROPIC_BASE_URL` line)
+on startup. Override the port with `--port`, the captures dir with `--dir` (or
+`JUNREI_CAPTURES_DIR`), and the upstream with `--upstream`.
+
+Once captures exist, two MCP tools read them (joined to the session log by the
+same `requestId` the log records):
+
+- **`get_actual_request(sessionRef, requestId)`** — the captured wire request
+  body, response meta (status/model/usage), **measured** `latencyMs`, and
+  `isSubagent` for that request.
+- **`get_hidden_calls(sessionRef)`** — the captured requests whose `requestId`
+  never appears in the session log: the concrete evidence of undercounted
+  cost/latency (each call's content is fetched via `get_actual_request`).
+
+Captures also serve as the **calibration ground truth** for the reconstruction
+layer (`get_reconstructed_request`): whenever a capture exists for a session,
+reconstruction accuracy is measured against the real wire bytes rather than
+assumed (see `experiments/claude-code-capture/recon/`).
 
 ## Development
 
