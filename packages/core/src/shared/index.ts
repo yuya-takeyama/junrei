@@ -59,6 +59,7 @@ export type {
   UsageSummary,
 } from "./metrics.js";
 export { cacheHitRate, foldFileAccess, mergeFileAccess, mergeUsageByModel } from "./metrics.js";
+export { percentileRank } from "./percentile.js";
 export type { CostComponents } from "./pricing/pricing.js";
 export {
   estimateCostComponents,
@@ -107,6 +108,7 @@ export type {
 } from "./timeline.js";
 export { durationBetween } from "./timeline.js";
 export type {
+  TrendBashSummary,
   TrendBucket,
   TrendDelegationCostSplit,
   TrendDelegationSlice,

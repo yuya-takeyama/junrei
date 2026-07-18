@@ -23,6 +23,7 @@ function claudeItem(overrides: Partial<ClaudeSessionListItem> = {}): ClaudeSessi
     modelMix: [],
     usageByModel: [],
     delegation: { main: { tokens: 0 }, subagents: { tokens: 0 } },
+    bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
     ...overrides,
   };
 }
@@ -46,6 +47,7 @@ function codexItem(overrides: Partial<CodexSessionListItem> = {}): CodexSessionL
     modelMix: [],
     usageByModel: [],
     delegation: { main: { tokens: 0 }, subagents: { tokens: 0 } },
+    bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
     ...overrides,
   };
 }
@@ -403,5 +405,93 @@ describe("computeRepoOverview — topSessions", () => {
     const [first, second] = computeRepoOverview(items, REPO).topSessions;
     expect(first?.projectDirName).toBe("-Users-me-proj");
     expect(second?.projectDirName).toBeUndefined();
+  });
+});
+
+describe("computeRepoOverview — bash rollup + distribution", () => {
+  it("sums calls/resultChars across every matched session, including one with zero Bash calls", () => {
+    const items: AnySessionListItem[] = [
+      claudeItem({
+        sessionId: "a",
+        repoRoot: REPO,
+        bashSummary: { calls: 3, resultChars: 100, estimatedTokens: 25, estUsd: 0.01 },
+      }),
+      claudeItem({
+        sessionId: "b",
+        repoRoot: REPO,
+        bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
+      }),
+      codexItem({
+        sessionId: "c",
+        repoRoot: REPO,
+        bashSummary: { calls: 2, resultChars: 50, estimatedTokens: 13, estUsd: 0.02 },
+      }),
+    ];
+    const overview = computeRepoOverview(items, REPO);
+    expect(overview.bash.calls).toBe(5);
+    expect(overview.bash.resultChars).toBe(150);
+    expect(overview.bash.estUsd).toBeCloseTo(0.03);
+  });
+
+  it("partial-sums estUsd, skipping sessions with no known price — never falling back to 0", () => {
+    const items: AnySessionListItem[] = [
+      claudeItem({
+        sessionId: "a",
+        repoRoot: REPO,
+        bashSummary: { calls: 1, resultChars: 100, estimatedTokens: 25, estUsd: 0.5 },
+      }),
+      claudeItem({
+        sessionId: "b",
+        repoRoot: REPO,
+        bashSummary: { calls: 1, resultChars: 200, estimatedTokens: 50 }, // unknown model
+      }),
+    ];
+    const overview = computeRepoOverview(items, REPO);
+    expect(overview.bash.estUsd).toBeCloseTo(0.5);
+    expect(overview.bash.distribution.estUsd).toEqual([0.5]);
+  });
+
+  it("leaves estUsd undefined (never 0) when NOT ONE matched session resolved a known price", () => {
+    const items: AnySessionListItem[] = [
+      claudeItem({
+        repoRoot: REPO,
+        bashSummary: { calls: 4, resultChars: 400, estimatedTokens: 100 },
+      }),
+    ];
+    const overview = computeRepoOverview(items, REPO);
+    expect(overview.bash.estUsd).toBeUndefined();
+    expect(overview.bash.distribution.estUsd).toEqual([]);
+  });
+
+  it("exposes the per-session resultChars distribution ascending sorted, including zero-call sessions as real data points", () => {
+    const items: AnySessionListItem[] = [
+      claudeItem({
+        sessionId: "a",
+        repoRoot: REPO,
+        bashSummary: { calls: 1, resultChars: 900, estimatedTokens: 225 },
+      }),
+      claudeItem({
+        sessionId: "b",
+        repoRoot: REPO,
+        bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
+      }),
+      claudeItem({
+        sessionId: "c",
+        repoRoot: REPO,
+        bashSummary: { calls: 1, resultChars: 300, estimatedTokens: 75 },
+      }),
+    ];
+    const overview = computeRepoOverview(items, REPO);
+    // Ascending, NOT insertion order (900, 0, 300).
+    expect(overview.bash.distribution.resultChars).toEqual([0, 300, 900]);
+  });
+
+  it("returns a zeroed bash rollup with empty distribution arrays for a repo matching no session", () => {
+    const overview = computeRepoOverview([claudeItem({ repoRoot: REPO })], "/no/such/repo");
+    expect(overview.bash).toEqual({
+      calls: 0,
+      resultChars: 0,
+      distribution: { resultChars: [], estUsd: [] },
+    });
   });
 });

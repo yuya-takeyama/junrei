@@ -26,6 +26,7 @@ import {
   type SessionListBounds,
   type SessionListItemBase,
   type SourceAdapter,
+  sliceBashSummary,
   sliceDelegation,
   sliceUsageByModel,
   sumSubagentReturns,
@@ -149,6 +150,11 @@ function toListItem(
     modelMix: computeModelMix(analysis),
     usageByModel: sliceUsageByModel(analysis.totalUsageByModel),
     delegation: sliceDelegation(analysis.delegation),
+    // `analysis.bashStats` is ALREADY the main+every-subagent joint pass
+    // (`analyzeClaudeSession` — see `SessionAnalysisCore.bashStats`'s doc
+    // comment), computed as part of the very analysis this function is
+    // already projecting every other field from — no extra work here.
+    bashSummary: sliceBashSummary(analysis.bashStats),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(analysis.repoRoot !== undefined && { repoRoot: analysis.repoRoot }),
     ...(analysis.worktreeName !== undefined && { worktreeName: analysis.worktreeName }),

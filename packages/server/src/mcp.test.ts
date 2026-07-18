@@ -93,6 +93,40 @@ describe("MCP tools", () => {
     ]);
   });
 
+  it("list_sessions items carry bashSummary sourced from the already-computed session analysis", async () => {
+    // Same fixture session `get_bash_stats`'s own describe block uses (see
+    // its first test's comment): 3 main-thread Bash calls, resultChars 97,
+    // estimatedTokens 35, estUsd 0.00026000000000000003, and `byCommand[0]`
+    // is "pnpm" (51.5% share vs "sleep"'s 48.5%) — `sliceBashSummary` is a
+    // pure projection of that same already-computed `BashStats`, so these
+    // figures must match exactly.
+    client = await connect();
+    const result = await client.callTool({
+      name: "list_sessions",
+      arguments: { source: "claude-code" },
+    });
+    const body = JSON.parse(textOf(result)) as {
+      sessions: Array<{
+        sessionId: string;
+        bashSummary: {
+          calls: number;
+          resultChars: number;
+          estimatedTokens: number;
+          estUsd?: number;
+          topFamily?: string;
+        };
+      }>;
+    };
+    const target = body.sessions.find((s) => s.sessionId === CLAUDE_SESSION_ID);
+    expect(target?.bashSummary).toEqual({
+      calls: 3,
+      resultChars: 97,
+      estimatedTokens: 35,
+      estUsd: 0.00026000000000000003,
+      topFamily: "pnpm",
+    });
+  });
+
   it("get_session_summary works for a Codex session via source: 'codex'", async () => {
     client = await connect();
     const result = await client.callTool({
@@ -372,6 +406,12 @@ describe("MCP tools", () => {
       totalTokens: number;
       costIsComplete: boolean;
       topSessions: Array<{ sessionId: string }>;
+      bash: {
+        calls: number;
+        resultChars: number;
+        estUsd?: number;
+        distribution: { resultChars: number[]; estUsd: number[] };
+      };
       sourceCompleteness: { sources: Array<{ source: string }> };
     };
     // Fixture session 11111111... is the only one whose cwd (/Users/test/proj)
@@ -384,6 +424,16 @@ describe("MCP tools", () => {
     expect(overview.totalTokens).toBe(55695);
     expect(overview.costIsComplete).toBe(true);
     expect(overview.topSessions[0]?.sessionId).toBe(CLAUDE_SESSION_ID);
+    // Single-session repo: the repo-wide bash rollup and its distribution
+    // both collapse to that one session's own bashSummary figures (same
+    // fixture values the list_sessions bashSummary test above asserts).
+    expect(overview.bash.calls).toBe(3);
+    expect(overview.bash.resultChars).toBe(97);
+    expect(overview.bash.estUsd).toBeCloseTo(0.00026000000000000003, 10);
+    expect(overview.bash.distribution).toEqual({
+      resultChars: [97],
+      estUsd: [overview.bash.estUsd],
+    });
     // Multi-source tool: both entries, statically, even though this repo
     // only has Claude sessions.
     expect(overview.sourceCompleteness.sources.map((s) => s.source)).toEqual([
@@ -425,9 +475,23 @@ describe("MCP tools", () => {
       arguments: { repo: "/no/such/repo" },
     });
     expect(result.isError).not.toBe(true);
-    const overview = JSON.parse(textOf(result)) as { sessionCount: number; totalCostUsd: number };
+    const overview = JSON.parse(textOf(result)) as {
+      sessionCount: number;
+      totalCostUsd: number;
+      bash: {
+        calls: number;
+        resultChars: number;
+        estUsd?: number;
+        distribution: { resultChars: number[]; estUsd: number[] };
+      };
+    };
     expect(overview.sessionCount).toBe(0);
     expect(overview.totalCostUsd).toBe(0);
+    expect(overview.bash).toEqual({
+      calls: 0,
+      resultChars: 0,
+      distribution: { resultChars: [], estUsd: [] },
+    });
   });
 
   describe("get_trends", () => {
@@ -530,6 +594,35 @@ describe("MCP tools", () => {
       for (const session of scopedBody.anomalies.topSessions) {
         expect(session.repoKey).toBe("/Users/test/proj");
       }
+    });
+
+    it("bash fields (bucket sums + window summary/delta) flow the same way cost does — repo-scoped to the single-session fixture repo", async () => {
+      // Same repo/fixture as the get_repo_overview bash test above:
+      // /Users/test/proj has exactly one session (CLAUDE_SESSION_ID) with
+      // bashSummary { calls: 3, resultChars: 97, estUsd: 0.00026... }.
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_trends",
+        arguments: { days: 30, repo: "/Users/test/proj" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        buckets: Array<{ bashCalls: number; bashResultChars: number; bashEstUsd?: number }>;
+        summary: {
+          current: { bashResultChars: number; bashEstUsd?: number };
+          previous: { bashResultChars: number; bashEstUsd?: number } | null;
+          delta: { bashResultCharsPct: number | null; bashEstUsdPct: number | null } | null;
+        };
+      };
+      const bucketCallSum = body.buckets.reduce((sum, b) => sum + b.bashCalls, 0);
+      const bucketCharsSum = body.buckets.reduce((sum, b) => sum + b.bashResultChars, 0);
+      expect(bucketCallSum).toBe(3);
+      expect(bucketCharsSum).toBe(97);
+      expect(body.summary.current.bashResultChars).toBe(97);
+      expect(body.summary.current.bashEstUsd).toBeCloseTo(0.00026000000000000003, 10);
+      // No previous-window session for this single-session repo -> no delta.
+      expect(body.summary.previous).toBeNull();
+      expect(body.summary.delta).toBeNull();
     });
   });
 
