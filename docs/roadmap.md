@@ -727,6 +727,27 @@ logs:
   lens stays strictly log-derived; injected CLAUDE.md/MEMORY.md rows simply
   don't exist for current-format sessions.
 
+## Next milestone — Goshuin (proposal, 2026-07-18)
+
+Evidence-grade agent analysis over Junrei MCP: give analyzing agents
+verifiable, provenance-backed access to what actually happened in a session —
+including what the session JSONL alone cannot show (system prompt, tool
+schemas/action space, generation params, injected context, hidden API calls,
+latency). Grounded in the
+[session-log completeness study](./research/claude-code-session-log-completeness.md)
+and new measured verification (API-payload reconstruction from log+disk:
+85–100% byte-exact; per-CLI-version stability of system prompt/tools/params).
+Full insight dump, candidate approaches (A–F), recommended phasing, and open
+decisions: [milestones/goshuin.md](./milestones/goshuin.md).
+
+- ✅ Insight/idea capture: evidence base, six candidate approaches
+  (drill-down tools, blind-spot metadata, reconstruction "virtual wire",
+  wire-capture ingestion, OTel ingestion, eval-trace export), open decisions
+- ⬜ Decision stage: settle the open decisions (C-first vs D-first,
+  epistemics of labeled non-log-derived values, template-library logistics,
+  MCP surface philosophy)
+- ⬜ Implementation: phased per the decisions
+
 ## Later (post-v1)
 
 - 🚧 Cross-session aggregates & trends — repo-level overview shipped
