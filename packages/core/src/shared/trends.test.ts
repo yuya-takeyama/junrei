@@ -12,6 +12,7 @@ function item(overrides: Partial<TrendSessionItem> = {}): TrendSessionItem {
     compactionCount: 0,
     usageByModel: [],
     delegation: { main: { tokens: 0, costUsd: 0 }, subagents: { tokens: 0, costUsd: 0 } },
+    bashSummary: { calls: 0, resultChars: 0 },
     ...overrides,
   };
 }
@@ -255,6 +256,53 @@ describe("computeTrends — byModel and delegation aggregation", () => {
     const report = computeTrends(items, { nowMs, days: 1, timeZone: "UTC" });
     expect(report.buckets[0]?.subagentReturn).toEqual({ count: 3, totalChars: 500, maxChars: 250 });
   });
+
+  it("sums bashSummary.calls/resultChars across sessions and partial-sums estUsd, skipping unknown-model sessions", () => {
+    const nowMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const items = [
+      item({
+        sessionId: "a",
+        startedAt: "2026-07-01T01:00:00.000Z",
+        bashSummary: { calls: 3, resultChars: 1000, estUsd: 0.5 },
+      }),
+      item({
+        sessionId: "b",
+        startedAt: "2026-07-01T02:00:00.000Z",
+        bashSummary: { calls: 2, resultChars: 500 }, // unknown model — no estUsd
+      }),
+      item({
+        sessionId: "c",
+        startedAt: "2026-07-01T03:00:00.000Z",
+        bashSummary: { calls: 1, resultChars: 200, estUsd: 0.1 },
+      }),
+    ];
+    const report = computeTrends(items, { nowMs, days: 1, timeZone: "UTC" });
+    expect(report.buckets[0]?.bashCalls).toBe(6);
+    expect(report.buckets[0]?.bashResultChars).toBe(1700);
+    expect(report.buckets[0]?.bashEstUsd).toBeCloseTo(0.6);
+  });
+
+  it("leaves bashEstUsd undefined (never 0) when NOT ONE session in the bucket resolved a known estUsd", () => {
+    const nowMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const items = [
+      item({
+        startedAt: "2026-07-01T01:00:00.000Z",
+        bashSummary: { calls: 5, resultChars: 900 },
+      }),
+    ];
+    const report = computeTrends(items, { nowMs, days: 1, timeZone: "UTC" });
+    expect(report.buckets[0]?.bashCalls).toBe(5);
+    expect(report.buckets[0]?.bashResultChars).toBe(900);
+    expect(report.buckets[0]?.bashEstUsd).toBeUndefined();
+  });
+
+  it("zero-fills bashCalls/bashResultChars (not undefined) for a day with no sessions", () => {
+    const nowMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const report = computeTrends([], { nowMs, days: 1, timeZone: "UTC" });
+    expect(report.buckets[0]?.bashCalls).toBe(0);
+    expect(report.buckets[0]?.bashResultChars).toBe(0);
+    expect(report.buckets[0]?.bashEstUsd).toBeUndefined();
+  });
 });
 
 describe("computeTrends — cacheHitRate reuse", () => {
@@ -313,6 +361,40 @@ describe("computeTrends — previous-window summary and delta", () => {
     // (20 - 10) / 10 * 100 = 100% cost growth; (2 - 2) / 2 * 100 = 0% session-count change.
     expect(report.summary.delta?.totalCostUsdPct).toBeCloseTo(100);
     expect(report.summary.delta?.sessionCountPct).toBeCloseTo(0);
+  });
+
+  it("computes bashResultCharsPct/bashEstUsdPct the same way totalCostUsdPct flows, null-safely when a side is unpriced", () => {
+    const nowMs = Date.parse("2026-07-14T12:00:00.000Z");
+    const items = [
+      // Current window: 2 sessions, both priced.
+      item({
+        sessionId: "cur1",
+        startedAt: "2026-07-09T00:00:00.000Z",
+        bashSummary: { calls: 1, resultChars: 800, estUsd: 0.8 },
+      }),
+      item({
+        sessionId: "cur2",
+        startedAt: "2026-07-10T00:00:00.000Z",
+        bashSummary: { calls: 1, resultChars: 200, estUsd: 0.2 },
+      }),
+      // Previous window: 1 session, unpriced model (no estUsd).
+      item({
+        sessionId: "prev1",
+        startedAt: "2026-07-02T00:00:00.000Z",
+        bashSummary: { calls: 1, resultChars: 500 },
+      }),
+    ];
+    const report = computeTrends(items, { nowMs, days: 7, timeZone: "UTC" });
+
+    expect(report.summary.current.bashResultChars).toBe(1000);
+    expect(report.summary.previous?.bashResultChars).toBe(500);
+    // (1000 - 500) / 500 * 100 = 100%
+    expect(report.summary.delta?.bashResultCharsPct).toBeCloseTo(100);
+
+    expect(report.summary.current.bashEstUsd).toBeCloseTo(1.0);
+    expect(report.summary.previous?.bashEstUsd).toBeUndefined();
+    // previous window's bashEstUsd is unknown -> null, not a computed value.
+    expect(report.summary.delta?.bashEstUsdPct).toBeNull();
   });
 
   it("previous is null when the prior window has zero matching sessions, and so is delta", () => {

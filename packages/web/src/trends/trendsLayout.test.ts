@@ -32,6 +32,8 @@ function bucket(date: string, overrides: Partial<TrendBucket> = {}): TrendBucket
     cacheHitRate: null,
     compactionCount: 0,
     subagentReturn: null,
+    bashCalls: 0,
+    bashResultChars: 0,
     ...overrides,
   };
 }

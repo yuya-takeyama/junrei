@@ -34,6 +34,7 @@ import {
   type SessionListBounds,
   type SessionListItemBase,
   type SourceAdapter,
+  sliceBashSummary,
   sliceDelegation,
   sliceUsageByModel,
 } from "./shared.js";
@@ -358,6 +359,17 @@ function toCodexListItem(
     delegation: sliceDelegation(
       computeDelegationSummary(analysis.usage, totalUsage, totalUsageByModel),
     ),
+    // `analysis.bashStats` is this session's OWN main-thread-only value
+    // (`analyzeCodexSession` — see `SessionAnalysisCore.bashStats`'s doc
+    // comment), NOT the forest-inclusive joint recompute `getCodexSession`
+    // does for the detail view (`computeForestBashStats`, which re-parses
+    // every descendant sub-agent rollout — too expensive to pay for every
+    // row of every list build). A parent session with sub-agents therefore
+    // shows a SMALLER `bashSummary` here than its own detail view would —
+    // same honest-partial-figure posture as a Codex placeholder-dominated
+    // session's own totals (see `BashSummary`'s doc comment), just for a
+    // different reason (list-time cost, not unknown data).
+    bashSummary: sliceBashSummary(analysis.bashStats),
     ...(analysis.cwd !== undefined && { cwd: analysis.cwd }),
     ...(repoRoot !== undefined && { repoRoot }),
     ...(analysis.gitRepositoryUrl !== undefined && { repoUrl: analysis.gitRepositoryUrl }),

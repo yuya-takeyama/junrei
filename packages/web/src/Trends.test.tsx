@@ -36,6 +36,8 @@ const bucketDefaults: Omit<TrendBucket, "date"> = {
   cacheHitRate: null,
   compactionCount: 0,
   subagentReturn: null,
+  bashCalls: 0,
+  bashResultChars: 0,
 };
 
 function bucket(date: string, overrides: Partial<TrendBucket> = {}): TrendBucket {
@@ -123,13 +125,27 @@ describe("TrendsView — typical report", () => {
       }),
     ],
     summary: {
-      current: { totalCostUsd: 47, sessionCount: 8, cacheHitRate: 0.7, subagentCostShare: 0.489 },
-      previous: { totalCostUsd: 30, sessionCount: 6, cacheHitRate: 0.6, subagentCostShare: 0.2 },
+      current: {
+        totalCostUsd: 47,
+        sessionCount: 8,
+        cacheHitRate: 0.7,
+        subagentCostShare: 0.489,
+        bashResultChars: 0,
+      },
+      previous: {
+        totalCostUsd: 30,
+        sessionCount: 6,
+        cacheHitRate: 0.6,
+        subagentCostShare: 0.2,
+        bashResultChars: 0,
+      },
       delta: {
         totalCostUsdPct: 56.7,
         sessionCountPct: 33.3,
         cacheHitRatePts: 10,
         subagentCostSharePts: 28.9,
+        bashResultCharsPct: null,
+        bashEstUsdPct: null,
       },
     },
     anomalies: {
@@ -230,7 +246,13 @@ describe("TrendsView — null-heavy report (no previous window, unpriced/undefin
       }),
     ],
     summary: {
-      current: { totalCostUsd: 3, sessionCount: 2, cacheHitRate: null, subagentCostShare: null },
+      current: {
+        totalCostUsd: 3,
+        sessionCount: 2,
+        cacheHitRate: null,
+        subagentCostShare: null,
+        bashResultChars: 0,
+      },
       previous: null,
       delta: null,
     },
@@ -275,7 +297,13 @@ describe("TrendsView — empty window (zero sessions)", () => {
     },
     buckets: [bucket("2026-07-01"), bucket("2026-07-02")],
     summary: {
-      current: { totalCostUsd: 0, sessionCount: 0, cacheHitRate: null, subagentCostShare: null },
+      current: {
+        totalCostUsd: 0,
+        sessionCount: 0,
+        cacheHitRate: null,
+        subagentCostShare: null,
+        bashResultChars: 0,
+      },
       previous: null,
       delta: null,
     },

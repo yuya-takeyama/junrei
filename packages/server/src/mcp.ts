@@ -998,9 +998,12 @@ export function createMcpServer(): McpServer {
         "overview: turns, tool calls/errors, subagents (Claude only), compactions, tokens, " +
         'estimated cost (USD). Each item\'s `source` field is "claude-code" or "codex". Each ' +
         "item also carries `repoRoot`/`worktreeName` (repo-level grouping key — see " +
-        "get_repo_overview), a per-model `usageByModel` breakdown, and a `delegation` " +
-        "main-vs-subagents split, so a repo- or model-level rollup can be built without " +
-        "fetching every session's full summary. Every response includes sourceCompleteness — " +
+        "get_repo_overview), a per-model `usageByModel` breakdown, a `delegation` " +
+        "main-vs-subagents split, and a `bashSummary` (Bash calls/resultChars/estimatedTokens, " +
+        "plus estUsd and topFamily where knowable — see get_bash_stats for the full per-session " +
+        "breakdown; get_repo_overview's `bash` field for the repo-wide baseline to compare it " +
+        "against), so a repo- or model-level rollup can be built without fetching every " +
+        "session's full summary. Every response includes sourceCompleteness — " +
         "a machine-readable declaration of what the underlying session source cannot show; " +
         "treat absent/not-recorded dimensions as unknowable from this data, not as evidence " +
         "of absence.",
@@ -1316,7 +1319,12 @@ export function createMcpServer(): McpServer {
       description:
         "Repo-level retrospective across every session (both harnesses) in one repo: total " +
         "cost/tokens, a per-day cost timeline, a merged per-model breakdown, the main-vs-" +
-        "subagents delegation split, and the top 5 sessions by cost. `repo` accepts either a " +
+        "subagents delegation split, the top 5 sessions by cost, and a repo-wide Bash rollup " +
+        "(`bash.calls`/`resultChars`/`estUsd`) with `bash.distribution` — every matched " +
+        "session's own `resultChars`/`estUsd`, ascending — for ranking one session's own " +
+        "list_sessions `bashSummary` against the repo baseline (e.g. via a percentile-rank " +
+        "computation over `distribution.resultChars`: what fraction of this repo's sessions " +
+        "had less Bash output than this one). `repo` accepts either a " +
         "`repoRoot` absolute path (a list_sessions item's `repoRoot` field — a worktree " +
         "session, `.claude/worktrees/<name>` or Codex's `$CODEX_HOME/worktrees/<hash>`, " +
         "collapses into its parent repo's key, see `worktreeName`) " +
@@ -1356,10 +1364,12 @@ export function createMcpServer(): McpServer {
         "Multi-day trend report across every session (both harnesses), globally or scoped to " +
         "one repo: cost/tokens bucketed by LOCAL calendar day (zero-filled) over `days` days " +
         "ending today, each day's per-model breakdown and main-vs-subagents delegation cost " +
-        "split, cache hit rate, and merged subagent-return-size stats (count/total/max chars — " +
+        "split, cache hit rate, merged subagent-return-size stats (count/total/max chars — " +
         'check the mean, totalChars/count, against the ~1-2k token "typical worker summary" ' +
-        "benchmark); a current-vs-previous-window summary with null-safe deltas (cost %, " +
-        "session-count %, cache-hit-rate points, subagent-cost-share points); simple spike-day " +
+        "benchmark), and Bash rollup fields (`bashCalls`/`bashResultChars`/`bashEstUsd`); a " +
+        "current-vs-previous-window summary with null-safe deltas (cost %, session-count %, " +
+        "cache-hit-rate points, subagent-cost-share points, `bashResultCharsPct`, " +
+        "`bashEstUsdPct`); simple spike-day " +
         "detection (days whose cost is a population-stddev outlier); and the top 5 sessions by " +
         "cost in the current window. Use this — not get_repo_overview's all-time single-repo " +
         "rollup — for cross-session, multi-day questions: is cost/token usage by model trending " +

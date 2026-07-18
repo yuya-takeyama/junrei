@@ -56,6 +56,23 @@ export interface TrendSubagentReturn {
 }
 
 /**
+ * Bash/shell-command $ + volume rollup for one session — structurally the
+ * server's `BashSummary` (`sources/shared.ts`), minus `topFamily`: a
+ * per-session "which command family dominates" string doesn't aggregate
+ * meaningfully across a whole bucket/window of sessions the way the three
+ * numeric fields here do, so it's dropped rather than carried along unused.
+ * `estUsd` is the SAME partial-sum-when-known convention as
+ * `BashStats.totals.estUsd` (`@junrei/core`'s `bash-stats.ts`): undefined
+ * only when this session's Bash spend couldn't be priced at all (unknown
+ * model), never `0` for "nothing spent".
+ */
+export interface TrendBashSummary {
+  calls: number;
+  resultChars: number;
+  estUsd?: number;
+}
+
+/**
  * The subset of a session-list item `computeTrends` reads. Every real list
  * item (`ClaudeSessionListItem` / `CodexSessionListItem`, server-side)
  * satisfies this structurally — see the module doc comment. `projectDirName`
@@ -86,6 +103,15 @@ export interface TrendSessionItem {
    * rather than reporting a fake all-zero count.
    */
   subagentReturn?: TrendSubagentReturn;
+  /**
+   * Required (not optional), mirroring how `totalCostUsd`/`usageByModel`
+   * flow through this interface — both harnesses' list items always carry a
+   * real `bashSummary` (a session with zero Bash calls still has one, with
+   * `calls: 0`; see `sources/shared.ts`'s `sliceBashSummary`), so there is no
+   * "this harness doesn't have the concept" case here the way there is for
+   * `subagentReturn`.
+   */
+  bashSummary: TrendBashSummary;
 }
 
 export interface TrendsOptions {
@@ -166,6 +192,19 @@ export interface TrendBucket {
   compactionCount: number;
   /** Merged across every session in the bucket that had one — null when none did. */
   subagentReturn: TrendSubagentReturn | null;
+  /** Sum of every session's `bashSummary.calls` in this bucket. */
+  bashCalls: number;
+  /** Sum of every session's `bashSummary.resultChars` in this bucket. */
+  bashResultChars: number;
+  /**
+   * Sum of every session's `bashSummary.estUsd` in this bucket, skipping any
+   * session whose own `estUsd` was unknown — same partial-sum-when-known
+   * convention as `BashStats.totals.estUsd` (`bash-stats.ts`), NOT
+   * `sumOptional`'s "any missing input poisons the whole sum" rule that
+   * `mainCostUsd`/`subagentsCostUsd` below use. Undefined only when NOT ONE
+   * session in this bucket resolved a known `estUsd`, never `0`.
+   */
+  bashEstUsd?: number;
 }
 
 /** Totals over one whole window (current or previous) — see `TrendsReport.summary`. */
@@ -176,6 +215,10 @@ export interface TrendWindowTotals {
   cacheHitRate: number | null;
   /** Subagent cost as a share of total cost — null when total cost is 0 or any contributing session's subagent slice is unpriced. */
   subagentCostShare: number | null;
+  /** Sum of `bashSummary.resultChars` across every session in the window — always known (chars, unlike $, need no pricing). */
+  bashResultChars: number;
+  /** Same partial-sum-when-known convention as `TrendBucket.bashEstUsd` — undefined only when NOT ONE session in the window resolved a known `estUsd`. */
+  bashEstUsd?: number;
 }
 
 /** Null-safe current-vs-previous deltas — every field null when the corresponding pair can't be compared (see each field's producing formula). */
@@ -187,6 +230,10 @@ export interface TrendDelta {
   cacheHitRatePts: number | null;
   /** Percentage-POINT change (not percent) — null when either side is null. */
   subagentCostSharePts: number | null;
+  /** Same null-when-previous-0 rule as `totalCostUsdPct` — `bashResultChars` is always known, so this is null ONLY on a divide-by-zero previous window. */
+  bashResultCharsPct: number | null;
+  /** Same rule as `bashResultCharsPct`, PLUS null whenever either window's `bashEstUsd` itself is unknown (see `pctChangeOptional`). */
+  bashEstUsdPct: number | null;
 }
 
 /** One day whose cost was a statistical outlier — see `computeTrends`'s spike-detection doc comment. */
@@ -343,6 +390,11 @@ interface MutableBucket {
   subagentReturnChars: number;
   /** Max across every session's own `subagentReturn.maxChars` in this bucket — NOT a sum, see `TrendSubagentReturn.maxChars`'s doc comment. */
   subagentReturnMaxChars: number;
+  bashCalls: number;
+  bashResultChars: number;
+  bashEstUsd: number;
+  /** Whether ANY session in this bucket resolved a known `bashSummary.estUsd` — see `TrendBucket.bashEstUsd`'s doc comment. */
+  bashEstUsdKnown: boolean;
 }
 
 function freshBucket(date: string): MutableBucket {
@@ -363,6 +415,10 @@ function freshBucket(date: string): MutableBucket {
     subagentReturnCount: 0,
     subagentReturnChars: 0,
     subagentReturnMaxChars: 0,
+    bashCalls: 0,
+    bashResultChars: 0,
+    bashEstUsd: 0,
+    bashEstUsdKnown: false,
   };
 }
 
@@ -401,6 +457,13 @@ function accumulate(bucket: MutableBucket, item: TrendSessionItem): void {
       item.subagentReturn.maxChars,
     );
   }
+
+  bucket.bashCalls += item.bashSummary.calls;
+  bucket.bashResultChars += item.bashSummary.resultChars;
+  if (item.bashSummary.estUsd !== undefined) {
+    bucket.bashEstUsd += item.bashSummary.estUsd;
+    bucket.bashEstUsdKnown = true;
+  }
 }
 
 /** `cacheHitRate` over `tokens`, but null (not 0) when there's no effective-input volume — see `TrendBucket.cacheHitRate`'s doc comment. */
@@ -434,6 +497,9 @@ function finalizeBucket(bucket: MutableBucket): TrendBucket {
             maxChars: bucket.subagentReturnMaxChars,
           }
         : null,
+    bashCalls: bucket.bashCalls,
+    bashResultChars: bucket.bashResultChars,
+    ...(bucket.bashEstUsdKnown && { bashEstUsd: bucket.bashEstUsd }),
   };
 }
 
@@ -450,6 +516,9 @@ function windowTotals(items: readonly TrendSessionItem[]): TrendWindowTotals {
     cacheCreationTokens: 0,
   };
   let subagentCostUsd: number | undefined = 0;
+  let bashResultChars = 0;
+  let bashEstUsd = 0;
+  let bashEstUsdKnown = false;
 
   for (const item of items) {
     totalCostUsd += item.totalCostUsd;
@@ -460,6 +529,11 @@ function windowTotals(items: readonly TrendSessionItem[]): TrendWindowTotals {
       tokens.cacheCreationTokens += m.cacheCreationTokens;
     }
     subagentCostUsd = sumOptional(subagentCostUsd, item.delegation.subagents.costUsd);
+    bashResultChars += item.bashSummary.resultChars;
+    if (item.bashSummary.estUsd !== undefined) {
+      bashEstUsd += item.bashSummary.estUsd;
+      bashEstUsdKnown = true;
+    }
   }
 
   const subagentCostShare =
@@ -470,6 +544,8 @@ function windowTotals(items: readonly TrendSessionItem[]): TrendWindowTotals {
     sessionCount: items.length,
     cacheHitRate: cacheHitRateOrNull(tokens),
     subagentCostShare,
+    bashResultChars,
+    ...(bashEstUsdKnown && { bashEstUsd }),
   };
 }
 
@@ -483,12 +559,22 @@ function ptsChange(current: number | null, previous: number | null): number | nu
   return current === null || previous === null ? null : (current - previous) * 100;
 }
 
+/** `pctChange`, but null-safe over an optional pair (e.g. `bashEstUsd`, unknown when NOT ONE session in a window priced) rather than `pctChange`'s bare `number`s — null whenever EITHER side is undefined, in addition to `pctChange`'s own null-when-previous-0 rule. */
+function pctChangeOptional(
+  current: number | undefined,
+  previous: number | undefined,
+): number | null {
+  return current === undefined || previous === undefined ? null : pctChange(current, previous);
+}
+
 function computeDelta(current: TrendWindowTotals, previous: TrendWindowTotals): TrendDelta {
   return {
     totalCostUsdPct: pctChange(current.totalCostUsd, previous.totalCostUsd),
     sessionCountPct: pctChange(current.sessionCount, previous.sessionCount),
     cacheHitRatePts: ptsChange(current.cacheHitRate, previous.cacheHitRate),
     subagentCostSharePts: ptsChange(current.subagentCostShare, previous.subagentCostShare),
+    bashResultCharsPct: pctChange(current.bashResultChars, previous.bashResultChars),
+    bashEstUsdPct: pctChangeOptional(current.bashEstUsd, previous.bashEstUsd),
   };
 }
 

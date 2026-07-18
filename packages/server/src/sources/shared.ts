@@ -1,4 +1,5 @@
 import type {
+  BashStats,
   DelegationSummary,
   ModelUsageSummary,
   RecordDetail,
@@ -96,6 +97,68 @@ export function sliceDelegation(delegation: DelegationSummary): DelegationLite {
 }
 
 /**
+ * Slim Bash/shell-command rollup for a session-list row, sourced from
+ * `SessionAnalysisCore.bashStats` (`analysis.bashStats.totals` +
+ * `byCommand[0]`) — both harnesses' list builds already run the full session
+ * analysis to populate every other list-item field, so `bashStats` is
+ * ALREADY COMPUTED by the time `sliceBashSummary` runs; this is a pure
+ * projection, never a re-parse. Unlike `subagentReturn` (undefined when a
+ * harness/session has no such data), `bashSummary` itself is always present
+ * — `BashStats` is a required field on `SessionAnalysisCore`, so even a
+ * session with zero Bash calls gets a real (all-zero-ish) summary rather
+ * than an absent one. `estUsd`/`topFamily` are the only conditionally-absent
+ * pieces, each for its own honest reason (see their own doc comments below).
+ * Feeds the trends aggregate's per-day/window Bash rollup (`@junrei/core`'s
+ * `computeTrends`, `TrendSessionItem.bashSummary`) and, summed across a
+ * repo's sessions, `overview.ts`'s `RepoOverview.bash`.
+ */
+export interface BashSummary {
+  /** `BashStats.totals.calls`. */
+  calls: number;
+  /** `BashStats.totals.resultChars`. */
+  resultChars: number;
+  /** `BashStats.totals.estimatedTokens`. */
+  estimatedTokens: number;
+  /**
+   * `BashStats.totals.estUsd` — the same partial-sum-when-known convention
+   * as that field (see `bash-stats.ts`'s module doc comment): undefined only
+   * when NOT ONE Bash call anywhere in this session resolved a known price
+   * (unknown/unpriced model), never `0` for "genuinely free".
+   */
+  estUsd?: number;
+  /**
+   * The resolved executable of this session's LARGEST command group by
+   * `totalResultChars` — `BashStats.byCommand[0]?.family` (that array is
+   * already sorted `totalResultChars` desc, see `computeBashStats`).
+   * Undefined only for a session with zero Bash calls at all (`byCommand` is
+   * empty) — never a guess at "the" dominant family when there's no data.
+   */
+  topFamily?: string;
+}
+
+/**
+ * Project a full `BashStats` (core) down to the list item's lean
+ * `BashSummary` — see that type's doc comment. A session whose Bash entries
+ * are placeholder-dominated (Codex's `local_shell_call` synthesized
+ * "exited with code N" results — see `NeutralBashCall.resultIsPlaceholder`)
+ * simply carries whatever smaller/absent figures `BashStats.totals` itself
+ * already computes for that case (placeholders are excluded from
+ * `estUsd`/`resultChars` sums at the `computeBashStats` level) — this
+ * function never re-derives or invents a number `BashStats` didn't already
+ * produce.
+ */
+export function sliceBashSummary(bashStats: BashStats): BashSummary {
+  const top = bashStats.byCommand[0];
+  return {
+    calls: bashStats.totals.calls,
+    resultChars: bashStats.totals.resultChars,
+    estimatedTokens: bashStats.totals.estimatedTokens,
+    ...(bashStats.totals.estUsd !== undefined && { estUsd: bashStats.totals.estUsd }),
+    ...(top !== undefined && { topFamily: top.family }),
+  };
+}
+
+/**
  * Fields genuinely shared by both harnesses' list items. `projectDirName` and
  * `subagentCount` are deliberately NOT here — Claude's `projectDirName` has
  * no Codex equivalent (see `sources/codex.ts`'s comment on how the web
@@ -140,6 +203,8 @@ export interface SessionListItemBase {
   usageByModel: UsageByModelEntry[];
   /** Slim main-vs-subagents cost/token split — see `DelegationLite`. */
   delegation: DelegationLite;
+  /** Slim Bash/shell-command rollup (calls/chars/tokens/$, top command family) — see `BashSummary`. */
+  bashSummary: BashSummary;
   /**
    * Sum of subagent `returnedChars` for this session, how many subagents
    * contributed one, and the single largest one (`maxChars`) — see

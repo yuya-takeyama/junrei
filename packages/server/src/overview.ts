@@ -64,6 +64,44 @@ export interface RepoOverviewDelegationSlice {
   costUsd?: number;
 }
 
+/**
+ * Every matched session's own `bashSummary.resultChars` (ascending — 0 for a
+ * session with no Bash calls, since that's still a real, meaningful data
+ * point in the distribution) and `bashSummary.estUsd` (ascending, but only
+ * from sessions whose `estUsd` was actually known — same partial-sum-when-
+ * known posture `BashSummary.estUsd` itself already has, so `estUsd.length`
+ * can be shorter than `resultChars.length`/`RepoOverview.sessionCount`).
+ *
+ * RAW sorted arrays, deliberately NOT precomputed quantile markers
+ * (median/p90/...): `@junrei/core`'s `percentileRank` needs the actual
+ * per-session distribution to compute an EXACT rank for an arbitrary
+ * session's own figure ("this session is P88 for this repo") — a caller
+ * holding only a handful of quantile snapshots could at best interpolate an
+ * approximate rank. Response size stays bounded regardless of this choice:
+ * `matched` (and therefore both arrays) can never exceed `MAX_LIST_LIMIT`
+ * (500) sessions, the same ceiling every other `computeRepoOverview` caller
+ * already accepts (`getRepoOverview`'s own doc comment) — no extra cap
+ * needed here.
+ */
+export interface RepoOverviewBashDistribution {
+  resultChars: number[];
+  estUsd: number[];
+}
+
+/**
+ * Repo-wide Bash/shell-command rollup — see `RepoOverview.bash`. `estUsd`
+ * follows the same partial-sum-when-known convention as
+ * `BashSummary.estUsd`/`BashStats.totals.estUsd`: undefined only when NOT
+ * ONE matched session resolved a known price, never `0`.
+ */
+export interface RepoOverviewBash {
+  calls: number;
+  resultChars: number;
+  estUsd?: number;
+  /** Per-session values feeding `percentileRank` (`@junrei/core`) — see `RepoOverviewBashDistribution`'s doc comment. */
+  distribution: RepoOverviewBashDistribution;
+}
+
 /** One of the top-5-by-cost sessions in `RepoOverview.topSessions`. */
 export interface RepoOverviewTopSession {
   sessionId: string;
@@ -103,6 +141,8 @@ export interface RepoOverview {
   delegation: { main: RepoOverviewDelegationSlice; subagents: RepoOverviewDelegationSlice };
   /** Top 5 matched sessions by cost, descending. */
   topSessions: RepoOverviewTopSession[];
+  /** Repo-wide Bash/shell-command totals + per-session distribution — see `RepoOverviewBash`. */
+  bash: RepoOverviewBash;
 }
 
 const TOP_SESSIONS_LIMIT = 5;
@@ -148,6 +188,12 @@ export function computeRepoOverview(
   let subagentTokens = 0;
   let mainCost: number | undefined = 0;
   let subagentCost: number | undefined = 0;
+  let bashCalls = 0;
+  let bashResultChars = 0;
+  let bashEstUsd = 0;
+  let bashEstUsdKnown = false;
+  const bashResultCharsSamples: number[] = [];
+  const bashEstUsdSamples: number[] = [];
 
   for (const item of matched) {
     sourceCounts[item.source] += 1;
@@ -185,7 +231,19 @@ export function computeRepoOverview(
     subagentTokens += item.delegation.subagents.tokens;
     mainCost = sumOptional(mainCost, item.delegation.main.costUsd);
     subagentCost = sumOptional(subagentCost, item.delegation.subagents.costUsd);
+
+    bashCalls += item.bashSummary.calls;
+    bashResultChars += item.bashSummary.resultChars;
+    bashResultCharsSamples.push(item.bashSummary.resultChars);
+    if (item.bashSummary.estUsd !== undefined) {
+      bashEstUsd += item.bashSummary.estUsd;
+      bashEstUsdKnown = true;
+      bashEstUsdSamples.push(item.bashSummary.estUsd);
+    }
   }
+
+  bashResultCharsSamples.sort((a, b) => a - b);
+  bashEstUsdSamples.sort((a, b) => a - b);
 
   const totalOutputTokens = [...byModel.values()].reduce((sum, m) => sum + m.outputTokens, 0);
 
@@ -229,6 +287,15 @@ export function computeRepoOverview(
       },
     },
     topSessions,
+    bash: {
+      calls: bashCalls,
+      resultChars: bashResultChars,
+      ...(bashEstUsdKnown && { estUsd: bashEstUsd }),
+      distribution: {
+        resultChars: bashResultCharsSamples,
+        estUsd: bashEstUsdSamples,
+      },
+    },
   };
 }
 

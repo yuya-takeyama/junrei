@@ -35,6 +35,7 @@ const claudeItem: ClaudeSessionListItem = {
     },
   ],
   delegation: { main: { tokens: 800, costUsd: 8 }, subagents: { tokens: 200, costUsd: 2 } },
+  bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
 };
 
 const codexItem: CodexSessionListItem = {
@@ -65,6 +66,7 @@ const codexItem: CodexSessionListItem = {
     },
   ],
   delegation: { main: { tokens: 500, costUsd: 3 }, subagents: { tokens: 0, costUsd: 0 } },
+  bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
 };
 
 describe("computeFilteredOverview", () => {

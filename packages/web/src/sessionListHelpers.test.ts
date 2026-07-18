@@ -28,6 +28,7 @@ const claudeItem: ClaudeSessionListItem = {
   modelMix: [],
   usageByModel: [],
   delegation: { main: { tokens: 0 }, subagents: { tokens: 0 } },
+  bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
 };
 
 const codexItem: CodexSessionListItem = {
@@ -48,6 +49,7 @@ const codexItem: CodexSessionListItem = {
   modelMix: [],
   usageByModel: [],
   delegation: { main: { tokens: 0 }, subagents: { tokens: 0 } },
+  bashSummary: { calls: 0, resultChars: 0, estimatedTokens: 0 },
 };
 
 describe("sessionsListQuery", () => {
