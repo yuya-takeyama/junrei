@@ -125,6 +125,35 @@ describe("Claude Code timeline + record routes", () => {
     expect(await res.json()).toEqual({ error: "record not found" });
   });
 
+  it("GET /api/sessions/claude-code/:id/evaluation-trace returns the full uncapped evaluation trace", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/evaluation-trace`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      schema: string;
+      session: { sessionId: string };
+      sourceCompleteness: { sources: Array<{ source: string }> };
+      enrichment: { otel: { consulted: boolean }; captures: { consulted: boolean } };
+      events: Array<{ name: string }>;
+    };
+    expect(body.schema).toBe("junrei-evaluation-trace/v1");
+    expect(body.session.sessionId).toBe(SESSION_ID);
+    expect(body.sourceCompleteness.sources.map((s) => s.source)).toContain("claude-session-jsonl");
+    // Declared, never silently absent — the opt-in channels weren't configured for this test.
+    expect(body.enrichment.otel.consulted).toBe(true);
+    expect(body.enrichment.captures.consulted).toBe(true);
+    expect(body.events.length).toBeGreaterThan(0);
+    expect(body.events.some((e) => e.name === "gen_ai.user.message")).toBe(true);
+    expect(body.events.some((e) => e.name === "junrei.subagent_launch")).toBe(true);
+  });
+
+  it("GET .../evaluation-trace 404s for an unknown session id", async () => {
+    const app = createApp();
+    const res = await app.request("/api/sessions/claude-code/does-not-exist/evaluation-trace");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "session not found" });
+  });
+
   it("GET /api/sessions/claude-code/:id/agents/:agentId returns { analysis } for the sidecar transcript", async () => {
     const app = createApp();
     const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/agents/${AGENT_ID}`);

@@ -56,69 +56,6 @@ emulator, added to `aqua.yaml` via a local registry —
 aqua registry), uploads the existing core fixtures, and exercises the store
 end to end; it skips gracefully when `kumo` isn't on `PATH`.
 
-## Current milestone — Goshuin (decided 2026-07-18)
-
-Evidence-grade agent analysis over Junrei MCP: give analyzing agents
-verifiable, provenance-backed access to what actually happened in a session —
-including what the session JSONL alone cannot show (system prompt, tool
-schemas/action space, generation params, injected context, hidden API calls,
-latency). Grounded in the
-[session-log completeness study](./research/claude-code-session-log-completeness.md)
-and new measured verification (API-payload reconstruction from log+disk:
-85–100% byte-exact; per-CLI-version stability of system prompt/tools/params).
-Full insight dump, candidate approaches (A–F), adopted phasing, and the
-decision record: [milestones/goshuin.md](./milestones/goshuin.md).
-
-- ✅ Insight/idea capture: evidence base, six candidate approaches
-  (drill-down tools, blind-spot metadata, reconstruction "virtual wire",
-  wire-capture ingestion, OTel ingestion, eval-trace export), open decisions
-- ✅ Decision stage (2026-07-18): all nine open decisions settled — C-first
-  (reconstruction first-class, capture as opt-in calibrator); labeled
-  confidence classes (`exact`/`template`/`disk-contingent`/`unknown`)
-  admitted; drift = `disk-contingent` label + mtime hint, no watcher;
-  user-local template library (`~/.junrei/templates/`, never in-repo);
-  drill-down tools added to MCP (9 → 11); capture-proxy constraints fixed
-  (local-only, opt-in, redact-at-write, ToS warning), UX deferred to D;
-  OTel receiver on the same Hono server with per-session JSONL;
-  per-response `sourceCompleteness` block (+ `costIsComplete` kept);
-  recon scripts promoted to `experiments/` in phase C. Full record with
-  rationale:
-  [goshuin.md — Decisions](./milestones/goshuin.md#decisions-2026-07-18)
-- 🚧 Implementation (phase order B → A → C → D/E → F):
-  - ✅ B: blind-spot metadata — `sourceCompleteness` on every MCP response
-    (fixed status vocabulary + frozen per-source dimension tables in
-    `@junrei/core`; all 9 tool descriptions document the semantics;
-    `list_sessions` payload became `{ sessions, sourceCompleteness }`)
-  - ✅ A: MCP drill-down tools — `get_records` (bulk line-level record
-    detail with `missingLines`) + `get_tool_call` (call + result + linked
-    records as one evidence unit), both harnesses, explicit truncation
-    flags everywhere; Claude tool_result text recovered in full from the
-    raw source line past the parser's 2000-char capture cap (web
-    record-detail badge now driven by the explicit signal)
-  - ✅ C: reconstruction layer ("virtual wire") — `@junrei/core`
-    `claude/reconstruction/` (confidence classes exact/template/
-    disk-contingent/unknown, named normalization rules, template +
-    disk-context provider interfaces), MCP `get_reconstructed_request`
-    (discovery + full payload, explicit truncation), recon scripts
-    promoted into `experiments/claude-code-capture/recon/` driving the
-    production code; calibrated on capture run A: exact+template = 92.95%
-    of wire bytes (bar ≥ 85%), drift detection verified on a real
-    post-session change
-  - ✅ D: wire-capture ingestion — `@junrei/capture-proxy` (localhost-only
-    pass-through bin, redact-at-write with sentinel-scan tests, mandatory
-    ToS banner, `~/.junrei/captures/` per-session JSONL), MCP
-    `get_actual_request` + `get_hidden_calls` (log-requestId join, measured
-    latency, hidden-call detection); `claude-wire-capture`
-    sourceCompleteness entry; byte-for-byte parity tests prove disabled ==
-    unchanged
-  - ✅ E: OTel ingestion — opt-in (`JUNREI_OTEL_DIR`) OTLP http/json
-    receiver on the junrei server, per-session JSONL storage, MCP
-    `get_session_observability` (authoritative `cost_usd` with costBasis
-    cross-check, api-request latency, tool_decision, MCP/hook health);
-    `claude-otel` sourceCompleteness entry; byte-for-byte parity tests
-    prove disabled == unchanged
-  - ⬜ F: evaluation-trace export + analysis playbooks
-
 ## Open items
 
 - ⬜ Docs refreshed; README quick start (v1 M4)
@@ -132,6 +69,5 @@ decision record: [milestones/goshuin.md](./milestones/goshuin.md).
 ## Later (post-v1)
 
 - ⬜ Export/copy portable summaries (paste into ChatGPT, issues, docs)
-- ⬜ Review Skill for agent-driven retrospectives
 - ⬜ Desktop packaging (Tauri/Electron)
 - ⬜ Live tail / watch mode

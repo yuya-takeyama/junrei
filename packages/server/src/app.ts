@@ -5,6 +5,7 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { extractSessionId } from "@junrei/core";
 import { type Context, Hono } from "hono";
+import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import { createMcpServer } from "./mcp.js";
 import { getRepoOverview } from "./overview.js";
 import {
@@ -212,6 +213,20 @@ export function createApp(options: CreateAppOptions = {}) {
           return c.json({ error: "record not found" } as const, 404);
         }
         return c.json(detail);
+      })
+      // Goshuin Phase F: the full, UNCAPPED evaluation-trace export (see
+      // `evaluation-trace.ts`'s doc comment) — the MCP `export_evaluation_trace`
+      // tool serves the same trace but capped/truncated for a chat context;
+      // this route is for external eval pipelines that want everything at
+      // once. Claude-only — Codex has no reconstruction/wire-capture side
+      // channels to merge in, so no route is registered for it (a request
+      // there falls through to the generic /api/* 404 below).
+      .get("/api/sessions/claude-code/:id/evaluation-trace", async (c) => {
+        const trace = await assembleEvaluationTrace(c.req.param("id"));
+        if (trace === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json(trace);
       })
       // Claude-only: Codex sub-agent threads are full sessions in their own
       // right (fetch them via the codex detail route above), not sidecar
