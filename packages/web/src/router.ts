@@ -332,7 +332,79 @@ export const ALL_REPOS = "all";
  * else through verbatim. A stale/unrecognized value just matches zero rows
  * until the user picks again, the same failure mode as any other filter
  * param pointing at data that no longer exists.
+ *
+ * Reused as-is by the Trends screen's own `?repo=` filter (Trends.tsx) — the
+ * key semantics are identical (`GET /api/trends`'s `repo` param accepts the
+ * same `repoRoot`/fallback-bucket keys as `GET /api/overview`'s, see
+ * `trendRepoKey` in `@junrei/core`'s `trends.ts`), so it needs no
+ * screen-specific variant.
  */
 export function parseRepoParam(value: string | null): string {
   return value ?? ALL_REPOS;
+}
+
+const DAY_PARAM_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Normalizes the session list's `?day=` query param — a single LOCAL
+ * calendar day (`YYYY-MM-DD`) to filter the list to, the drill-down target
+ * from a Trends screen spike-day row / daily chart column (see
+ * `sessionListDayFilterPath` below). `undefined` for anything missing or
+ * malformed, same "never break on a stale URL" convention as
+ * `parseRepoParam`/`parseTrendsWindowDays` — a bad value just falls back to
+ * whatever date filter was already active instead of throwing.
+ */
+export function parseDayParam(value: string | null): string | undefined {
+  return value !== null && DAY_PARAM_RE.test(value) ? value : undefined;
+}
+
+/**
+ * Session list URL that filters to exactly one local calendar day (and,
+ * when given, a repo) — used by the Trends screen's drill-down links
+ * (`AnomaliesPanel.tsx`'s spike-day rows, `DailyCostChart.tsx`'s columns).
+ * `day` is expected to be a `TrendBucket.date`/`TrendSpikeDay.date` value
+ * (`YYYY-MM-DD`, already a LOCAL calendar day in the viewer's own tz — see
+ * `@junrei/core`'s `localDayKey`), and the session list's `?day=` filter
+ * resolves it via `dateFilter.ts`'s `localDayStartMs`, which interprets the
+ * same `YYYY-MM-DD` string in the BROWSER's own local timezone — since the
+ * Trends screen always sends `Intl.DateTimeFormat().resolvedOptions().timeZone`
+ * (the browser's own tz) as its `tz` param, both screens agree on exactly
+ * the same day boundaries for the same viewer. `repoKey` is omitted from the
+ * URL when absent or the `ALL_REPOS` sentinel, matching every other repo-filter
+ * link in this app.
+ */
+export function sessionListDayFilterPath(day: string, repoKey?: string): string {
+  const params = new URLSearchParams({ day });
+  if (repoKey !== undefined && repoKey !== ALL_REPOS) params.set("repo", repoKey);
+  return `/?${params.toString()}`;
+}
+
+/** react-router path for the Trends screen — no dynamic segments, so (unlike the session/agent routes) no path-builder function is needed; a literal `/trends` Link target suffices, same as the session list's own bare `/`. */
+export const TRENDS_ROUTE_PATH = "trends";
+
+/**
+ * `GET /api/trends`'s `days` whitelist, mirrored from the server
+ * (`TRENDS_DAYS_WHITELIST` in `packages/server/src/app.ts`) so the window
+ * selector only ever offers values the API actually accepts. Declared
+ * independently from the session list's `DATE_FILTER_PRESET_DAYS`
+ * (`dateFilter.ts`) even though the three numbers coincide today — the two
+ * features' day-count choices are unrelated facts (one bounds a
+ * client-filtered fetch window, the other bounds a fixed-shape server
+ * aggregation) that could diverge later.
+ */
+export const TRENDS_WINDOW_DAYS: readonly number[] = [7, 14, 30];
+
+/** Default `days` for a first visit / stale-or-missing `?days=` — matches the server's `DEFAULT_TRENDS_DAYS`. */
+export const DEFAULT_TRENDS_WINDOW_DAYS = 14;
+
+/**
+ * Normalizes the Trends screen's `?days=` query param to a value from
+ * `TRENDS_WINDOW_DAYS`, defaulting (like `parseListPage`/`parseSourceTab`)
+ * anything missing or unrecognized to `DEFAULT_TRENDS_WINDOW_DAYS` rather
+ * than erroring — same "never break on a stale URL" convention every other
+ * query-param parser here follows.
+ */
+export function parseTrendsWindowDays(value: string | null): number {
+  const days = value !== null ? Number(value) : Number.NaN;
+  return TRENDS_WINDOW_DAYS.includes(days) ? days : DEFAULT_TRENDS_WINDOW_DAYS;
 }

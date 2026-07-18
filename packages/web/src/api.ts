@@ -1,3 +1,4 @@
+import type { TrendsReport } from "@junrei/core";
 import type { AppType } from "@junrei/server";
 import type { InferResponseType } from "hono/client";
 import { hc } from "hono/client";
@@ -195,4 +196,29 @@ export async function fetchAgentSession(id: string, agentId: string): Promise<Ag
   const body = await res.json();
   if (!("analysis" in body)) throw new Error("malformed agent response");
   return body.analysis;
+}
+
+/**
+ * Fetch the multi-day trend report (`GET /api/trends`) for the Trends
+ * screen. Typed against `@junrei/core`'s `TrendsReport` directly rather than
+ * `InferResponseType` (unlike every other fetch* above): the route handler
+ * returns `c.json(computeTrends(...))` verbatim (`packages/server/src/app.ts`),
+ * so the core type — the source of truth `computeTrends` itself is declared
+ * against — already matches the wire shape exactly, with no envelope to
+ * unwrap and no separate DTO worth maintaining.
+ */
+export async function fetchTrends(params: {
+  days: number;
+  timeZone: string;
+  repo?: string;
+}): Promise<TrendsReport> {
+  const res = await client.api.trends.$get({
+    query: {
+      days: String(params.days),
+      tz: params.timeZone,
+      ...(params.repo !== undefined && { repo: params.repo }),
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  return (await res.json()) as TrendsReport;
 }

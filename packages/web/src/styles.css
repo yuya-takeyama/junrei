@@ -1367,6 +1367,10 @@ button.fb {
   min-width: 2px;
   display: flex;
   flex-direction: column-reverse;
+  /* Positioning context for `.scol-spike::before`'s marker dot (Trends'
+     daily cost chart) — a no-op for every other `.stk` chart, which never
+     applies that modifier class. */
+  position: relative;
 }
 .sseg {
   width: 100%;
@@ -1525,4 +1529,106 @@ button.fb {
 }
 .bflat.hdr {
   border-bottom: 1px solid var(--bd);
+}
+
+/* ---------------------------------------------------------------------
+   Trends (L0, sibling to the session list) — window/repo controls, KPI
+   tile row, daily stacked-by-model cost chart, main/subagent delegation
+   split, efficiency small multiples, cadence panel, anomalies panel. See
+   Trends.tsx and the trends/ subfolder.
+   --------------------------------------------------------------------- */
+
+/* Spike-day marker (`DailyCostChart.tsx`) — a small amber dot above the
+   flagged column, same "amber dot = flagged/notable" vocabulary as
+   `.cmark`/`.axamb` (compaction markers, Context growth chart). Anchored to
+   `.scol`'s own positioning context (see that rule's comment above). */
+.scol-spike::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--amb);
+}
+
+/* Delegation-split chart segment fills (`DelegationSplitChart.tsx`) — main
+   (the baseline scope) muted, subagents `--s` (a plain identity color, the
+   same accent `modelClass.ts` uses for the Sonnet family, reused generically
+   here as "the other scope"). Deliberately NOT `--amb`: delegating work to
+   subagents is the mission's own goal, not a cost worth flagging, and
+   docs/concept.md §4.6 rules out red/green-style judgment coloring entirely
+   ("numbers, never grades") — see `DelegationSplitChart.tsx`'s doc comment. */
+.k-main {
+  background: var(--mut);
+}
+.k-sub {
+  background: var(--s);
+}
+
+/* Efficiency small-multiples row (`EfficiencyMultiples.tsx`) — three compact
+   sparklines sharing one card each. */
+.efm-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.efm-spark {
+  fill: none;
+  stroke: var(--amb);
+  stroke-width: 1.5;
+}
+.efm-dot {
+  fill: var(--amb);
+}
+/* Reference-band rect (`EfficiencyMultiples.tsx`'s subagent-return sparkline)
+   — an annotation, not a judgment (docs/concept.md §4.6 explicitly allows
+   "reference points from published research ... shown as annotations,
+   clearly sourced"), so this stays a neutral, low-contrast fill rather than
+   reusing any tone color. */
+.efm-band {
+  fill: var(--bd);
+  opacity: 0.5;
+}
+
+/* Anomalies panel (`AnomaliesPanel.tsx`) — top-5-by-cost session rows and
+   the spike-day list. Rank | repo | prompt snippet | started | source | cost. */
+.trend-top {
+  display: grid;
+  grid-template-columns: 20px 110px minmax(0, 1fr) 96px 62px 70px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12.5px;
+  color: inherit;
+}
+.trend-top.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+a.trend-top:hover {
+  background: var(--pan);
+}
+.trend-spike-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+  color: var(--mut);
+}
+/* Spike-day rows are drill-down links into the session list (see
+   `AnomaliesPanel.tsx`) — same hover affordance as `.trend-top`'s rows. */
+a.trend-spike-row:hover {
+  background: var(--pan);
+}
+
+/* Daily cost columns (`DailyCostChart.tsx`) are drill-down links into the
+   session list too — `.scol` itself stays a plain flex column (see its own
+   rule above) since `<a>` inherits that fine; this just adds the same hover
+   affordance every other clickable row in this app gets. */
+a.scol:hover {
+  opacity: 0.8;
 }

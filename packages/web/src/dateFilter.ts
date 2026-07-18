@@ -174,9 +174,23 @@ export function dateFilterFromSelectValue(value: string): DateFilter {
  * DIFFERENT case from "nothing stored" — whether a value existed is
  * unknowable here, so this still falls back to `ALL_DATES` rather than
  * risking a surprising narrower view for a returning viewer.
+ *
+ * `initialOverride`, when given, wins over BOTH of the above for this
+ * mount's starting value — used by `SessionList.tsx` to seed the filter from
+ * a `?day=` drill-down link (see `router.ts`'s `sessionListDayFilterPath`)
+ * without touching `localStorage`: the override only shapes this one visit's
+ * INITIAL state, so a returning viewer's own stored preference survives
+ * untouched for their next normal (non-drill-down) visit. Read once, at
+ * mount, via the lazy `useState` initializer below — deliberately not kept
+ * in sync with a changing `initialOverride` on every render, the same
+ * "seeds initial state, doesn't drive it" contract a lazy initializer
+ * always has.
  */
-export function useStoredDateFilter(): [DateFilter, (next: DateFilter) => void] {
+export function useStoredDateFilter(
+  initialOverride?: DateFilter,
+): [DateFilter, (next: DateFilter) => void] {
   const [filter, setFilter] = useState<DateFilter>(() => {
+    if (initialOverride !== undefined) return initialOverride;
     try {
       return parseDateFilter(localStorage.getItem(STORAGE_KEY));
     } catch {

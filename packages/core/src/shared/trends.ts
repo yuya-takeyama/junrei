@@ -40,10 +40,19 @@ export interface TrendDelegationSlice {
   costUsd?: number;
 }
 
-/** Sum of subagent `returnedChars` for one session — see `SubagentNode.returnedChars`. */
+/**
+ * Sum of subagent `returnedChars` for one session — see
+ * `SubagentNode.returnedChars`. `maxChars` is the single largest one
+ * (session-level: this session's own max; bucket-level, see
+ * `TrendBucket.subagentReturn`: the max across every session in the bucket)
+ * — carried alongside the mean-feeding `totalChars`/`count` because a mean
+ * alone hides exactly the kind of one-off huge-context-dump leak this signal
+ * exists to catch (see the web's `EfficiencyMultiples.tsx`).
+ */
 export interface TrendSubagentReturn {
   count: number;
   totalChars: number;
+  maxChars: number;
 }
 
 /**
@@ -80,10 +89,21 @@ export interface TrendSessionItem {
 }
 
 export interface TrendsOptions {
-  /** Start of the CURRENT window, epoch ms, inclusive. */
-  sinceMs: number;
-  /** End of the CURRENT window, epoch ms, exclusive — also "now" for the report. */
-  untilMs: number;
+  /**
+   * "Now", epoch ms — the CURRENT window is the `days` CALENDAR days (in
+   * `timeZone`) ENDING WITH the calendar day containing this instant
+   * ("today", inclusive, even though it's necessarily a partial day — see
+   * `computeSpikeDays`'s doc comment on what that implies for spike
+   * detection). The PREVIOUS window is the equal-length span of calendar
+   * days immediately before the current window's first day. Replaces the
+   * former `sinceMs`/`untilMs` pair: those let the caller's window end
+   * yesterday while `untilMs` (used for session membership) stayed at the
+   * real "now", so today's sessions counted in `summary`/`topSessions` but
+   * had no bucket to land in — see this module's own history for that bug.
+   */
+  nowMs: number;
+  /** Number of calendar-day buckets in the CURRENT window. */
+  days: number;
   /** IANA time zone name — days are bucketed by LOCAL calendar day in this zone (see `localDayKey`). */
   timeZone: string;
   /** Same repo-key semantics as `computeRepoOverview`'s `repoKey` (see `trendRepoKey`) — omitted means no filter. */
@@ -95,12 +115,16 @@ export interface TrendsOptions {
 // ---------------------------------------------------------------------------
 
 export interface TrendWindow {
-  sinceMs: number;
-  untilMs: number;
-  /** Number of calendar-day buckets — `round((untilMs - sinceMs) / 86400000)`. */
+  /** Number of calendar-day buckets in the CURRENT window (today counts as one, even though it's necessarily partial). */
   days: number;
   timeZone: string;
   bucket: "day";
+  /** First (oldest) calendar day of the current window, `YYYY-MM-DD`. */
+  startDate: string;
+  /** Last calendar day of the current window — always the local (in `timeZone`) calendar day containing `nowMs`, i.e. "today". */
+  endDate: string;
+  /** The `nowMs` this report was computed against, echoed back. */
+  nowMs: number;
 }
 
 /** One model's cost/token rollup within a single day bucket — see `TrendBucket.byModel`. */
@@ -234,8 +258,6 @@ function trendRepoKey(item: TrendSessionItem): string {
 // Local-day bucketing
 // ---------------------------------------------------------------------------
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * Local calendar day (`YYYY-MM-DD`) for an epoch-ms instant in an IANA time
  * zone. `en-CA` is the one built-in locale whose default date format IS
@@ -251,21 +273,45 @@ function localDayKey(ms: number, timeZone: string): string {
   }).format(ms);
 }
 
-/** Every calendar day in `[sinceMs, sinceMs + days*DAY_MS)`, stepped in fixed 24h increments and formatted per `localDayKey`.
- *
- * This assumes no DST transition falls inside the window shifts a 24h step
- * across a local-day boundary twice (or zero times) in the target zone — an
- * accepted Phase-1 simplification (no date-arithmetic library), same
- * "no date libraries" constraint the option's doc comment states. `days` is
- * always derived from a whole number of 24h periods (`untilMs - sinceMs`),
- * so this reliably produces exactly `days` entries.
+/** `dayKey`'s (always `localDayKey`'s own `YYYY-MM-DD` output) y/m/d as numbers. The `?? ` fallbacks only satisfy strict indexed-access typing — `dayKey` is always well-formed, this never actually falls back. */
+function splitDayKey(dayKey: string): { y: number; m: number; d: number } {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return { y: y ?? 1970, m: m ?? 1, d: d ?? 1 };
+}
+
+function formatDayKey(y: number, m: number, d: number): string {
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/**
+ * `dayKey` shifted by `deltaDays` (either sign) via pure calendar arithmetic
+ * on `Date.UTC` — deliberately NOT by adding `deltaDays * 24h` to `dayKey`'s
+ * own local instant and re-formatting through `timeZone` (the previous
+ * implementation's approach, and the root cause of the calendar-day-window-
+ * alignment bug this module was redesigned to fix: a DST transition inside
+ * the stepped range shifts a fixed-24h step across a local-day boundary
+ * twice, or zero times, silently misaligning the bucket list against the
+ * window it's supposed to cover). `Date.UTC` has no DST (UTC never observes
+ * it) and normalizes an out-of-range day-of-month on its own (e.g. day 0
+ * rolls back into the previous month), so this needs no manual month-length
+ * table either — still "no date libraries", per the option's doc comment.
  */
-function dayBucketDates(sinceMs: number, days: number, timeZone: string): string[] {
-  const dates: string[] = [];
-  for (let i = 0; i < days; i++) {
-    dates.push(localDayKey(sinceMs + i * DAY_MS, timeZone));
-  }
-  return dates;
+function shiftDayKey(dayKey: string, deltaDays: number): string {
+  const { y, m, d } = splitDayKey(dayKey);
+  const shifted = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  return formatDayKey(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate());
+}
+
+/**
+ * `days` calendar-day keys ENDING WITH (and including) `endKey`, oldest ->
+ * newest. The CURRENT window is `calendarWindowEndingAt(todayKey, days)`;
+ * the PREVIOUS window is the same call anchored one day before the current
+ * window's own first day (see `computeTrends`). `days <= 0` (defensive —
+ * `computeTrends` already clamps its own input) produces an empty list.
+ */
+function calendarWindowEndingAt(endKey: string, days: number): string[] {
+  const n = Math.max(0, Math.trunc(days));
+  return Array.from({ length: n }, (_, i) => shiftDayKey(endKey, i - (n - 1)));
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +341,8 @@ interface MutableBucket {
   compactionCount: number;
   subagentReturnCount: number;
   subagentReturnChars: number;
+  /** Max across every session's own `subagentReturn.maxChars` in this bucket — NOT a sum, see `TrendSubagentReturn.maxChars`'s doc comment. */
+  subagentReturnMaxChars: number;
 }
 
 function freshBucket(date: string): MutableBucket {
@@ -314,6 +362,7 @@ function freshBucket(date: string): MutableBucket {
     compactionCount: 0,
     subagentReturnCount: 0,
     subagentReturnChars: 0,
+    subagentReturnMaxChars: 0,
   };
 }
 
@@ -347,6 +396,10 @@ function accumulate(bucket: MutableBucket, item: TrendSessionItem): void {
   if (item.subagentReturn !== undefined) {
     bucket.subagentReturnCount += item.subagentReturn.count;
     bucket.subagentReturnChars += item.subagentReturn.totalChars;
+    bucket.subagentReturnMaxChars = Math.max(
+      bucket.subagentReturnMaxChars,
+      item.subagentReturn.maxChars,
+    );
   }
 }
 
@@ -375,7 +428,11 @@ function finalizeBucket(bucket: MutableBucket): TrendBucket {
     compactionCount: bucket.compactionCount,
     subagentReturn:
       bucket.subagentReturnCount > 0
-        ? { count: bucket.subagentReturnCount, totalChars: bucket.subagentReturnChars }
+        ? {
+            count: bucket.subagentReturnCount,
+            totalChars: bucket.subagentReturnChars,
+            maxChars: bucket.subagentReturnMaxChars,
+          }
         : null,
   };
 }
@@ -464,6 +521,19 @@ const SPIKE_STDDEV_MULTIPLE = 2;
  *
  * Population standard deviation (divide by N, not N-1) — this is the full
  * window being measured, not a sample estimating some larger population.
+ *
+ * The LAST bucket (today, `TrendWindow.endDate`) is necessarily partial —
+ * sessions still running or yet to start today aren't in `items` at
+ * report-generation time — so its cost can only ever be an undercount of
+ * what the full day will eventually total. A genuinely spiking today can
+ * therefore under-trigger this detector (or, once the day completes and a
+ * later report re-runs the same window shifted by one day, suddenly trigger
+ * where it didn't before). Accepted, not corrected for: doing so would need
+ * either excluding today from spike detection entirely (losing same-day
+ * visibility into an actual burst) or projecting today's eventual total from
+ * a partial one (guessing), and every other current-window figure in this
+ * report (the KPI row's own `summary.current` totals) already carries the
+ * same partial-today characteristic.
  */
 function computeSpikeDays(buckets: readonly TrendBucket[]): TrendSpikeDay[] {
   const activeDays = buckets.filter((b) => b.sessionCount > 0).length;
@@ -509,17 +579,32 @@ function computeTopSessions(items: readonly TrendSessionItem[]): TrendTopSession
 
 /**
  * Aggregate session-list items into a multi-day trend report: per-local-day
- * buckets (zero-filled) over `[options.sinceMs, options.untilMs)`, a
- * current-vs-previous-window summary (the "previous" window is the
- * equal-length span immediately before `sinceMs`), and simple anomaly
- * detection (cost spike days, top sessions by cost).
+ * buckets (zero-filled) over the CURRENT window — the `options.days`
+ * calendar days (in `options.timeZone`) ending with (and including) "today",
+ * the local calendar day containing `options.nowMs` — a current-vs-previous-
+ * window summary (the "previous" window is the equal-length span of
+ * calendar days immediately before the current window's first day), and
+ * simple anomaly detection (cost spike days, top sessions by cost).
+ *
+ * Session-window membership and bucket assignment are now the SAME
+ * operation — both compare a session's `localDayKey(startedAt, timeZone)`
+ * against the identical `currentKeySet`/`bucketsByDate` key set built from
+ * `calendarWindowEndingAt` — so `sum(buckets[].sessionCount) ===
+ * summary.current.sessionCount` (and the `totalCostUsd` equivalent) hold BY
+ * CONSTRUCTION, not by coincidence. That wasn't true before this function
+ * was redesigned: the old `sinceMs`/`untilMs` pair let the bucket list end
+ * "yesterday" (a fixed-24h-step walk from `sinceMs`) while session
+ * membership was checked against the real `untilMs` ("now"), so a session
+ * that started today counted in `summary.current`/`anomalies.topSessions`
+ * but had no bucket to land in — invisible in every per-day panel while
+ * still inflating the window-total KPIs above them.
  *
  * `items` should include every session whose `startedAt` falls in EITHER
  * window (current or previous) — this function does the windowing itself
  * (see the loop below), so passing extra items outside both windows is
  * harmless (they're silently excluded), but passing too NARROW a set will
  * silently undercount `summary.previous`. `GET /api/trends` (server) is
- * expected to fetch the full 2×`days` span up front — see that route's doc
+ * expected to fetch a comfortable superset up front — see that route's doc
  * comment.
  *
  * A session with no `startedAt` (or an unparseable one) can't be assigned to
@@ -532,9 +617,18 @@ export function computeTrends(
   items: readonly TrendSessionItem[],
   options: TrendsOptions,
 ): TrendsReport {
-  const { sinceMs, untilMs, timeZone, repo } = options;
-  const days = Math.max(0, Math.round((untilMs - sinceMs) / DAY_MS));
-  const previousSinceMs = sinceMs - (untilMs - sinceMs);
+  const { nowMs, timeZone, repo } = options;
+  const days = Math.max(0, Math.trunc(options.days));
+
+  const todayKey = localDayKey(nowMs, timeZone);
+  const currentKeys = calendarWindowEndingAt(todayKey, days);
+  // The day right before the current window's own first day — falls back to
+  // the day before `todayKey` only when `currentKeys` is empty (`days <= 0`,
+  // an edge case with no "first day" of its own to anchor off).
+  const previousEndKey = shiftDayKey(currentKeys[0] ?? todayKey, -1);
+  const previousKeys = calendarWindowEndingAt(previousEndKey, days);
+  const currentKeySet = new Set(currentKeys);
+  const previousKeySet = new Set(previousKeys);
 
   const filtered = repo === undefined ? items : items.filter((item) => trendRepoKey(item) === repo);
 
@@ -544,33 +638,31 @@ export function computeTrends(
     if (item.startedAt === undefined) continue;
     const ms = Date.parse(item.startedAt);
     if (Number.isNaN(ms)) continue;
-    if (ms >= sinceMs && ms < untilMs) {
+    const dayKey = localDayKey(ms, timeZone);
+    if (currentKeySet.has(dayKey)) {
       currentItems.push(item);
-    } else if (ms >= previousSinceMs && ms < sinceMs) {
+    } else if (previousKeySet.has(dayKey)) {
       previousItems.push(item);
     }
   }
 
-  const bucketDates = dayBucketDates(sinceMs, days, timeZone);
   const bucketsByDate = new Map<string, MutableBucket>();
-  for (const date of bucketDates) {
+  for (const date of currentKeys) {
     bucketsByDate.set(date, freshBucket(date));
   }
   for (const item of currentItems) {
-    // Already validated (parseable, non-NaN) in the windowing loop above.
+    // Already validated (parseable, non-NaN) in the windowing loop above,
+    // and — since `currentItems` membership was decided by the SAME
+    // `currentKeySet` this map's keys came from — this `.get` always hits;
+    // see this function's own doc comment on the by-construction invariant.
     const ms = Date.parse(item.startedAt as string);
     const bucket = bucketsByDate.get(localDayKey(ms, timeZone));
-    // A day-key miss here means the fixed-24h-step bucket list (see
-    // `dayBucketDates`) didn't land exactly on this session's local day —
-    // the known DST edge case documented there. The session still counts in
-    // `summary.current`/`anomalies.topSessions` either way; it just has no
-    // bucket to add its per-day figures into.
     if (bucket !== undefined) accumulate(bucket, item);
   }
 
-  const buckets = bucketDates.map((date) => {
+  const buckets = currentKeys.map((date) => {
     const bucket = bucketsByDate.get(date);
-    // Every date in `bucketDates` was just inserted into `bucketsByDate`
+    // Every date in `currentKeys` was just inserted into `bucketsByDate`
     // above — this is defensive, not a real possibility.
     return bucket === undefined ? finalizeBucket(freshBucket(date)) : finalizeBucket(bucket);
   });
@@ -580,7 +672,14 @@ export function computeTrends(
   const delta = previous === null ? null : computeDelta(current, previous);
 
   return {
-    window: { sinceMs, untilMs, days, timeZone, bucket: "day" },
+    window: {
+      days,
+      timeZone,
+      bucket: "day",
+      startDate: currentKeys[0] ?? todayKey,
+      endDate: currentKeys[currentKeys.length - 1] ?? todayKey,
+      nowMs,
+    },
     buckets,
     summary: { current, previous, delta },
     anomalies: {

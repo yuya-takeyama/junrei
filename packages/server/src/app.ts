@@ -190,7 +190,7 @@ export function createApp(options: CreateAppOptions = {}) {
         return c.json({ overview: await getRepoOverview(repo) });
       })
       // Multi-day trend report — Phase 1 (core aggregation + this route; no
-      // UI, no MCP tool yet, see the trends feature's roadmap entry).
+      // MCP tool yet, see the trends feature's roadmap entry).
       // `days` is whitelisted (7/14/30) rather than an arbitrary integer so
       // the lookback fetch below stays a small, predictable number of
       // sessions; an out-of-whitelist value coerces to the default (same
@@ -198,11 +198,17 @@ export function createApp(options: CreateAppOptions = {}) {
       // invalid `tz` 400s outright — there's no sane default to fall back to
       // for "the caller asked for a time zone that doesn't exist".
       //
-      // The window fetched from `listAllSessionsInBounds` spans TWO windows
-      // of `days` (current + the equal-length window immediately before it)
-      // so `computeTrends` can compute `summary.previous`/`delta` without a
-      // second round trip — see that function's doc comment for why it needs
-      // every session in both windows up front, not just a page of them.
+      // `computeTrends` now windows by CALENDAR day itself (current window =
+      // the `days` local calendar days ending with today; previous = the
+      // equal-length span right before it — see `@junrei/core`'s
+      // `TrendsOptions`), so this route just needs to hand it a comfortable
+      // SUPERSET of both windows, not the exact bounds. `2*days + 2` days of
+      // margin covers the two full windows plus slop for `timeZone` being
+      // ahead of UTC (a session that's "today" in a +N tz can be up to N
+      // hours in the FUTURE relative to this server's own UTC `Date.now()`)
+      // — cheap insurance against a boundary session going missing, at the
+      // cost of `listAllSessionsInBounds` looking at a few extra days of
+      // sessions `computeTrends` itself will just filter back out.
       .get("/api/trends", async (c) => {
         const days = parseTrendsDays(c.req.query("days"));
         const timeZone = c.req.query("tz") ?? DEFAULT_TRENDS_TIMEZONE;
@@ -212,15 +218,15 @@ export function createApp(options: CreateAppOptions = {}) {
         const rawRepo = c.req.query("repo");
         const repo = rawRepo === undefined || rawRepo === "" ? undefined : rawRepo;
 
-        const untilMs = Date.now();
-        const sinceMs = untilMs - days * DAY_MS;
-        const lookbackSinceMs = untilMs - 2 * days * DAY_MS;
+        const nowMs = Date.now();
+        const untilMs = nowMs;
+        const sinceMs = nowMs - (2 * days + 2) * DAY_MS;
 
-        const items = await listAllSessionsInBounds({ sinceMs: lookbackSinceMs, untilMs });
+        const items = await listAllSessionsInBounds({ sinceMs, untilMs });
         return c.json(
           computeTrends(items, {
-            sinceMs,
-            untilMs,
+            nowMs,
+            days,
             timeZone,
             ...(repo !== undefined && { repo }),
           }),

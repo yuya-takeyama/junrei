@@ -9,10 +9,12 @@ import {
   CODEX_AGENT_ROUTE_PATH,
   CODEX_SESSION_ROUTE_PATH,
   legacyClaudeSessionRedirectTarget,
+  TRENDS_ROUTE_PATH,
 } from "./router.js";
 import { SessionList } from "./SessionList.js";
 import { SessionShell } from "./SessionShell.js";
 import "./styles.css";
+import { Trends } from "./Trends.js";
 
 const root = document.getElementById("root");
 if (root === null) {
@@ -54,6 +56,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <SessionList /> },
+      { path: TRENDS_ROUTE_PATH, element: <Trends /> },
       // The agent routes' static "agent" segment outranks the session routes'
       // optional ":lens?" — react-router's route ranking scores static segments
       // higher than dynamic ones regardless of declaration order, so

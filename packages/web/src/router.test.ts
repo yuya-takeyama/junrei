@@ -14,11 +14,13 @@ import {
   LENSES_BY_SOURCE,
   legacyClaudeSessionRedirectTarget,
   normalizeLens,
+  parseDayParam,
   parseListPage,
   parseRecordParam,
   parseRepoParam,
   parseSourceTab,
   recordPath,
+  sessionListDayFilterPath,
   sessionPath,
   sessionRefOf,
 } from "./router.js";
@@ -403,5 +405,35 @@ describe("parseRepoParam", () => {
     params.set("repo", "/Users/me/repo with spaces");
     const url = `?${params.toString()}`;
     expect(parseRepoParam(new URLSearchParams(url).get("repo"))).toBe("/Users/me/repo with spaces");
+  });
+});
+
+describe("parseDayParam", () => {
+  it("passes through a well-formed YYYY-MM-DD value", () => {
+    expect(parseDayParam("2026-07-14")).toBe("2026-07-14");
+  });
+
+  it("falls back to undefined for missing or malformed values", () => {
+    expect(parseDayParam(null)).toBeUndefined();
+    expect(parseDayParam("")).toBeUndefined();
+    expect(parseDayParam("2026-7-14")).toBeUndefined();
+    expect(parseDayParam("not-a-date")).toBeUndefined();
+  });
+});
+
+describe("sessionListDayFilterPath", () => {
+  it("builds a session-list URL scoped to exactly one local calendar day", () => {
+    expect(sessionListDayFilterPath("2026-07-14")).toBe("/?day=2026-07-14");
+  });
+
+  it("carries a real repo filter along, percent-encoded", () => {
+    expect(sessionListDayFilterPath("2026-07-14", "/Users/me/junrei")).toBe(
+      "/?day=2026-07-14&repo=%2FUsers%2Fme%2Fjunrei",
+    );
+  });
+
+  it("omits the repo param when it's absent or the ALL_REPOS sentinel", () => {
+    expect(sessionListDayFilterPath("2026-07-14", ALL_REPOS)).toBe("/?day=2026-07-14");
+    expect(sessionListDayFilterPath("2026-07-14", undefined)).toBe("/?day=2026-07-14");
   });
 });
