@@ -1531,6 +1531,63 @@ button.fb {
   border-bottom: 1px solid var(--bd);
 }
 
+/* `SortableHeaderCell.tsx` renders a real `<th scope="col">` (Biome's a11y
+   rules want a native element for `aria-sort`, not a `<span role=
+   "columnheader">` — see that component's doc comment) even though every
+   other cell in these grids (`.bcmd`/`.bhh`/`.bflat`) is a plain `<div>`/
+   `<span>`. `<th>` blockifies fine as a CSS Grid item, but its UA
+   stylesheet still bolds/centers/pads it by default — reset all three so it
+   sits in the grid indistinguishably from its `<span>` siblings. Scoped to
+   these three grid families rather than a bare `th` selector, since a bare
+   reset would silently clobber any unrelated `<table>` this app adds later. */
+.bcmd th,
+.bhh th,
+.bflat th {
+  font-weight: inherit;
+  text-align: inherit;
+  vertical-align: inherit;
+  padding: 0;
+}
+
+/* Sortable column header (`SortableHeaderCell.tsx`) — a `<button>` carrying
+   `.lbl`'s usual mono/uppercase/muted look so a header row of sort buttons
+   reads identically to a plain `.lbl` header; `.on` (the active sort
+   column) switches to `--amb`, this app's existing active-state accent (see
+   `.b-tab.on`, `.chip.on`). Resets the native button chrome the base
+   `button` rule (top of this file) doesn't touch. */
+.sortbtn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.sortbtn:hover {
+  color: var(--tx);
+}
+.sortbtn.on {
+  color: var(--amb);
+}
+.sortbtn.on:hover {
+  color: var(--amb);
+}
+/* Same amber keyboard-focus ring as `.trow`/`.stepstoggle`/`.chip`/`.dseg`
+   (mock 2i a11y pass, ~line 1026) — `.sortbtn` is a keyboard-operable
+   control introduced after that shared rule, kept as its own declaration
+   here (Bash lens section) rather than joining that selector list, whose
+   own doc comment scopes it to Timeline controls specifically. */
+.sortbtn:focus-visible {
+  outline: 2px solid var(--amb);
+  outline-offset: -2px;
+}
+.sortind {
+  font-size: 7px;
+  line-height: 1;
+}
+
 /* ---------------------------------------------------------------------
    Trends (L0, sibling to the session list) — window/repo controls, KPI
    tile row, daily stacked-by-model cost chart, main/subagent delegation
