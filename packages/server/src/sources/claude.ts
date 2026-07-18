@@ -6,6 +6,7 @@ import {
   type ClaudeSessionFileRef,
   type ClaudeSessionStore,
   getClaudeRecordDetail,
+  getClaudeToolCallDetail,
   listSubagentRefs,
   listWorkflowRuns,
   loadClaudeDesktopTitles,
@@ -16,6 +17,7 @@ import {
   resolveClaudeDesktopSessionsDirs,
   type SessionData,
   type TimelineEntry,
+  type ToolCallDetail,
 } from "@junrei/core";
 import { createS3ClaudeSessionStore, resolveS3StoreConfigFromEnv } from "./s3-store.js";
 import {
@@ -111,6 +113,7 @@ interface ClaudeAdapterBundle {
     line: number,
     agentId?: string,
   ): Promise<RecordDetail | undefined>;
+  getToolCallDetail(key: ClaudeSessionKey, toolUseId: string): Promise<ToolCallDetail | undefined>;
   getLastActivityAt(sessionId: string): Promise<string | undefined>;
   getAgentSession(sessionId: string, agentId: string): Promise<ClaudeSessionAnalysis | undefined>;
 }
@@ -422,7 +425,38 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
     }
   }
 
-  return { listItems, getDetail, getTimeline, getRecordDetail, getLastActivityAt, getAgentSession };
+  /**
+   * One tool call + its result as a single unit — for the `get_tool_call` MCP
+   * tool. Scoped to the MAIN transcript only (no `agentId` — unlike
+   * `getRecordDetail`/`getTimeline`, `get_tool_call`'s spec has no subagent
+   * scoping; a subagent's own tool calls aren't reachable through this
+   * lookup). `undefined` for BOTH an unknown session id and an unknown
+   * `toolUseId` — the MCP layer already resolved the session separately
+   * before calling this, so it can tell the two apart itself.
+   */
+  async function getToolCallDetail(
+    key: ClaudeSessionKey,
+    toolUseId: string,
+  ): Promise<ToolCallDetail | undefined> {
+    const ref = await store.findSessionFileById(key.id);
+    if (ref === undefined) return undefined;
+    try {
+      const data = await sessionDataCached(ref);
+      return await getClaudeToolCallDetail(data, toolUseId, store);
+    } catch {
+      return undefined;
+    }
+  }
+
+  return {
+    listItems,
+    getDetail,
+    getTimeline,
+    getRecordDetail,
+    getToolCallDetail,
+    getLastActivityAt,
+    getAgentSession,
+  };
 }
 
 const localBundle = createClaudeAdapterBundle(localClaudeSessionStore);
@@ -496,6 +530,17 @@ export async function getSessionRecordDetail(
   return firstDefined([
     () => localBundle.getRecordDetail({ id: sessionId }, line, agentId),
     () => s3Bundle?.getRecordDetail({ id: sessionId }, line, agentId) ?? Promise.resolve(undefined),
+  ]);
+}
+
+/** Local-first, S3-fallback lookup for one tool call — see `getSessionRecordDetail`. */
+export async function getSessionToolCallDetail(
+  sessionId: string,
+  toolUseId: string,
+): Promise<ToolCallDetail | undefined> {
+  return firstDefined([
+    () => localBundle.getToolCallDetail({ id: sessionId }, toolUseId),
+    () => s3Bundle?.getToolCallDetail({ id: sessionId }, toolUseId) ?? Promise.resolve(undefined),
   ]);
 }
 

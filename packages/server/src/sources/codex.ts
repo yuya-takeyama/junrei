@@ -8,6 +8,7 @@ import {
   computeDelegationSummary,
   type FileAccessEntry,
   getCodexRecordDetail,
+  getCodexToolCallDetail,
   listCodexSessionFiles,
   loadCodexSessionIndexTitles,
   type ModelUsageSummary,
@@ -19,6 +20,7 @@ import {
   type SubagentNode,
   type TimelineEntry,
   type TokenTotals,
+  type ToolCallDetail,
 } from "@junrei/core";
 import {
   type ModelMixEntry,
@@ -614,6 +616,27 @@ export async function getCodexSessionRecordDetail(
     const transcript = await codexTranscriptCached(ref);
     if (transcript.format !== "current") return undefined;
     return getCodexRecordDetail(transcript, line);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One tool call + its result as a single unit, for a Codex session — the
+ * Codex analog of `getSessionToolCallDetail` (`sources/claude.ts`).
+ * `undefined` for BOTH an unknown session id and an unknown `toolUseId` — the
+ * MCP layer already resolved the session separately before calling this.
+ */
+export async function getCodexSessionToolCallDetail(
+  sessionId: string,
+  toolUseId: string,
+): Promise<ToolCallDetail | undefined> {
+  const ref = await findCodexRef(sessionId);
+  if (ref === undefined) return undefined;
+  try {
+    const transcript = await codexTranscriptCached(ref);
+    if (transcript.format !== "current") return undefined;
+    return getCodexToolCallDetail(transcript, toolUseId);
   } catch {
     return undefined;
   }

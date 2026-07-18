@@ -16,8 +16,9 @@ import type { TokenUsage } from "../shared/types.js";
 import { parseClaudeTranscriptFile } from "./parser.js";
 import type { SessionData } from "./session-data.js";
 import { buildSessionData } from "./session-data.js";
+import type { ClaudeSessionStore } from "./store.js";
 import { loadSubagentSessionData } from "./subagents.js";
-import { buildClaudeTimeline, getClaudeRecordDetail } from "./timeline.js";
+import { buildClaudeTimeline, getClaudeRecordDetail, getClaudeToolCallDetail } from "./timeline.js";
 import type { AssistantContentBlock, ClaudeTranscript } from "./types.js";
 
 const FIXTURE_PROJECTS = join(
@@ -490,5 +491,99 @@ describe("getClaudeRecordDetail", () => {
     const data = await loadMainData();
     const detail = await getClaudeRecordDetail(data, 99999);
     expect(detail).toBeUndefined();
+  });
+});
+
+/** A store whose `openLines` never yields anything — every raw-line recovery attempt against it fails (line "unreadable"). */
+function unreadableLineStore(): ClaudeSessionStore {
+  return {
+    listSessionFiles: () => Promise.resolve([]),
+    findSessionFileById: () => Promise.resolve(undefined),
+    openLines: async function* openLines() {
+      // Yields nothing — readRawLineAt never reaches the target line.
+    },
+    readFile: () => Promise.reject(new Error("not implemented")),
+    listSidecarFiles: () => Promise.resolve([]),
+  };
+}
+
+describe("getClaudeToolCallDetail", () => {
+  it("returns the call and its result as one unit, with the containing record's uuid and no related records", async () => {
+    const data = await loadMainData();
+    const detail = await getClaudeToolCallDetail(data, "toolu_read1");
+    expect(detail?.toolUseId).toBe("toolu_read1");
+    expect(detail?.call).toEqual({
+      name: "Read",
+      input: { file_path: "/p/foo.ts" },
+      line: 3,
+      timestamp: "2026-07-09T01:00:06.000Z",
+      uuid: "a2",
+    });
+    expect(detail?.result).toEqual({
+      isError: false,
+      text: "const x = 1;",
+      line: 4,
+      timestamp: "2026-07-09T01:00:07.000Z",
+    });
+    expect(detail?.resultMissing).toBe(false);
+    expect(detail?.relatedRecords).toEqual([]);
+  });
+
+  it("declares result: null and resultMissing: true for a call with no result", async () => {
+    const data = await loadMainData();
+    const detail = await getClaudeToolCallDetail(data, "toolu_webfetch1"); // line 18, never resulted
+    expect(detail?.result).toBeNull();
+    expect(detail?.resultMissing).toBe(true);
+  });
+
+  it("recovers the FULL result text (re-reading the raw source line) when the parser's capture cap would otherwise truncate it", async () => {
+    const data = await loadMainData();
+    const detail = await getClaudeToolCallDetail(data, "toolu_skill1"); // line 29 -> result line 30, 2200 raw chars
+    // No longer stuck at the parser's TOOL_RESULT_TEXT_LIMIT (2000) — the
+    // true 2200-char tool_result is recovered from the raw JSONL line.
+    expect(detail?.result?.text.length).toBe(2200);
+    expect(detail?.result?.fullTextLength).toBeUndefined();
+  });
+
+  it("omits fullTextLength when the captured text was never cut", async () => {
+    const data = await loadMainData();
+    const detail = await getClaudeToolCallDetail(data, "toolu_read1");
+    expect(detail?.result?.fullTextLength).toBeUndefined();
+  });
+
+  it("falls back to the parser's capped text and reports fullTextLength when raw-line recovery fails", async () => {
+    const data = await loadMainData();
+    const detail = await getClaudeToolCallDetail(data, "toolu_skill1", unreadableLineStore());
+    // Recovery couldn't read the raw line — never lies about it: still the
+    // parser's own capped snapshot, with the TRUE original count reported.
+    expect(detail?.result?.text.length).toBe(2000);
+    expect(detail?.result?.fullTextLength).toBe(2200);
+  });
+
+  it("skips recovery (and reports fullTextLength) for hand-built SessionData with no filePath", async () => {
+    const { filePath: _filePath, ...withoutFilePath } = await loadMainData();
+    const detail = await getClaudeToolCallDetail(withoutFilePath, "toolu_skill1");
+    expect(detail?.result?.text.length).toBe(2000);
+    expect(detail?.result?.fullTextLength).toBe(2200);
+  });
+
+  it("links a background launch's completion notification as a related record", async () => {
+    const data = await loadMainData();
+    const detail = await getClaudeToolCallDetail(data, "toolu_bgbash1"); // line 23, launches taskId bgtask01
+    expect(detail?.relatedRecords).toEqual([
+      {
+        kind: "task-notification",
+        taskId: "bgtask01",
+        line: 25,
+        timestamp: "2026-07-09T01:02:55.000Z",
+        status: "completed",
+        exitCode: 0,
+      },
+    ]);
+  });
+
+  it("returns undefined for an unknown toolUseId", async () => {
+    const data = await loadMainData();
+    expect(await getClaudeToolCallDetail(data, "does-not-exist")).toBeUndefined();
   });
 });

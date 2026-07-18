@@ -206,6 +206,33 @@ function normalizeUser(raw: Record<string, unknown>, line: number): UserRecord {
   return record;
 }
 
+/**
+ * Recover the FULL (uncapped) `tool_result` text for one `toolUseId` from a
+ * raw, already-JSON-parsed JSONL line — used only by the drill-down
+ * evidence path (`claude/timeline.ts`'s `getClaudeRecordDetail`/
+ * `getClaudeToolCallDetail`) to undo `TOOL_RESULT_TEXT_LIMIT` above by
+ * re-reading a record's own source line through the store, for callers that
+ * need the tool's true output rather than the parser's capped snapshot.
+ * Mirrors `normalizeUser`'s own tool_result extraction exactly (same
+ * `content` shape, same `extractText`) so the recovered value matches what
+ * parsing would have produced had there been no cap at all. `undefined`
+ * when `raw` isn't a user-record shape, or carries no `tool_result` block
+ * for `toolUseId` — every field access here is already optional-chained/
+ * type-guarded, so this never throws on a malformed line.
+ */
+export function extractRawToolResultText(raw: unknown, toolUseId: string): string | undefined {
+  if (!isObject(raw) || raw.type !== "user") return undefined;
+  const message = isObject(raw.message) ? raw.message : undefined;
+  const content = message?.content;
+  if (!Array.isArray(content)) return undefined;
+  for (const block of content) {
+    if (!isObject(block) || block.type !== "tool_result") continue;
+    if (str(block.tool_use_id) !== toolUseId) continue;
+    return extractText(block.content);
+  }
+  return undefined;
+}
+
 function parseTaskNotification(text: string): TaskNotificationInfo | undefined {
   if (!text.includes("<task-notification>")) return undefined;
   const taskId = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];

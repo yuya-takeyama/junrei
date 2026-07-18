@@ -1,15 +1,5 @@
 import type { RecordDetail } from "../../api.js";
 
-/**
- * Mirrors `TOOL_RESULT_TEXT_LIMIT` in `packages/core/src/parser.ts` — the
- * parser caps captured tool-result text at this many characters. That
- * constant isn't exported from core, so it's re-declared here (web-only
- * change); a captured `resultText`/`returnedText` whose length hits this
- * exact value means the true tool output was longer and got truncated at
- * parse time, not that the output happened to be exactly this long.
- */
-export const TOOL_RESULT_TEXT_CAP = 2000;
-
 /** Human label for the slide-over header — see design-spec/17-record-detail.md's anatomy. */
 export const RECORD_KIND_LABEL: Record<RecordDetail["kind"], string> = {
   user: "User message",
@@ -47,9 +37,18 @@ export function rawJson(value: unknown): string {
   }
 }
 
-/** Whether a captured result/returned text hit the parser's capture cap (see `TOOL_RESULT_TEXT_CAP`). */
-export function isResultCapped(text: string | undefined): boolean {
-  return text !== undefined && text.length >= TOOL_RESULT_TEXT_CAP;
+/**
+ * Whether a captured result/returned text is still short of the tool's TRUE
+ * output — driven by the backend's explicit `resultTextFullCharCount` /
+ * `returnedTextFullCharCount` companion field (see `ToolCallRecordDetail`/
+ * `SubagentLaunchRecordDetail` in `@junrei/core`), never a length heuristic:
+ * the backend recovers the full text from the record's raw source line
+ * whenever the parser's own parse-time capture cap would otherwise have cut
+ * it, so a captured text landing at/above that old cap no longer implies
+ * truncation by itself — only the explicit signal does.
+ */
+export function isResultCapped(fullCharCount: number | undefined): boolean {
+  return fullCharCount !== undefined;
 }
 
 function countLines(text: string): number {

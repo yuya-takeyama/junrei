@@ -96,8 +96,11 @@ function ToolCallBody({
       {detail.resultText !== undefined ? (
         <>
           <div className="code">{detail.resultText}</div>
-          {isResultCapped(detail.resultText) && (
-            <div className="mono fs10 mut mt8">result captured up to 2,000 chars</div>
+          {isResultCapped(detail.resultTextFullCharCount) && (
+            <div className="mono fs10 mut mt8">
+              result captured {detail.resultText.length.toLocaleString()} of{" "}
+              {detail.resultTextFullCharCount?.toLocaleString()} chars
+            </div>
           )}
         </>
       ) : (
@@ -209,8 +212,11 @@ function SubagentLaunchBody({
       {detail.returnedText !== undefined ? (
         <>
           <div className="code">{detail.returnedText}</div>
-          {isResultCapped(detail.returnedText) && (
-            <div className="mono fs10 mut mt8">result captured up to 2,000 chars</div>
+          {isResultCapped(detail.returnedTextFullCharCount) && (
+            <div className="mono fs10 mut mt8">
+              result captured {detail.returnedText.length.toLocaleString()} of{" "}
+              {detail.returnedTextFullCharCount?.toLocaleString()} chars
+            </div>
           )}
         </>
       ) : (

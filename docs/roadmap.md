@@ -89,7 +89,12 @@ decision record: [milestones/goshuin.md](./milestones/goshuin.md).
     (fixed status vocabulary + frozen per-source dimension tables in
     `@junrei/core`; all 9 tool descriptions document the semantics;
     `list_sessions` payload became `{ sessions, sourceCompleteness }`)
-  - ⬜ A: MCP drill-down tools (`get_records`, `get_tool_call`)
+  - ✅ A: MCP drill-down tools — `get_records` (bulk line-level record
+    detail with `missingLines`) + `get_tool_call` (call + result + linked
+    records as one evidence unit), both harnesses, explicit truncation
+    flags everywhere; Claude tool_result text recovered in full from the
+    raw source line past the parser's 2000-char capture cap (web
+    record-detail badge now driven by the explicit signal)
   - ⬜ C: reconstruction layer ("virtual wire",
     `get_reconstructed_request`) + promote recon scripts into
     `experiments/` with fixture-based tests

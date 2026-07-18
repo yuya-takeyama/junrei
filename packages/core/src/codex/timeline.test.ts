@@ -11,7 +11,7 @@ import type {
   UserEntry,
 } from "../shared/timeline.js";
 import { parseCodexTranscriptFile } from "./parser.js";
-import { buildCodexTimeline, getCodexRecordDetail } from "./timeline.js";
+import { buildCodexTimeline, getCodexRecordDetail, getCodexToolCallDetail } from "./timeline.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../test/fixtures/codex");
 
@@ -301,6 +301,85 @@ describe("getCodexRecordDetail", () => {
   it("still returns undefined for a response_item duplicate of a real event-sourced prompt", async () => {
     const transcript = await loadSynthetic();
     expect(getCodexRecordDetail(transcript, 4)).toBeUndefined();
+  });
+});
+
+describe("getCodexToolCallDetail", () => {
+  it("returns the call and result as one unit for a function_call/function_call_output pair, flagging {success:false} as an error", async () => {
+    const transcript = await loadRich();
+    const detail = getCodexToolCallDetail(transcript, "call-1");
+    expect(detail?.toolUseId).toBe("call-1");
+    expect(detail?.call).toEqual({
+      name: "shell",
+      input: { command: ["pytest", "foo.spec.ts"] },
+      line: 6,
+      timestamp: "2026-07-01T10:00:04.000Z",
+    });
+    expect(detail?.result).toEqual({
+      isError: true,
+      text: "process exited with code 1",
+      line: 7,
+      timestamp: "2026-07-01T10:00:05.000Z",
+    });
+    expect(detail?.resultMissing).toBe(false);
+    // Codex has no hook/attachment linkage concept — always empty.
+    expect(detail?.relatedRecords).toEqual([]);
+  });
+
+  it("resolves a custom_tool_call/custom_tool_call_output pair as ok, falling back to the raw (non-JSON) input string", async () => {
+    const transcript = await loadRich();
+    const detail = getCodexToolCallDetail(transcript, "call-2");
+    expect(detail?.call.name).toBe("apply_patch");
+    expect(detail?.call.input).toBe("*** Update File: foo.spec.ts");
+    expect(detail?.result?.isError).toBe(false);
+    expect(detail?.result?.text).toBe("patch applied");
+    expect(detail?.result?.line).toBe(11);
+  });
+
+  it("resolves a local_shell_call via its exec_command_end, flagging a nonzero exit code as an error", async () => {
+    const transcript = await loadRich();
+    const detail = getCodexToolCallDetail(transcript, "call-3");
+    expect(detail?.call.name).toBe("shell");
+    expect(detail?.result).toEqual({
+      isError: true,
+      text: "exited with code 2",
+      line: 13,
+      timestamp: "2026-07-01T10:00:08.000Z",
+    });
+  });
+
+  it("returns undefined for an unknown toolUseId", async () => {
+    const transcript = await loadRich();
+    expect(getCodexToolCallDetail(transcript, "does-not-exist")).toBeUndefined();
+  });
+
+  it("declares result: null and resultMissing: true for a call with neither an output nor an exec_command_end", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "junrei-codex-toolcall-"));
+    const filePath = join(dir, "rollout.jsonl");
+    try {
+      const lines = [
+        '{"timestamp":"2026-07-04T00:00:00.000Z","type":"session_meta","payload":{"id":"dddddddd-dddd-dddd-dddd-dddddddddddd","cwd":"/tmp/proj","originator":"codex_cli_rs","cli_version":"0.55.0"}}',
+        JSON.stringify({
+          timestamp: "2026-07-04T00:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "shell",
+            call_id: "call-unresolved",
+            arguments: "{}",
+          },
+        }),
+      ];
+      await writeFile(filePath, `${lines.join("\n")}\n`);
+      const transcript = await parseCodexTranscriptFile(filePath);
+      expect(transcript.format).toBe("current");
+
+      const detail = getCodexToolCallDetail(transcript, "call-unresolved");
+      expect(detail?.result).toBeNull();
+      expect(detail?.resultMissing).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
