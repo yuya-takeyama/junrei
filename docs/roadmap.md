@@ -56,7 +56,7 @@ emulator, added to `aqua.yaml` via a local registry —
 aqua registry), uploads the existing core fixtures, and exercises the store
 end to end; it skips gracefully when `kumo` isn't on `PATH`.
 
-## Next milestone — Goshuin (proposal, 2026-07-18)
+## Current milestone — Goshuin (decided 2026-07-18)
 
 Evidence-grade agent analysis over Junrei MCP: give analyzing agents
 verifiable, provenance-backed access to what actually happened in a session —
@@ -66,16 +66,33 @@ latency). Grounded in the
 [session-log completeness study](./research/claude-code-session-log-completeness.md)
 and new measured verification (API-payload reconstruction from log+disk:
 85–100% byte-exact; per-CLI-version stability of system prompt/tools/params).
-Full insight dump, candidate approaches (A–F), recommended phasing, and open
-decisions: [milestones/goshuin.md](./milestones/goshuin.md).
+Full insight dump, candidate approaches (A–F), adopted phasing, and the
+decision record: [milestones/goshuin.md](./milestones/goshuin.md).
 
 - ✅ Insight/idea capture: evidence base, six candidate approaches
   (drill-down tools, blind-spot metadata, reconstruction "virtual wire",
   wire-capture ingestion, OTel ingestion, eval-trace export), open decisions
-- ⬜ Decision stage: settle the open decisions (C-first vs D-first,
-  epistemics of labeled non-log-derived values, template-library logistics,
-  MCP surface philosophy)
-- ⬜ Implementation: phased per the decisions
+- ✅ Decision stage (2026-07-18): all nine open decisions settled — C-first
+  (reconstruction first-class, capture as opt-in calibrator); labeled
+  confidence classes (`exact`/`template`/`disk-contingent`/`unknown`)
+  admitted; drift = `disk-contingent` label + mtime hint, no watcher;
+  user-local template library (`~/.junrei/templates/`, never in-repo);
+  drill-down tools added to MCP (9 → 11); capture-proxy constraints fixed
+  (local-only, opt-in, redact-at-write, ToS warning), UX deferred to D;
+  OTel receiver on the same Hono server with per-session JSONL;
+  per-response `sourceCompleteness` block (+ `costIsComplete` kept);
+  recon scripts promoted to `experiments/` in phase C. Full record with
+  rationale:
+  [goshuin.md — Decisions](./milestones/goshuin.md#decisions-2026-07-18)
+- 🚧 Implementation (phase order B → A → C → D/E → F):
+  - ⬜ B: blind-spot metadata — `sourceCompleteness` on every MCP response
+  - ⬜ A: MCP drill-down tools (`get_records`, `get_tool_call`)
+  - ⬜ C: reconstruction layer ("virtual wire",
+    `get_reconstructed_request`) + promote recon scripts into
+    `experiments/` with fixture-based tests
+  - ⬜ D: wire-capture ingestion (opt-in, local-only)
+  - ⬜ E: OTel ingestion (OTLP endpoint on the junrei server)
+  - ⬜ F: evaluation-trace export + analysis playbooks
 
 ## Open items
 

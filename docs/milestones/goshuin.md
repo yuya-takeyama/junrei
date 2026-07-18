@@ -1,9 +1,11 @@
 # Milestone proposal: Goshuin (御朱印) — evidence-grade agent analysis over Junrei MCP
 
-**Status: PROPOSAL** (2026-07-18). This document records the insights, verified
-evidence, and candidate approaches for the next major milestone. **Decisions
-and implementation are explicitly deferred** to the next stage — nothing here
-is committed yet.
+**Status: DECIDED** (2026-07-18). This document records the insights, verified
+evidence, and candidate approaches for the milestone. All nine open decisions
+were settled with Yuya on 2026-07-18 — see
+[Decisions](#decisions-2026-07-18). Implementation proceeds in the adopted
+phase order (B → A → C → D/E → F) and is tracked in
+[the roadmap](../roadmap.md).
 
 **Codename.** A *goshuin* is the seal a pilgrim collects at each temple as
 proof that the visit really happened. This milestone is about giving analyzing
@@ -153,8 +155,8 @@ isn't reproducible from session data alone.
 The confidence classes answer it — `exact`/`template` blocks *are*
 reproducible (template inputs are pinned, versioned captures), and
 `disk-contingent` blocks are explicitly labeled rather than silently
-asserted. Whether that satisfies the quantitative-data principle is an open
-decision, not a foregone conclusion.
+asserted. Decision #2 below accepts this reasoning: labeled
+non-log-derived values are admitted.
 
 ### D. Wire-capture ingestion (ground truth, opt-in)
 
@@ -183,7 +185,7 @@ methodology over the MCP tools (the cost-efficient-delegation skill's
 "Measure it" section is the prototype). Precision comes from method as much
 as data.
 
-## Recommended phasing (recommendation, not a decision)
+## Adopted phasing (decision #1)
 
 1. **B → A**: days-scale, zero philosophical friction, benefits every
    existing session immediately.
@@ -191,36 +193,107 @@ as data.
 3. **D / E**: opt-in enrichment; D doubles as C's calibration rig.
 4. **F**: once the layers below exist.
 
-The central architectural choice is **C-first (reconstruction as a first-
+The central architectural choice was **C-first (reconstruction as a first-
 class citizen, capture as its calibrator) vs D-first (capture as the
-foundation, reconstruction as a fallback)**. The recommendation is C-first:
-it works retroactively on every existing session and carries no ToS risk.
+foundation, reconstruction as a fallback)**. Decided: C-first — it works
+retroactively on every existing session and carries no ToS risk.
 
-## Open decisions (for the next stage)
+## Decisions (2026-07-18)
 
-1. C-first vs D-first (above).
-2. Does the quantitative-data principle admit labeled `disk-contingent` /
-   `template` values, or must MCP output stay strictly log-derived (in which
-   case C's scope shrinks to attachment-rebuildable blocks)?
-3. CLAUDE.md/memory drift: accept disk-contingent labels, or have junrei
-   snapshot those files at observation time (a watcher — new moving part)?
-4. Template library logistics: per-CLI-version system-prompt/tool captures
-   are Anthropic-authored text — **they can be captured and stored locally by
-   the user but must not be redistributed in the junrei repo**. Templates
-   would be user-local artifacts (e.g. `~/.junrei/templates/<version>/`),
-   possibly auto-captured via D. Confirm this framing.
-5. MCP surface growth vs the "few, high-leverage tools" philosophy: add
-   drill-down tools (A), or keep raw access HTTP-only and teach agents the
-   HTTP route?
-6. Capture-proxy (D) product stance: opt-in UX, warning copy for
-   subscription users, storage/retention, redaction guarantees.
-7. OTel endpoint (E) placement (same Hono server vs sidecar), storage
-   format, retention.
-8. `sourceCompleteness` schema (B): per-response vs per-field, and how it
-   composes with `costIsComplete`.
-9. Promote the reconstruction/stability scripts (currently session-scratchpad
-   one-offs) into `experiments/` with fixture-based tests, so C's rules are
-   executable documentation rather than prose.
+All nine open decisions were settled with Yuya on 2026-07-18. Numbering
+matches the open-decision list this section replaces (the questions are
+restated inline).
+
+1. **C-first vs D-first → C-first.** Reconstruction is the first-class
+   citizen; wire capture (D) is its opt-in calibrator, added later.
+   Rationale: C works retroactively on every existing session and carries
+   zero ToS exposure, while D only covers future sessions with capture
+   enabled; the measured reconstruction fidelity (85.2% byte-exact, 99.0%
+   after the four mechanical normalization rules, 0% missing with disk
+   access) makes C viable without ground-truth capture.
+
+2. **Labeled non-log-derived values → admitted.** Every reconstructed block
+   must carry a confidence class (`exact` / `template` / `disk-contingent` /
+   `unknown`); under that labeling, `template` and `disk-contingent` values
+   may appear in MCP output. Rationale: the quantitative-data principle's
+   core — deterministic rules, no LLM judgment — is fully preserved; what
+   changes is that provenance becomes explicit per block instead of the
+   implicit "everything is log-derived". Silent assertion stays forbidden;
+   labeled derivation is not judgment.
+
+3. **CLAUDE.md/memory drift → `disk-contingent` label + mtime hint, no
+   watcher.** Disk-rebuilt blocks carry the confidence label plus a
+   machine-readable `driftDetected` flag derived from comparing the file's
+   mtime against the session's timestamps (a file modified after the
+   session started may differ from what the session actually saw).
+   Rationale: near-zero implementation cost and no standing watcher
+   process; a snapshot watcher would be a new moving part that still misses
+   every session run while junrei is down.
+
+4. **Template library → user-local artifacts, confirmed.** Per-CLI-version
+   system-prompt/tool-schema captures are Anthropic-authored text: users
+   capture and store them locally under `~/.junrei/templates/<cli-version>/`
+   (later auto-captured via D), and they are **never redistributed in the
+   junrei repo**. The repo commits only extraction/verification logic and
+   anonymized synthetic fixtures. When no template exists for a session's
+   CLI version, the affected blocks degrade to `unknown` with the absence
+   declared.
+
+5. **MCP surface → add drill-down tools.** `get_records` and
+   `get_tool_call` join the MCP surface (9 → 11 tools) rather than keeping
+   raw access HTTP-only. Rationale: evidence access is itself high-leverage,
+   so this extends rather than violates the "few, high-leverage tools"
+   philosophy; MCP-only environments (e.g. remote agents) would otherwise
+   have no path to evidence, and the milestone's acceptance test — an
+   analysis report produced over MCP alone — requires it.
+
+6. **Capture proxy (D) → constraints decided now, UX at build time.**
+   Committed constraints: local-only (never hosted), explicit opt-in (env
+   var + launch flag), auth headers redacted at write time, mandatory ToS
+   warning copy for subscription users, storage under `~/.junrei/captures/`,
+   retention user-managed. Detailed UX (warning copy, command surface,
+   rotation) is designed when D starts.
+
+7. **OTel endpoint (E) → same Hono server, JSONL storage.** The OTLP
+   http/json receiver (validated at ~60 lines in the experiment) lands in
+   the existing junrei server process; events are stored as per-`session.id`
+   JSONL under `~/.junrei/otel/`, retention user-managed. Single-process
+   fits a local tool; a sidecar adds a moving part with no clear payoff.
+   Details re-confirmed when E starts.
+
+8. **`sourceCompleteness` schema (B) → per-response block + exceptional
+   per-field flags.** Every MCP response carries a fixed-vocabulary
+   per-response block:
+
+   ```jsonc
+   sourceCompleteness: {
+     source: "claude-session-jsonl",
+     dimensions: {
+       systemPrompt:   { status: "absent",       note: "not in session log" },
+       toolSchemas:    { status: "absent",       note: "action space not recorded" },
+       hiddenApiCalls: { status: "not-recorded", note: "aux calls invisible; cost undercounts" },
+       cost:           { status: "estimate",     note: "pricing-table; see costIsComplete" },
+       thinking:       { status: "partial",      note: "not re-sent in later turns" },
+       latency:        { status: "absent" }
+     }
+   }
+   ```
+
+   Existing `costIsComplete` stays as-is for backward compatibility (the
+   `cost` dimension references it), and the `costIsComplete` pattern — a
+   per-field flag right next to the value — remains the escape hatch for
+   values whose completeness varies per response. Full per-field annotation
+   everywhere was rejected as response bloat.
+
+9. **Reconstruction/stability scripts → promoted into `experiments/`.**
+   The session-scratchpad survived (capture runs A/B plus all scripts); as
+   part of phase C, `reconstruct-compare.mjs` / `stability-compare.mjs`
+   move into `experiments/claude-code-capture/` with anonymized synthetic
+   fixtures that test the reconstruction rules (the four normalization
+   rules, attachment rebuilds, template substitution), so C's rules are
+   executable documentation rather than prose. Raw captures contain
+   personal context: they stay local as the calibration oracle and are
+   never committed.
 
 ## Evidence assets
 
