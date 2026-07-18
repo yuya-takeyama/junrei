@@ -34,6 +34,33 @@ export interface UsageSummary {
   total: TokenTotals & { costUsd: number; costIsComplete: boolean; cacheWriteCostUsd?: number };
 }
 
+/** Token totals sufficient to compute a cache-hit rate — see `cacheHitRate`. */
+export interface CacheableTokenTotals {
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+/**
+ * Fraction of "effective input" tokens (input + cache-read + cache-creation)
+ * actually served from cache. Moved here (Phase 1 of the trends feature,
+ * `./trends.ts`) from the web package's `format.ts`, which had the only
+ * existing copy of this formula (session-level stat strip and agent detail
+ * shell) — promoted so the server-side trends aggregate can share the exact
+ * same definition instead of inventing a second one. `format.ts` keeps its
+ * own copy for now (not yet migrated to import from here); keep the two in
+ * lockstep until web is updated to import this one.
+ *
+ * Returns 0 (not a sentinel) when there's no effective-input volume at all —
+ * a caller that needs to distinguish "0% real hit rate" from "no tokens to
+ * rate" (e.g. `trends.ts`'s per-bucket `cacheHitRate: number | null`) checks
+ * the denominator itself before calling this.
+ */
+export function cacheHitRate(totals: CacheableTokenTotals): number {
+  const denominator = totals.inputTokens + totals.cacheReadTokens + totals.cacheCreationTokens;
+  return denominator > 0 ? totals.cacheReadTokens / denominator : 0;
+}
+
 /**
  * Merge per-model usage summaries from a main transcript's own usage and
  * every node of a subagent forest (recursively), keyed by model id — mirrors

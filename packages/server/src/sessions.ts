@@ -112,6 +112,31 @@ export async function listSessions(
   return { sessions, total: results.reduce((sum, r) => sum + r.total, 0) };
 }
 
+/**
+ * Every session across the selected source(s) whose START time falls in
+ * `bounds`, with NO page-size cap — unlike `listSessions`, which always asks
+ * each adapter for `offset + limit` entries (capped publicly by callers at
+ * `MAX_LIST_LIMIT`). `GET /api/trends` needs every session in its (up to)
+ * 2×`days` window to compute accurate per-day buckets and a real
+ * "previous window" total, not just a page of them.
+ *
+ * Passing `max: undefined` to an adapter's own `listItems` is exactly the
+ * "no cap" mechanism that already exists (see `ListingAdapter`'s doc
+ * comment: `max !== undefined` is the only condition that breaks the scan
+ * early), so this doesn't require raising `MAX_LIST_LIMIT` itself — that
+ * constant stays the public list/overview ceiling; this helper is a
+ * DIFFERENT, narrower lever (bounded by date, not by page size) for a route
+ * that genuinely needs everything in a date range.
+ */
+export async function listAllSessionsInBounds(
+  bounds: SessionListBounds,
+  source: SessionSourceFilter = "all",
+): Promise<AnySessionListItem[]> {
+  const adapters = source === "all" ? registry : registry.filter((a) => a.source === source);
+  const results = await Promise.all(adapters.map((a) => a.listItems(undefined, bounds)));
+  return results.flatMap((r) => r.entries).map((r) => r.item);
+}
+
 export {
   type ClaudeSessionKey,
   type ClaudeSessionListItem,

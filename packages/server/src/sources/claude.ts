@@ -28,6 +28,7 @@ import {
   type SourceAdapter,
   sliceDelegation,
   sliceUsageByModel,
+  sumSubagentReturns,
 } from "./shared.js";
 
 /**
@@ -125,6 +126,7 @@ function toListItem(
   desktopTitle?: string,
 ): ClaudeSessionListItem {
   const title = analysis.title ?? desktopTitle;
+  const subagentReturn = sumSubagentReturns(analysis.subagents);
   return {
     source: "claude-code",
     sessionId: analysis.sessionId,
@@ -155,6 +157,7 @@ function toListItem(
     ...(analysis.startedAt !== undefined && { startedAt: analysis.startedAt }),
     ...(analysis.endedAt !== undefined && { endedAt: analysis.endedAt }),
     ...(analysis.durationMs !== undefined && { durationMs: analysis.durationMs }),
+    ...(subagentReturn !== undefined && { subagentReturn }),
   };
 }
 

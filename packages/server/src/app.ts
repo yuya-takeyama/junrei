@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { extractSessionId } from "@junrei/core";
+import { computeTrends, extractSessionId } from "@junrei/core";
 import { type Context, Hono } from "hono";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import { createMcpServer } from "./mcp.js";
@@ -14,6 +14,7 @@ import {
   getAgentSession,
   getClaudeLastActivityAt,
   getCodexLastActivityAt,
+  listAllSessionsInBounds,
   listSessions,
   MAX_LIST_LIMIT,
   type SessionSourceFilter,
@@ -42,6 +43,28 @@ export type CreateAppOptions = {
 
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** `GET /api/trends`'s `days` query param — a fixed whitelist (not an arbitrary integer) so the 2×`days` lookback fetch below stays cheap and predictable. */
+const TRENDS_DAYS_WHITELIST = new Set([7, 14, 30]);
+const DEFAULT_TRENDS_DAYS = 14;
+const DEFAULT_TRENDS_TIMEZONE = "UTC";
+
+/** A `days` value outside the whitelist (missing, non-numeric, or some other integer) silently falls back to the default — same "coerce, don't 400" convention `GET /api/sessions`'s `limit`/`offset` already use. */
+function parseTrendsDays(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return TRENDS_DAYS_WHITELIST.has(parsed) ? parsed : DEFAULT_TRENDS_DAYS;
+}
+
+/** `Intl.DateTimeFormat` throws `RangeError` for a `timeZone` it doesn't recognize as a valid IANA name — the cheapest correct validator, no IANA database bundled/parsed by hand. */
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -165,6 +188,43 @@ export function createApp(options: CreateAppOptions = {}) {
           return c.json({ error: "repo query param is required" } as const, 400);
         }
         return c.json({ overview: await getRepoOverview(repo) });
+      })
+      // Multi-day trend report — Phase 1 (core aggregation + this route; no
+      // UI, no MCP tool yet, see the trends feature's roadmap entry).
+      // `days` is whitelisted (7/14/30) rather than an arbitrary integer so
+      // the lookback fetch below stays a small, predictable number of
+      // sessions; an out-of-whitelist value coerces to the default (same
+      // convention `limit`/`offset`/`sinceMs`/`untilMs` use above), but an
+      // invalid `tz` 400s outright — there's no sane default to fall back to
+      // for "the caller asked for a time zone that doesn't exist".
+      //
+      // The window fetched from `listAllSessionsInBounds` spans TWO windows
+      // of `days` (current + the equal-length window immediately before it)
+      // so `computeTrends` can compute `summary.previous`/`delta` without a
+      // second round trip — see that function's doc comment for why it needs
+      // every session in both windows up front, not just a page of them.
+      .get("/api/trends", async (c) => {
+        const days = parseTrendsDays(c.req.query("days"));
+        const timeZone = c.req.query("tz") ?? DEFAULT_TRENDS_TIMEZONE;
+        if (!isValidTimeZone(timeZone)) {
+          return c.json({ error: "tz query param must be a valid IANA time zone" } as const, 400);
+        }
+        const rawRepo = c.req.query("repo");
+        const repo = rawRepo === undefined || rawRepo === "" ? undefined : rawRepo;
+
+        const untilMs = Date.now();
+        const sinceMs = untilMs - days * DAY_MS;
+        const lookbackSinceMs = untilMs - 2 * days * DAY_MS;
+
+        const items = await listAllSessionsInBounds({ sinceMs: lookbackSinceMs, untilMs });
+        return c.json(
+          computeTrends(items, {
+            sinceMs,
+            untilMs,
+            timeZone,
+            ...(repo !== undefined && { repo }),
+          }),
+        );
       })
       // Source-prefixed routes, symmetric between the two harnesses: both
       // Claude and Codex now scope by `{id}` alone (a bare session UUID) —
