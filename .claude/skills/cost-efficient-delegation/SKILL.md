@@ -55,6 +55,13 @@ or routing question commits to nothing.
 - **Workers return conclusions, not context**: verdicts, summaries, and
   file:line pointers — never raw logs, DOM dumps, screenshots, or full
   search output.
+- **Workers read files with the dedicated tools.** Every spawn prompt for a
+  role-less worker must state: use Read/Grep/Glob for file access, never
+  `cat`, `sed -n`, or `grep` through Bash. Bash file dumps arrive uncapped
+  (a single `cat` of a fixture can cost tens of thousands of chars inside a
+  review agent), while the dedicated tools bound output and let the harness
+  track what was already read. Junrei flags violations: check
+  `get_bash_stats` -> `waste.bashAsRead` after delegation-heavy sessions.
 
 ## Pricing
 
