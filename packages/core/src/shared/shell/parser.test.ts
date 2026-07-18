@@ -154,10 +154,10 @@ describe("parseShellCommand", () => {
         expect(seg?.hasOutputRedirect).toBe(true);
       });
 
-      it("strips a whole-token attached numbered redirect (2>out.txt)", () => {
+      it("strips a whole-token attached numbered redirect (2>out.txt), but does not set hasOutputRedirect — fd 2 is stderr, not stdout", () => {
         const [seg] = parseShellCommand("pnpm test 2>out.txt").segments;
         expect(seg?.args).toEqual(["test"]);
-        expect(seg?.hasOutputRedirect).toBe(true);
+        expect(seg?.hasOutputRedirect).toBeUndefined();
       });
 
       it("strips a whole-token attached &> redirect", () => {
@@ -188,6 +188,85 @@ describe("parseShellCommand", () => {
       it("does not treat a bare fd-dup redirect (2>&1) as an output redirect", () => {
         const [seg] = parseShellCommand("pnpm test 2>&1").segments;
         expect(seg?.args).toEqual(["test"]);
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+
+      it("does not treat an attached fd-dup redirect (echo hi>&2) as an output redirect", () => {
+        const [seg] = parseShellCommand("echo hi>&2").segments;
+        expect(seg?.args).toEqual(["hi"]);
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+
+      it("distinguishes a word ending in a digit (foo2>out) from a pure fd redirect (2>out)", () => {
+        const withWord = parseShellCommand("touch foo2>out").segments[0];
+        expect(withWord?.args).toEqual(["foo2"]);
+        expect(withWord?.hasOutputRedirect).toBe(true);
+
+        const pureFd = parseShellCommand("touch 2>out").segments[0];
+        expect(pureFd?.args).toEqual([]);
+        expect(pureFd?.hasOutputRedirect).toBeUndefined();
+      });
+    });
+
+    describe("hasOutputRedirect: stdout-only semantics", () => {
+      it.each([
+        ["cmd 2>err.txt", false],
+        ["cmd 2>>err.txt", false],
+        ["cmd >out.txt", true],
+        ["cmd >>out.txt", true],
+        ["cmd 1>out.txt", true],
+        ["cmd 1>>out.txt", true],
+        ["cmd &>all.txt", true],
+        ["cmd &>>all.txt", true],
+        ["cmd 2>&1", false],
+        ["cmd >&2", false],
+        ["cmd 1>&2", false],
+      ] as const)("%s -> hasOutputRedirect %s", (command, expected) => {
+        const [seg] = parseShellCommand(command).segments;
+        expect(seg?.hasOutputRedirect === true).toBe(expected);
+      });
+    });
+
+    describe("not mangled by the redirect scanner", () => {
+      it("keeps both process-substitution operands intact as args", () => {
+        const [seg] = parseShellCommand("diff <(sort a) <(sort b)").segments;
+        expect(seg?.executable).toBe("diff");
+        expect(seg?.args).toEqual(["<(sort a)", "<(sort b)"]);
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+
+      it("keeps a >(...) process substitution (with a nested > inside it) intact as one arg", () => {
+        const [seg] = parseShellCommand("tee >(gzip > out.gz)").segments;
+        expect(seg?.executable).toBe("tee");
+        expect(seg?.args).toEqual([">(gzip > out.gz)"]);
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+
+      it("does not set hasOutputRedirect for a heredoc (<<EOF)", () => {
+        const [seg] = parseShellCommand("cat <<EOF").segments;
+        expect(seg?.executable).toBe("cat");
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+
+      it('does not set hasOutputRedirect for a here-string (<<<"x")', () => {
+        const [seg] = parseShellCommand('cat <<<"x"').segments;
+        expect(seg?.executable).toBe("cat");
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+    });
+
+    describe("attached-value flags", () => {
+      it("keeps a head -n100 attached-value flag as one token, separate from the file arg", () => {
+        const [seg] = parseShellCommand("head -n100 file").segments;
+        expect(seg?.executable).toBe("head");
+        expect(seg?.args).toEqual(["-n100", "file"]);
+        expect(seg?.hasOutputRedirect).toBeUndefined();
+      });
+
+      it("keeps a head -c4K attached-value flag as one token, separate from the file arg", () => {
+        const [seg] = parseShellCommand("head -c4K file").segments;
+        expect(seg?.executable).toBe("head");
+        expect(seg?.args).toEqual(["-c4K", "file"]);
         expect(seg?.hasOutputRedirect).toBeUndefined();
       });
     });
