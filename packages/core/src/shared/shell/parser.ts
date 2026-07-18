@@ -94,6 +94,43 @@ const FD_DUP_REDIRECT = /^\d*>&\d+$/;
 /** A token that redirects and consumes the FOLLOWING token as its target filename. */
 const REDIRECT_WITH_TARGET = /^(\d*>{1,2}|\d*<{1,2}|&>{1,2})$/;
 
+/**
+ * Matches a fd-duplication redirect operator (`2>&1`, `>&2`, `1>&2`) at the
+ * START of a string that may have more text following it (a filename, or —
+ * in the attached-redirect scan — trailing characters that were never
+ * actually part of the operator). Used by `isStdoutFileRedirectOperator` to
+ * rule these out before testing for a genuine stdout-to-file redirect, since
+ * `>&2`'s leading `>` would otherwise look identical to a real `>file`.
+ */
+const FD_DUP_PREFIX = /^\d*>&\d+/;
+/**
+ * Matches a redirect operator that diverts STDOUT to a file — unnumbered
+ * `>`/`>>`, explicit `1>`/`1>>`, or the combined `&>`/`&>>` (stdout+stderr)
+ * — at the START of a string that may have more text following it (a
+ * filename). The `(?!&)` guard keeps a bare `>` from matching the `>` in
+ * `>&2`; callers are expected to check `FD_DUP_PREFIX` first regardless.
+ */
+const STDOUT_TARGET_PREFIX = /^(1?>{1,2}(?!&)|&>{1,2})/;
+
+/**
+ * Classify a redirect operator — either the whole operator token (the
+ * standalone-token path) or an operator immediately followed by more text
+ * such as a filename (the attached-redirect path) — as one that diverts
+ * STDOUT to a file, per the stdout-only semantics documented on
+ * `ShellSegment.hasOutputRedirect`.
+ *
+ * True only for unnumbered `>`/`>>`, explicit `1>`/`1>>`, and the combined
+ * `&>`/`&>>` forms. False for another fd's redirect alone (`2>`, `2>>`, ...)
+ * — stdout isn't touched, so it still reaches the tool result — and false
+ * for a pure fd-duplication (`2>&1`, `>&2`, `1>&2`), which keeps output
+ * within a stream the agent still receives rather than sending it to a
+ * file. Also false for any `<`-led input redirect.
+ */
+function isStdoutFileRedirectOperator(text: string): boolean {
+  if (FD_DUP_PREFIX.test(text)) return false;
+  return STDOUT_TARGET_PREFIX.test(text);
+}
+
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** One `|`/`&&`/`||`/`;`-delimited slice of a shell command line. */
@@ -122,13 +159,23 @@ export interface ShellSegment {
   /** Set instead of `executable`/`subcommand` when this segment's first token is a shell control-flow keyword — see `CONTROL_KEYWORDS`. */
   controlKeyword?: string;
   /**
-   * `true` when a TARGET-bearing `>`-style redirect (`>file`, `>>file`,
-   * `2>file`, `&>file` — spaced or attached, NOT a bare fd-duplication like
-   * `2>&1`, and NOT an input `<` redirect) was stripped from this segment.
-   * Consumers use this to tell "this command's output is visible in the
-   * tool result" apart from "this command's output was sent to a file
-   * instead" — see `bash-stats.ts`'s `isBashAsRead`, which a redirecting
-   * `cat`/`head`/etc should NOT be flagged by.
+   * `true` when a redirect that diverts STDOUT to a file — unnumbered
+   * `>file`/`>>file`, explicit `1>file`/`1>>file`, or the combined
+   * `&>file`/`&>>file` (which redirects both stdout and stderr) — was
+   * stripped from this segment, spaced or attached.
+   *
+   * NOT set for another fd's redirect alone, e.g. `2>file`/`2>>file`
+   * (stderr-only — stdout still reaches the tool result), and NOT set for a
+   * pure fd-duplication like `2>&1`, `>&2`, or `1>&2` (these keep output
+   * within a stream the agent still receives, they don't send it to a
+   * file). Also not set for an input `<` redirect.
+   *
+   * Consumers use this to tell "this command's stdout is visible in the
+   * tool result" apart from "this command's stdout was sent to a file
+   * instead" — see `bash-stats.ts`'s `isBashAsRead`, which a
+   * stdout-redirecting `cat`/`head`/etc should NOT be flagged by, but a
+   * stderr-only redirect (`cat foo.log 2>/dev/null`) SHOULD still be, since
+   * the file content (stdout) still reaches the agent.
    */
   hasOutputRedirect?: boolean;
 }
@@ -424,11 +471,14 @@ function findAttachedRedirectStart(raw: string): number | undefined {
  * only exists inside quoted text (see `findAttachedRedirectStart`'s doc
  * comment).
  *
- * Also reports `hasOutputRedirect`: whether any TARGET-bearing `>`-style
- * redirect (spaced or attached — NOT a bare fd-duplication like `2>&1`, and
- * NOT an input `<` redirect) was found, so callers can tell a command that's
- * genuinely printing to its result apart from one redirecting its output
- * elsewhere.
+ * Also reports `hasOutputRedirect`: whether a redirect diverting STDOUT to a
+ * file (unnumbered `>`/`>>`, explicit `1>`/`1>>`, or the combined `&>`/`&>>`
+ * — spaced or attached) was found. NOT set for another fd's redirect alone
+ * (`2>`, `2>>`, ...), NOT set for a pure fd-duplication (`2>&1`, `>&2`,
+ * `1>&2`), and NOT set for an input `<` redirect — see the
+ * `hasOutputRedirect` TSDoc on `ShellSegment` for the full rationale. So
+ * callers can tell a command that's genuinely printing to its result apart
+ * from one redirecting its output elsewhere.
  */
 function stripRedirects(
   values: readonly string[],
@@ -441,7 +491,7 @@ function stripRedirects(
     if (v === undefined) continue;
     if (FD_DUP_REDIRECT.test(v)) continue;
     if (REDIRECT_WITH_TARGET.test(v)) {
-      if (v.includes(">")) hasOutputRedirect = true;
+      if (isStdoutFileRedirectOperator(v)) hasOutputRedirect = true;
       i += 1; // also drop the filename target, if any
       continue;
     }
@@ -451,7 +501,7 @@ function stripRedirects(
       result.push(v);
       continue;
     }
-    if (/[<>]/.exec(raw.slice(splitAt))?.[0] === ">") hasOutputRedirect = true;
+    if (isStdoutFileRedirectOperator(raw.slice(splitAt))) hasOutputRedirect = true;
     if (splitAt > 0) {
       const relexed = lex(raw.slice(0, splitAt));
       const word = relexed[0]?.value;

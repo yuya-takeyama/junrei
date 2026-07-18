@@ -278,6 +278,22 @@ describe("computeBashStats", () => {
         const stats = computeBashStats([{ thread: "main", data }]);
         expect(stats.waste.bashAsRead).toEqual([]);
       });
+
+      it("flags a stderr-only redirect — stdout (the file content) still reaches the agent", () => {
+        const data = makeSessionData([bashCall("toolu_h4", 1, "cat foo.log 2>/dev/null")]);
+        const stats = computeBashStats([{ thread: "main", data }]);
+        expect(stats.waste.bashAsRead).toEqual([
+          { command: "cat foo.log 2>/dev/null", resultChars: 0, line: 1, thread: "main" },
+        ]);
+      });
+
+      it("flags head -n100 foo.log (attached-value -n form, a real file arg beyond the flag's value)", () => {
+        const data = makeSessionData([bashCall("toolu_h5", 1, "head -n100 foo.log")]);
+        const stats = computeBashStats([{ thread: "main", data }]);
+        expect(stats.waste.bashAsRead).toEqual([
+          { command: "head -n100 foo.log", resultChars: 0, line: 1, thread: "main" },
+        ]);
+      });
     });
   });
 
