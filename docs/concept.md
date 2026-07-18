@@ -136,8 +136,10 @@ with provenance (line numbers / record UUIDs). ✅ shipped in v1 · ⬜ planned.
 | ✅ Skill invocations | Skill tool calls: which skill, when, what it loaded | Was procedural context available & used? |
 | ⬜ Instruction footprint | Size of CLAUDE.md / rules / MEMORY.md loaded at start; per-file injected sizes now tracked via file access (#40) — size-at-start as a headline signal remains open | Adherence-risk baseline (200-line guidance) |
 
-Aggregate lenses (cross-session trends, error taxonomy across sessions) stay
-post-v1 — see [roadmap.md](./roadmap.md).
+Cross-session trends (multi-day, global and per-repo, with prev-window
+deltas — the `/trends` web screen plus the `get_trends` MCP tool) have
+shipped; error taxonomy across sessions and a dedicated cross-repo comparison
+view stay post-v1 — see [roadmap.md](./roadmap.md).
 
 ## 4. Information architecture
 

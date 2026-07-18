@@ -76,6 +76,13 @@ default). An always-on overview band above the table summarizes total cost,
 session count, delegated share, and top model for whatever the current
 filters leave visible. Results are paginated.
 
+**Trends** (`/trends`) — a multi-day cost/usage retrospective across every
+session, globally or scoped to one repo: a 7/14/30-day window with KPI deltas
+against the prior window, daily cost-by-model and delegation-split charts,
+efficiency small multiples (incl. subagent return size vs. the ~1-2k token
+benchmark), a cadence panel, and an anomalies panel (spike days, top
+sessions).
+
 **Session detail** opens into a set of lenses:
 
 - **Overview** — top-line usage, cost, and delegation numbers for the session.
@@ -123,6 +130,7 @@ Table order matches registration order in `packages/server/src/mcp.ts`.
 | `get_task_executions` | Every Bash command and Agent run, with duration and outcome. | Claude Code only |
 | `get_first_prompt` | The first user prompt of a session. | Claude Code + Codex |
 | `get_repo_overview` | Repo-level rollup across every session in a repo: cost timeline, per-model breakdown, top sessions. | Claude Code + Codex |
+| `get_trends` | Multi-day trend report (7/14/30 days, global or per-repo): daily cost/token/delegation buckets, a current-vs-previous-window summary with deltas, spike-day detection, and top sessions. | Claude Code + Codex |
 | `get_records` | Full record text (bulk, by 1-based JSONL line number) for a session — the same detail the record-detail view shows, with full tool-result text recovery past the log's own capture cap. | Claude Code + Codex |
 | `get_tool_call` | One tool call and its result as a single evidence unit, resolved by `toolUseId`, with any records the parser already links to it (e.g. background-task notifications). | Claude Code + Codex |
 | `get_reconstructed_request` | Reconstructs the actual Anthropic `/v1/messages` request payload (system prompt, tool schemas, generation params) for one main-loop turn, with an explicit confidence class (`exact`/`template`/`disk-contingent`/`unknown`) per block. | Claude Code only |

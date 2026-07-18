@@ -430,6 +430,109 @@ describe("MCP tools", () => {
     expect(overview.totalCostUsd).toBe(0);
   });
 
+  describe("get_trends", () => {
+    it("tools/list includes get_trends", async () => {
+      client = await connect();
+      const { tools } = await client.listTools();
+      expect(tools.map((t) => t.name)).toContain("get_trends");
+    });
+
+    it("defaults days to 14 and timeZone to UTC; bucket sessionCounts sum to the summary's current sessionCount", async () => {
+      client = await connect();
+      const result = await client.callTool({ name: "get_trends", arguments: {} });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        window: { days: number; timeZone: string; bucket: string };
+        buckets: Array<{ sessionCount: number; totalCostUsd: number }>;
+        summary: { current: { sessionCount: number; totalCostUsd: number } };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.window.days).toBe(14);
+      expect(body.window.timeZone).toBe("UTC");
+      expect(body.window.bucket).toBe("day");
+      const bucketSessionSum = body.buckets.reduce((sum, b) => sum + b.sessionCount, 0);
+      expect(bucketSessionSum).toBe(body.summary.current.sessionCount);
+      const bucketCostSum = body.buckets.reduce((sum, b) => sum + b.totalCostUsd, 0);
+      expect(bucketCostSum).toBeCloseTo(body.summary.current.totalCostUsd);
+      // Multi-source tool, no source filter: both entries, statically.
+      expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+        "claude-session-jsonl",
+        "codex-session-jsonl",
+      ]);
+    });
+
+    it("accepts each whitelisted `days` value and zero-fills the buckets to that length", async () => {
+      client = await connect();
+      for (const days of [7, 14, 30]) {
+        const result = await client.callTool({ name: "get_trends", arguments: { days } });
+        expect(result.isError).not.toBe(true);
+        const body = JSON.parse(textOf(result)) as {
+          window: { days: number };
+          buckets: unknown[];
+        };
+        expect(body.window.days).toBe(days);
+        expect(body.buckets).toHaveLength(days);
+      }
+    });
+
+    it("coerces an out-of-whitelist `days` value to the default instead of erroring (same convention as GET /api/trends)", async () => {
+      client = await connect();
+      const result = await client.callTool({ name: "get_trends", arguments: { days: 5 } });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { window: { days: number } };
+      expect(body.window.days).toBe(14);
+    });
+
+    it("rejects an invalid IANA timeZone with a tool error", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_trends",
+        arguments: { timeZone: "Not/AZone" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("timeZone is not a valid IANA time zone");
+    });
+
+    it("accepts a valid non-UTC IANA timeZone", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_trends",
+        arguments: { timeZone: "Asia/Tokyo" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { window: { timeZone: string } };
+      expect(body.window.timeZone).toBe("Asia/Tokyo");
+    });
+
+    it("`repo` narrows the report to one repo's sessions, same key semantics as get_repo_overview", async () => {
+      client = await connect();
+      // 30 days comfortably covers the fixtures' 2026-07-01..09 session dates
+      // from whenever this suite actually runs (same margin app.test.ts's
+      // GET /api/trends suite relies on).
+      const all = await client.callTool({ name: "get_trends", arguments: { days: 30 } });
+      const allBody = JSON.parse(textOf(all)) as {
+        summary: { current: { sessionCount: number } };
+      };
+
+      const scoped = await client.callTool({
+        name: "get_trends",
+        arguments: { days: 30, repo: "/Users/test/proj" },
+      });
+      expect(scoped.isError).not.toBe(true);
+      const scopedBody = JSON.parse(textOf(scoped)) as {
+        summary: { current: { sessionCount: number } };
+        anomalies: { topSessions: Array<{ repoKey: string }> };
+      };
+      expect(scopedBody.summary.current.sessionCount).toBeGreaterThan(0);
+      expect(scopedBody.summary.current.sessionCount).toBeLessThanOrEqual(
+        allBody.summary.current.sessionCount,
+      );
+      for (const session of scopedBody.anomalies.topSessions) {
+        expect(session.repoKey).toBe("/Users/test/proj");
+      }
+    });
+  });
+
   describe("get_records", () => {
     it("returns full record content with correct line numbers, and lists an out-of-range line in missingLines", async () => {
       client = await connect();

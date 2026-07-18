@@ -20,6 +20,12 @@ import {
   type SessionSourceFilter,
 } from "./sessions.js";
 import { appendOtelLine, resolveOtelDir } from "./sources/otel.js";
+import {
+  DEFAULT_TRENDS_TIMEZONE,
+  isValidTimeZone,
+  parseTrendsDays,
+  TRENDS_DAY_MS,
+} from "./trends-params.js";
 
 export type { AnySessionListItem } from "./sessions.js";
 
@@ -43,28 +49,6 @@ export type CreateAppOptions = {
 
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-/** `GET /api/trends`'s `days` query param — a fixed whitelist (not an arbitrary integer) so the 2×`days` lookback fetch below stays cheap and predictable. */
-const TRENDS_DAYS_WHITELIST = new Set([7, 14, 30]);
-const DEFAULT_TRENDS_DAYS = 14;
-const DEFAULT_TRENDS_TIMEZONE = "UTC";
-
-/** A `days` value outside the whitelist (missing, non-numeric, or some other integer) silently falls back to the default — same "coerce, don't 400" convention `GET /api/sessions`'s `limit`/`offset` already use. */
-function parseTrendsDays(raw: string | undefined): number {
-  const parsed = Number.parseInt(raw ?? "", 10);
-  return TRENDS_DAYS_WHITELIST.has(parsed) ? parsed : DEFAULT_TRENDS_DAYS;
-}
-
-/** `Intl.DateTimeFormat` throws `RangeError` for a `timeZone` it doesn't recognize as a valid IANA name — the cheapest correct validator, no IANA database bundled/parsed by hand. */
-function isValidTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -189,8 +173,10 @@ export function createApp(options: CreateAppOptions = {}) {
         }
         return c.json({ overview: await getRepoOverview(repo) });
       })
-      // Multi-day trend report — Phase 1 (core aggregation + this route; no
-      // MCP tool yet, see the trends feature's roadmap entry).
+      // Multi-day trend report (core aggregation + this route + the
+      // `/trends` web screen; the `get_trends` MCP tool in mcp.ts mirrors
+      // this same route, sharing its `days`/`tz` parsing via
+      // ./trends-params.js so the two surfaces can't drift).
       // `days` is whitelisted (7/14/30) rather than an arbitrary integer so
       // the lookback fetch below stays a small, predictable number of
       // sessions; an out-of-whitelist value coerces to the default (same
@@ -220,7 +206,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
         const nowMs = Date.now();
         const untilMs = nowMs;
-        const sinceMs = nowMs - (2 * days + 2) * DAY_MS;
+        const sinceMs = nowMs - (2 * days + 2) * TRENDS_DAY_MS;
 
         const items = await listAllSessionsInBounds({ sinceMs, untilMs });
         return c.json(

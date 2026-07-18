@@ -142,6 +142,8 @@ This repo is the measuring tool. After significant delegation, check:
 
 - Junrei UI -> session detail -> **Cost by model** and **Subagent tree**.
 - Junrei MCP -> `get_subagent_tree` / `get_session_summary`.
+- Junrei MCP -> `get_trends` for delegation share, cache hit rate, and
+  subagent-return-size trends across multiple days.
 - For Codex, compare the intended role's pinned model with the model recorded
   on each child; the observed model, not the prompt wording or the role name,
   is the source of truth.
