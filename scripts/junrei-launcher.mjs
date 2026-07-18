@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,11 @@ export const DEFAULT_WEB_PORT = 5873;
 export const DEV_SERVER_PORT_START = DEFAULT_SERVER_PORT + 1;
 export const DEV_WEB_PORT_START = DEFAULT_WEB_PORT + 1;
 
-const PORT_LOCK_DIR = join(tmpdir(), "junrei-dev-ports");
+export const PORT_LOCK_DIR = join(tmpdir(), "junrei-dev-ports");
+// Locks left behind by crashed or killed launchers would otherwise linger
+// forever: PID recycling can make their recorded owner look alive, so age is
+// the backstop for staleness.
+export const PORT_LOCK_STALE_MS = 24 * 60 * 60 * 1000;
 
 function parsePort(value, variableName) {
   const port = Number.parseInt(value, 10);
@@ -64,7 +68,37 @@ function isProcessRunning(pid) {
   }
 }
 
-async function claimPort(port) {
+async function isLockStale(lockPath) {
+  try {
+    const { mtimeMs } = await stat(lockPath);
+    if (Date.now() - mtimeMs > PORT_LOCK_STALE_MS) return true;
+    const pid = Number.parseInt(await readFile(lockPath, "utf8"), 10);
+    // A fresh lock without a parseable PID is mid-creation, not stale: its
+    // owner opened the file but has not written its PID yet.
+    return Number.isInteger(pid) && !isProcessRunning(pid);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return true; // released while being inspected; re-run the claim
+  }
+}
+
+let evictionSequence = 0;
+
+// Evict via rename so two claimants that both saw the same stale lock cannot
+// each delete-and-recreate it and end up sharing a port: rename is atomic, so
+// exactly one eviction wins and the loser re-runs the claim.
+async function evictStaleLock(lockPath) {
+  const evictedPath = `${lockPath}.evicted.${process.pid}.${evictionSequence++}`;
+  try {
+    await rename(lockPath, evictedPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return;
+  }
+  await rm(evictedPath, { force: true });
+}
+
+export async function claimPort(port) {
   await mkdir(PORT_LOCK_DIR, { recursive: true });
   const lockPath = join(PORT_LOCK_DIR, `${port}.lock`);
   try {
@@ -80,9 +114,8 @@ async function claimPort(port) {
     if (error.code !== "EEXIST") throw error;
   }
 
-  const pid = Number.parseInt(await readFile(lockPath, "utf8"), 10);
-  if (Number.isInteger(pid) && isProcessRunning(pid)) return undefined;
-  await rm(lockPath, { force: true });
+  if (!(await isLockStale(lockPath))) return undefined;
+  await evictStaleLock(lockPath);
   return claimPort(port);
 }
 
