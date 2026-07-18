@@ -15,8 +15,10 @@ four channels:
    proxy (`experiments/claude-code-capture/capture-proxy.mjs`) that tees every
    request/response (including SSE streams, reassembled) to JSONL, with auth
    headers redacted. This is informationally equivalent to the
-   mitmproxy-over-`HTTPS_PROXY` approach and to a LiteLLM/Bifrost-style
-   gateway, but needs no TLS interception or extra software.
+   mitmproxy-over-`HTTPS_PROXY` approach, but needs no TLS interception or
+   extra software. It is **not** interchangeable with a LiteLLM/Bifrost-style
+   gateway in every auth mode — see "Auth modes, gateways, and terms of
+   service" below.
 2. **OpenTelemetry** — Claude Code's built-in OTLP export
    (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, logs + metrics, `http/json`) sent to a
    local collector (`experiments/claude-code-capture/otel-collector.mjs`).
@@ -33,7 +35,12 @@ joins) and cross-checked against real *interactive* session logs from versions
 **Key enabling fact:** `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` works
 unmodified with existing subscription (OAuth) auth — the CLI sends its normal
 `authorization` bearer header to the substitute base URL. No API key, no MITM
-certificate, no keychain work is needed for wire capture.
+certificate, no keychain work is needed for wire capture. This matches
+Anthropic's own [LLM gateway docs](https://code.claude.com/docs/en/llm-gateway):
+overriding only the base URL (with no gateway credential) does not replace the
+subscription login, provided the forwarder preserves the `anthropic-beta`
+header that carries the OAuth capability — which a byte-for-byte pass-through
+does by construction.
 
 ## Summary matrix
 
@@ -187,20 +194,79 @@ Coverage today: **session log + wire capture together = 1–11 except hook
 internals timing (log has it) — i.e. the union is effectively complete.**
 Each alone is not.
 
+## Auth modes, gateways, and terms of service
+
+Claude Code authenticates in one of two ways — an **Anthropic API key**
+(Console/platform billing) or a **claude.ai subscription login** (Pro/Max
+OAuth bearer token) — and the capture routes are *not* equally available in
+both modes. Sources checked 2026-07-18:
+
+| Capture route | API key | Subscription (OAuth) |
+|---|---|---|
+| OTel export (official) | works | works |
+| Local pass-through proxy (`ANTHROPIC_BASE_URL` only, credentials untouched) | works | works — verified in this study, and consistent with Anthropic's gateway docs (below) |
+| mitmproxy via `HTTPS_PROXY` | works | works — same mechanics; TLS-inspection proxies are covered by the corporate-proxy docs |
+| LiteLLM gateway | works — the documented gateway pattern (LiteLLM holds the Anthropic API key; the client authenticates to LiteLLM) | **not by default** — a gateway credential replaces the subscription. An opt-in OAuth passthrough (`forward_client_headers_to_llm_api: true`) is documented for Max subscriptions but is recent, non-default, and has open header-handling bugs (litellm #19618, #29190) |
+| Bifrost gateway | works (virtual keys) | **no** — credential substitution only; OAuth passthrough is an open feature request (bifrost #1390) |
+
+The mechanics are documented by Anthropic itself
+([llm-gateway](https://code.claude.com/docs/en/llm-gateway),
+[llm-gateway-protocol](https://code.claude.com/docs/en/llm-gateway-protocol)):
+while a gateway credential (`ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, …) is
+active, the claude.ai subscription is not used — the credential replaces it
+for that session. Overriding only the base URL does not replace the
+subscription, and a forwarder must pass the `anthropic-beta` header through
+unmodified (stripping the OAuth capability yields 401s). Anthropic also notes
+it does not endorse or audit third-party gateway products.
+
+So the earlier equivalence framing needs a correction: **for API-key
+connections**, a LiteLLM/Bifrost-style gateway sees the same request content
+as our pass-through proxy; **for subscription connections**, mainstream
+gateways in their default configuration cannot carry the session at all —
+a transparent pass-through (this harness, or mitmproxy) is the only
+base-URL-family option that works as-is.
+
+### Terms-of-service position (subscription mode)
+
+- Anthropic's [legal-and-compliance page](https://code.claude.com/docs/en/legal-and-compliance)
+  restricts OAuth authentication to subscription holders' ordinary use of
+  Claude Code and native Anthropic applications, and explicitly disallows
+  third-party developers routing requests through Free/Pro/Max credentials on
+  behalf of *their* users. The consumer terms additionally prohibit credential
+  sharing and non-API-key automated access.
+- The 2026 enforcement wave (silent block in January, broad enforcement in
+  April, per press coverage) targeted **alternate harnesses** (OpenClaw,
+  OpenCode, NanoClaw, …) driving the API with subscription OAuth tokens from
+  clients that are not Claude Code; Anthropic's stated rationale was abnormal
+  traffic patterns from non-Claude-Code clients.
+- **No explicit Anthropic statement addresses a local, single-user,
+  byte-for-byte observer proxy in front of the genuine Claude Code client.**
+  Mechanically it is the exact configuration the gateway docs describe as
+  keeping the subscription active (client unchanged, credentials unaltered,
+  traffic shape unchanged), and it is materially different from the
+  enforced-against pattern — but it is not explicitly blessed either. Treat
+  it as a gray zone: keep it local and personal, never operate it as a
+  shared or hosted service for subscription users, and prefer the official
+  channels when they suffice.
+
 ## Implications for junrei
 
 - The session log remains the right **backbone**: it alone has the record
   tree, environment context, hooks, and subagent bookkeeping, and its
   overlapping content is byte-faithful.
-- A **capture-proxy ingestion mode** is feasible and cheap: point
-  `ANTHROPIC_BASE_URL` at a junrei-owned proxy, join to session logs via
+- **OTel ingestion is the safe, auth-mode-independent complement** — the only
+  officially sanctioned channel beyond the logs themselves. Its unique value
+  is authoritative cost, permission decisions, and MCP/hook health. Treat
+  `OTEL_LOG_USER_PROMPTS` as privacy-sensitive.
+- A **capture-proxy ingestion mode** is technically feasible and cheap: point
+  `ANTHROPIC_BASE_URL` at a junrei-owned local proxy, join to session logs via
   `x-claude-code-session-id` + `request-id`, and junrei gains system prompts,
   tool schemas, generation params, injected-context diffs, hidden calls, and
   latency — with zero heuristics. Auth redaction is mandatory (the bearer
-  token transits the proxy).
-- OTel ingestion is optional; its unique value is authoritative cost,
-  permission decisions, and MCP/hook health. Treat `OTEL_LOG_USER_PROMPTS`
-  as privacy-sensitive.
+  token transits the proxy). Given the ToS gray zone above, this must ship as
+  a **local-only, opt-in** feature framed as personal debugging of one's own
+  official client — never as a hosted/shared capture service; for API-key
+  users the same design doubles as a fully supported gateway deployment.
 - Cost accounting from session logs slightly undercounts reality (classifier
   calls are unlogged; each is small, but they scale with sessions).
 
@@ -211,4 +277,6 @@ Single scenario, one CLI version (2.1.205; log-side findings cross-checked on
 exercised, MCP tools and images untested, and the desktop-harness Workflow
 tool was out of scope (plain CLI has no Workflow). The classifier prompt and
 billing-header format are undocumented internals and may change without
-notice.
+notice. The gateway/ToS findings are a point-in-time snapshot (2026-07-18):
+LiteLLM's OAuth passthrough, Bifrost's feature set, and Anthropic's terms and
+enforcement posture are all actively moving.
