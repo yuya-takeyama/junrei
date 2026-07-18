@@ -64,17 +64,31 @@ describe("MCP tools", () => {
   it("list_sessions with source: 'codex' returns only Codex items, each carrying source", async () => {
     client = await connect();
     const result = await client.callTool({ name: "list_sessions", arguments: { source: "codex" } });
-    const sessions = JSON.parse(textOf(result)) as Array<{ source: string; sessionId: string }>;
-    expect(sessions.length).toBeGreaterThan(0);
-    expect(sessions.every((s) => s.source === "codex")).toBe(true);
+    const body = JSON.parse(textOf(result)) as {
+      sessions: Array<{ source: string; sessionId: string }>;
+      sourceCompleteness: { sources: Array<{ source: string }> };
+    };
+    expect(body.sessions.length).toBeGreaterThan(0);
+    expect(body.sessions.every((s) => s.source === "codex")).toBe(true);
+    // Filtered to one harness: only that harness's completeness is declared.
+    expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual(["codex-session-jsonl"]);
   });
 
-  it("list_sessions with no source merges both harnesses", async () => {
+  it("list_sessions with no source merges both harnesses, and sourceCompleteness reports both sources", async () => {
     client = await connect();
     const result = await client.callTool({ name: "list_sessions", arguments: {} });
-    const sessions = JSON.parse(textOf(result)) as Array<{ source: string }>;
-    expect(sessions.some((s) => s.source === "codex")).toBe(true);
-    expect(sessions.some((s) => s.source === "claude-code")).toBe(true);
+    const body = JSON.parse(textOf(result)) as {
+      sessions: Array<{ source: string }>;
+      sourceCompleteness: { sources: Array<{ source: string }> };
+    };
+    expect(body.sessions.some((s) => s.source === "codex")).toBe(true);
+    expect(body.sessions.some((s) => s.source === "claude-code")).toBe(true);
+    // Unfiltered multi-source call: both entries, statically, regardless of
+    // what the merged result set actually contains.
+    expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+      "claude-session-jsonl",
+      "codex-session-jsonl",
+    ]);
   });
 
   it("get_session_summary works for a Codex session via source: 'codex'", async () => {
@@ -88,11 +102,15 @@ describe("MCP tools", () => {
       source: string;
       codex: { turns: { count: number } };
       contextTimeline: { points: number };
+      sourceCompleteness: { sources: Array<{ source: string }> };
     };
     expect(summary.source).toBe("codex");
     // Bulky series are trimmed to a compact shape, mirroring the Claude summary.
     expect(summary.codex.turns.count).toBeGreaterThan(0);
     expect(summary.contextTimeline.points).toBeGreaterThan(0);
+    expect(summary.sourceCompleteness.sources).toEqual([
+      { source: "codex-session-jsonl", dimensions: expect.any(Object) },
+    ]);
   });
 
   it("get_session_summary works for a Claude session via source: 'claude-code' + sessionId alone (no project needed)", async () => {
@@ -105,6 +123,7 @@ describe("MCP tools", () => {
     const summary = JSON.parse(textOf(result)) as {
       subagents?: unknown;
       delegation?: { main: { tokens: number }; subagents: { tokens: number } };
+      sourceCompleteness: { sources: Array<{ source: string }> };
     };
     // toSummary() strips `subagents` entirely (use get_subagent_tree instead).
     expect(summary.subagents).toBeUndefined();
@@ -112,6 +131,9 @@ describe("MCP tools", () => {
     // consumer shouldn't have to subtract `usage` from `totalUsage` itself.
     expect(summary.delegation?.main.tokens).toBeGreaterThan(0);
     expect(summary.delegation?.subagents.tokens).toBeGreaterThan(0);
+    // Claude-scoped call: sourceCompleteness reports only the claude entry.
+    expect(summary.sourceCompleteness.sources).toHaveLength(1);
+    expect(summary.sourceCompleteness.sources[0]?.source).toBe("claude-session-jsonl");
   });
 
   it("session-scoped tools 404 clearly for an unknown Claude session id", async () => {
@@ -131,9 +153,14 @@ describe("MCP tools", () => {
       arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
-    const body = JSON.parse(textOf(result)) as { subagentCount: number; subagents: unknown[] };
+    const body = JSON.parse(textOf(result)) as {
+      subagentCount: number;
+      subagents: unknown[];
+      sourceCompleteness: { sources: Array<{ source: string }> };
+    };
     expect(body.subagentCount).toBe(0);
     expect(body.subagents).toEqual([]);
+    expect(body.sourceCompleteness.sources.length).toBeGreaterThan(0);
   });
 
   it("get_subagent_tree returns a real sub-agent forest for a Codex parent session", async () => {
@@ -200,6 +227,22 @@ describe("MCP tools", () => {
     }
   });
 
+  it("find_repetitions and get_task_executions succeed for Claude sessions and report sourceCompleteness", async () => {
+    client = await connect();
+    for (const name of ["find_repetitions", "get_task_executions"]) {
+      const result = await client.callTool({
+        name,
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.sourceCompleteness.sources).toHaveLength(1);
+      expect(body.sourceCompleteness.sources[0]?.source).toBe("claude-session-jsonl");
+    }
+  });
+
   it("get_first_prompt works for a Codex session", async () => {
     client = await connect();
     const result = await client.callTool({
@@ -207,8 +250,12 @@ describe("MCP tools", () => {
       arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
     });
     expect(result.isError).not.toBe(true);
-    const body = JSON.parse(textOf(result)) as { firstUserPrompt: string | null };
+    const body = JSON.parse(textOf(result)) as {
+      firstUserPrompt: string | null;
+      sourceCompleteness: { sources: Array<{ source: string }> };
+    };
     expect(body.firstUserPrompt).toBe("Fix the flaky test in foo.spec.ts");
+    expect(body.sourceCompleteness.sources.length).toBeGreaterThan(0);
   });
 
   it("get_context_timeline works for a Codex session", async () => {
@@ -221,8 +268,10 @@ describe("MCP tools", () => {
     const body = JSON.parse(textOf(result)) as {
       contextTimeline: unknown[];
       compactions: unknown[];
+      sourceCompleteness: { sources: Array<{ source: string }> };
     };
     expect(body.contextTimeline.length).toBeGreaterThan(0);
+    expect(body.sourceCompleteness.sources.length).toBeGreaterThan(0);
   });
 
   it("session-scoped tools 404 clearly for an unknown Codex session id", async () => {
@@ -261,6 +310,7 @@ describe("MCP tools", () => {
         matches: Array<{ line: number; field: string; snippet: string }>;
       }>;
       resultsTruncated: boolean;
+      sourceCompleteness: { sources: Array<{ source: string }> };
     };
     const codexHit = body.results.find(
       (r) => r.source === "codex" && r.sessionId === CODEX_SESSION_ID,
@@ -269,6 +319,11 @@ describe("MCP tools", () => {
     expect(codexHit?.matches[0]?.field).toBe("user");
     expect(codexHit?.matches[0]?.snippet).toContain("flaky test");
     expect(codexHit?.matches[0]?.line).toBeGreaterThan(0);
+    // Multi-source tool: both entries, statically.
+    expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+      "claude-session-jsonl",
+      "codex-session-jsonl",
+    ]);
   });
 
   it("search_sessions scoped to one Claude session returns its project ref", async () => {
@@ -315,6 +370,7 @@ describe("MCP tools", () => {
       totalTokens: number;
       costIsComplete: boolean;
       topSessions: Array<{ sessionId: string }>;
+      sourceCompleteness: { sources: Array<{ source: string }> };
     };
     // Fixture session 11111111... is the only one whose cwd (/Users/test/proj)
     // has no `.claude/worktrees/` marker and no sibling sharing that exact
@@ -326,6 +382,12 @@ describe("MCP tools", () => {
     expect(overview.totalTokens).toBe(55695);
     expect(overview.costIsComplete).toBe(true);
     expect(overview.topSessions[0]?.sessionId).toBe(CLAUDE_SESSION_ID);
+    // Multi-source tool: both entries, statically, even though this repo
+    // only has Claude sessions.
+    expect(overview.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+      "claude-session-jsonl",
+      "codex-session-jsonl",
+    ]);
   });
 
   it("get_repo_overview merges Codex sessions sharing a repoRoot and flags incomplete pricing", async () => {

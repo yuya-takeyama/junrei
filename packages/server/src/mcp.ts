@@ -1,4 +1,4 @@
-import type { ClaudeSessionAnalysis } from "@junrei/core";
+import { buildSourceCompleteness, type ClaudeSessionAnalysis, type SourceKind } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getRepoOverview } from "./overview.js";
@@ -22,8 +22,37 @@ const sessionRef = {
   sessionId: z.string().describe("Session UUID (from list_sessions)"),
 };
 
-function jsonResult(value: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
+/** Both source kinds — every multi-source tool (list_sessions, search_sessions, get_repo_overview) passes this. */
+const BOTH_SOURCES: SourceKind[] = ["claude-session-jsonl", "codex-session-jsonl"];
+
+/** Which `sourceCompleteness` kind a resolved session's harness maps to. */
+function sourceKindFor(source: "claude-code" | "codex"): SourceKind {
+  return source === "codex" ? "codex-session-jsonl" : "claude-session-jsonl";
+}
+
+/**
+ * Map a multi-source tool's `source` filter arg to the kinds its response
+ * actually draws from — a response filtered to one harness must not declare
+ * completeness for the other.
+ */
+function kindsForFilter(source: "claude-code" | "codex" | "all" | undefined): SourceKind[] {
+  if (source === "claude-code") return ["claude-session-jsonl"];
+  if (source === "codex") return ["codex-session-jsonl"];
+  return BOTH_SOURCES;
+}
+
+/**
+ * JSON-encode a tool payload, always stamping a top-level `sourceCompleteness`
+ * (see `@junrei/core`'s `buildSourceCompleteness`) so every response declares
+ * what its underlying session source(s) cannot show — attached here, not
+ * per-handler, so no tool can forget it. `kinds` is the caller's static
+ * declaration of which source(s) the payload was built from (see call sites
+ * below for the mapping); `value` must be a plain object so its own fields
+ * survive the merge untouched (additive only).
+ */
+function jsonResult<T extends object>(value: T, kinds: SourceKind[]) {
+  const payload = { ...value, sourceCompleteness: buildSourceCompleteness(kinds) };
+  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
 }
 
 function notFound(sessionId: string) {
@@ -199,7 +228,10 @@ export function createMcpServer(): McpServer {
         "item also carries `repoRoot`/`worktreeName` (repo-level grouping key — see " +
         "get_repo_overview), a per-model `usageByModel` breakdown, and a `delegation` " +
         "main-vs-subagents split, so a repo- or model-level rollup can be built without " +
-        "fetching every session's full summary.",
+        "fetching every session's full summary. Every response includes sourceCompleteness — " +
+        "a machine-readable declaration of what the underlying session source cannot show; " +
+        "treat absent/not-recorded dimensions as unknowable from this data, not as evidence " +
+        "of absence.",
       inputSchema: {
         limit: z.number().int().min(1).max(500).optional().describe("Max sessions (default 20)"),
         source: z
@@ -211,11 +243,14 @@ export function createMcpServer(): McpServer {
       },
     },
     // Omitted source = merged view, same default as the HTTP API — items
-    // self-describe via `source`. The tool keeps returning a bare array
-    // (not the HTTP route's `{ sessions, total }` page envelope) so existing
-    // MCP consumers' parsing doesn't break.
+    // self-describe via `source`. Wrapped in `{ sessions }` (rather than the
+    // bare array this tool used to return) so the mandatory top-level
+    // `sourceCompleteness` has somewhere to attach — see `jsonResult`.
     async ({ limit, source }) =>
-      jsonResult((await listSessions(limit ?? 20, source ?? "all")).sessions),
+      jsonResult(
+        { sessions: (await listSessions(limit ?? 20, source ?? "all")).sessions },
+        kindsForFilter(source),
+      ),
   );
 
   server.registerTool(
@@ -232,7 +267,10 @@ export function createMcpServer(): McpServer {
         "a short snippet per matched record with its source line number, an exact per-session " +
         "`matchCount`, and explicit truncation flags (`matchesTruncated`/`resultsTruncated` — " +
         "a capped list is never silently complete). Drill into a hit with get_session_summary " +
-        "/ get_first_prompt / get_context_timeline.",
+        "/ get_first_prompt / get_context_timeline. Every response includes sourceCompleteness " +
+        "— a machine-readable declaration of what the underlying session source cannot show; " +
+        "treat absent/not-recorded dimensions as unknowable from this data, not as evidence " +
+        "of absence.",
       inputSchema: {
         query: z.string().min(2).describe("Substring to find (plain text, not regex)"),
         source: z
@@ -333,7 +371,7 @@ export function createMcpServer(): McpServer {
           };
         }
       }
-      return jsonResult(await searchSessions(args));
+      return jsonResult(await searchSessions(args), kindsForFilter(args.source));
     },
   );
 
@@ -351,7 +389,9 @@ export function createMcpServer(): McpServer {
         "(on `usage`/`totalUsageByModel`) is a component already included in `costUsd` — never " +
         "add them. `costIsComplete: false` (on `totalUsage`/`delegation`) means at least one " +
         "nonzero-usage model had no pricing entry, so the cost is a lower bound, shown as " +
-        '"estimated" in the UI.',
+        '"estimated" in the UI. Every response includes sourceCompleteness — a machine-readable ' +
+        "declaration of what the underlying session source cannot show; treat absent/not-recorded " +
+        "dimensions as unknowable from this data, not as evidence of absence.",
       inputSchema: sessionRef,
     },
     async (args) => {
@@ -361,6 +401,7 @@ export function createMcpServer(): McpServer {
         resolved.source === "codex"
           ? toCodexSummary(resolved.analysis)
           : toSummary(resolved.analysis),
+        [sourceKindFor(resolved.source)],
       );
     },
   );
@@ -372,16 +413,22 @@ export function createMcpServer(): McpServer {
         "Context-size series for one session: effective context tokens " +
         "(input + cache_read + cache_creation) per API message, plus compaction events " +
         "with pre/post token counts. Each point carries its source line number for provenance. " +
-        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex").',
+        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex"). Every ' +
+        "response includes sourceCompleteness — a machine-readable declaration of what the " +
+        "underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
       inputSchema: sessionRef,
     },
     async (args) => {
       const resolved = await resolveAnalysis(args);
       if ("error" in resolved) return resolved.error;
-      return jsonResult({
-        contextTimeline: resolved.analysis.contextTimeline,
-        compactions: resolved.analysis.compactions,
-      });
+      return jsonResult(
+        {
+          contextTimeline: resolved.analysis.contextTimeline,
+          compactions: resolved.analysis.compactions,
+        },
+        [sourceKindFor(resolved.source)],
+      );
     },
   );
 
@@ -392,7 +439,10 @@ export function createMcpServer(): McpServer {
         "Repetition/loop findings for one session: consecutive identical tool calls, " +
         "same-file re-reads, and repeated failing calls. Includes source line numbers. " +
         "These are observations, not judgments — whether a repetition was wasteful " +
-        "depends on the task. Claude Code sessions only.",
+        "depends on the task. Claude Code sessions only. Every response includes " +
+        "sourceCompleteness — a machine-readable declaration of what the underlying session " +
+        "source cannot show; treat absent/not-recorded dimensions as unknowable from this " +
+        "data, not as evidence of absence.",
       inputSchema: sessionRef,
     },
     async ({ source, sessionId }) => {
@@ -400,7 +450,7 @@ export function createMcpServer(): McpServer {
       const analysis = await getSession(sessionId);
       return analysis === undefined
         ? notFound(sessionId)
-        : jsonResult({ repetitions: analysis.repetitions });
+        : jsonResult({ repetitions: analysis.repetitions }, ["claude-session-jsonl"]);
     },
   );
 
@@ -420,17 +470,24 @@ export function createMcpServer(): McpServer {
         "the UI. Claude Code sessions only also carry `workflowRuns`: one entry per Workflow-tool " +
         "run (name, status, phases, agentCount), for making sense of any tree node tagged with a " +
         "matching `workflowRunId` — those nodes are flat root-level entries in `subagents`, not a " +
-        "separate nested structure.",
+        "separate nested structure. Every response includes sourceCompleteness — a " +
+        "machine-readable declaration of what the underlying session source cannot show; treat " +
+        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
       inputSchema: sessionRef,
     },
     async (args) => {
       const resolved = await resolveAnalysis(args);
       if ("error" in resolved) return resolved.error;
-      return jsonResult({
-        subagentCount: resolved.analysis.subagentCount,
-        subagents: resolved.analysis.subagents,
-        ...(resolved.source === "claude-code" && { workflowRuns: resolved.analysis.workflowRuns }),
-      });
+      return jsonResult(
+        {
+          subagentCount: resolved.analysis.subagentCount,
+          subagents: resolved.analysis.subagents,
+          ...(resolved.source === "claude-code" && {
+            workflowRuns: resolved.analysis.workflowRuns,
+          }),
+        },
+        [sourceKindFor(resolved.source)],
+      );
     },
   );
 
@@ -441,7 +498,9 @@ export function createMcpServer(): McpServer {
         "All task executions of a session, as Claude Code's Background-tasks panel counts " +
         "them: every Bash command and Agent run (foreground and background) plus preview " +
         "servers — with start time, duration, and outcome (completed/failed/stopped/unresolved). " +
-        "Claude Code sessions only.",
+        "Claude Code sessions only. Every response includes sourceCompleteness — a " +
+        "machine-readable declaration of what the underlying session source cannot show; treat " +
+        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
       inputSchema: sessionRef,
     },
     async ({ source, sessionId }) => {
@@ -449,7 +508,7 @@ export function createMcpServer(): McpServer {
       const analysis = await getSession(sessionId);
       return analysis === undefined
         ? notFound(sessionId)
-        : jsonResult({ taskExecutions: analysis.taskExecutions });
+        : jsonResult({ taskExecutions: analysis.taskExecutions }, ["claude-session-jsonl"]);
     },
   );
 
@@ -459,17 +518,23 @@ export function createMcpServer(): McpServer {
       description:
         "The first user prompt of a session (truncated preview) — the original task " +
         "the quantitative data should be interpreted against. Works for both Claude Code " +
-        'sessions and Codex CLI sessions (source: "codex").',
+        'sessions and Codex CLI sessions (source: "codex"). Every response includes ' +
+        "sourceCompleteness — a machine-readable declaration of what the underlying session " +
+        "source cannot show; treat absent/not-recorded dimensions as unknowable from this " +
+        "data, not as evidence of absence.",
       inputSchema: sessionRef,
     },
     async (args) => {
       const resolved = await resolveAnalysis(args);
       if ("error" in resolved) return resolved.error;
-      return jsonResult({
-        firstUserPrompt: resolved.analysis.firstUserPrompt ?? null,
-        title: resolved.analysis.title ?? null,
-        userTurnCount: resolved.analysis.userTurnCount,
-      });
+      return jsonResult(
+        {
+          firstUserPrompt: resolved.analysis.firstUserPrompt ?? null,
+          title: resolved.analysis.title ?? null,
+          userTurnCount: resolved.analysis.userTurnCount,
+        },
+        [sourceKindFor(resolved.source)],
+      );
     },
   );
 
@@ -492,7 +557,10 @@ export function createMcpServer(): McpServer {
         "— never add them. `costIsComplete: false` means at least one nonzero-usage model summed " +
         'into this rollup had no pricing entry, so totals are a lower bound, shown as "estimated" ' +
         "in the UI. A `repo` matching no session returns a zeroed overview (`sessionCount: 0`), " +
-        "not an error — safe to probe candidate keys.",
+        "not an error — safe to probe candidate keys. Every response includes " +
+        "sourceCompleteness — a machine-readable declaration of what the underlying session " +
+        "source cannot show; treat absent/not-recorded dimensions as unknowable from this " +
+        "data, not as evidence of absence.",
       inputSchema: {
         repo: z
           .string()
@@ -505,7 +573,7 @@ export function createMcpServer(): McpServer {
     },
     async ({ repo }) => {
       if (repo.trim() === "") return missingRepo();
-      return jsonResult(await getRepoOverview(repo));
+      return jsonResult(await getRepoOverview(repo), BOTH_SOURCES);
     },
   );
 

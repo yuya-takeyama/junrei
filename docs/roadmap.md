@@ -85,7 +85,10 @@ decision record: [milestones/goshuin.md](./milestones/goshuin.md).
   rationale:
   [goshuin.md — Decisions](./milestones/goshuin.md#decisions-2026-07-18)
 - 🚧 Implementation (phase order B → A → C → D/E → F):
-  - ⬜ B: blind-spot metadata — `sourceCompleteness` on every MCP response
+  - ✅ B: blind-spot metadata — `sourceCompleteness` on every MCP response
+    (fixed status vocabulary + frozen per-source dimension tables in
+    `@junrei/core`; all 9 tool descriptions document the semantics;
+    `list_sessions` payload became `{ sessions, sourceCompleteness }`)
   - ⬜ A: MCP drill-down tools (`get_records`, `get_tool_call`)
   - ⬜ C: reconstruction layer ("virtual wire",
     `get_reconstructed_request`) + promote recon scripts into

@@ -4,6 +4,13 @@
  */
 
 export type {
+  CompletenessStatus,
+  SourceCompleteness,
+  SourceCompletenessEntry,
+  SourceKind,
+} from "./completeness.js";
+export { buildSourceCompleteness } from "./completeness.js";
+export type {
   DelegationModelSlice,
   DelegationScopeSlice,
   DelegationSummary,
