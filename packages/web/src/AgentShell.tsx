@@ -504,19 +504,16 @@ export function AgentShell({ source }: Props) {
               </div>
             </div>
           ))}
-        {ready && lens === "bash" && !isCodex && (
-          // `bash` is in `CLAUDE_LENSES` (shared by SessionShell and this
-          // shell — see `LENSES_BY_SOURCE`), so `lensAvailable` is true and
-          // the tab shows for a Claude agent even though this shell has no
-          // agent-scoped Bash view yet — same "not built yet" placeholder the
-          // orchestration branch above already uses for a Claude agent,
-          // rather than leaving a blank content area below the tab bar. The
-          // `!isCodex` guard mirrors the shell-level `source` prop that
-          // actually drives `lensAvailable` (`LENSES_BY_SOURCE[source]`) —
-          // without it, a Codex agent's stray `.../bash` URL would render
-          // this placeholder ALONGSIDE the "isn't available" fallback above,
-          // since `lens === "bash"` alone doesn't know which lens list gated
-          // it.
+        {ready && lens === "bash" && (
+          // `bash` is in both `CLAUDE_LENSES` and `CODEX_LENSES` (see
+          // `LENSES_BY_SOURCE`), so `lensAvailable` is true for either
+          // source's agent — but this shell has no agent-SCOPED Bash view for
+          // either one yet (the Bash lens ranks calls across a whole
+          // session's threads jointly, see `HeavyHittersTable`'s doc
+          // comment; a single-agent slice of that ranking isn't a
+          // straightforward "just filter" and hasn't been built). Same
+          // "not built yet" placeholder the orchestration branch above uses
+          // for a Claude agent, now unconditional on source.
           <div className="hpad mt16">
             <div className="pan tile mut">
               {LENS_LABEL[lens]} isn&apos;t built yet for subagent detail — coming in a later PR.

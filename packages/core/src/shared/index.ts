@@ -3,6 +3,35 @@
  * trees. MUST NOT import from either of those trees.
  */
 
+/**
+ * `Bash*`/`BashStats`/`BashWaste` are the harness-neutral OUTPUT shapes of
+ * the Bash-analysis engine (`./bash-stats.ts`) — exported from here only
+ * (never re-declared in `claude/index.ts`/`codex/index.ts`), same "shared
+ * data shape, one canonical export site" convention `FileAccessEntry`/
+ * `SkillInvocation` already follow below. The engine FUNCTION
+ * (`computeBashStats` in `./bash-stats.ts`) and its `NeutralBashCall`/
+ * `NeutralBashThread` input types are deliberately NOT exported from this
+ * barrel: each harness's own `computeBashStats` (`claude/bash-stats.ts`,
+ * `codex/bash-stats.ts`) has a DIFFERENT input signature (Claude:
+ * `BashStatsThread[]` wrapping `SessionData`; Codex: a `CodexTranscript`),
+ * so re-exporting the shared engine under the same bare name here would
+ * collide with Claude's own adapter export at the `@junrei/core` barrel
+ * level (`index.ts`'s `export *`).
+ */
+export type {
+  BashAsReadCall,
+  BashBackgroundCall,
+  BashCommandGroup,
+  BashHeavyHitter,
+  BashLargeResult,
+  BashNearDuplicateGroup,
+  BashProgramFrequency,
+  BashRerunAfterError,
+  BashStats,
+  BashTotals,
+  BashWaste,
+} from "./bash-stats.js";
+export { LARGE_RESULT_CHARS_THRESHOLD, normalizeCommandForDedup } from "./bash-stats.js";
 export type {
   CompletenessStatus,
   SourceCompleteness,

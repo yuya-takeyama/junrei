@@ -1,19 +1,25 @@
 import {
   analyzeCodexSession,
+  type BashStats,
   buildCodexSubagentForest,
   buildCodexTimeline,
   type CodexSessionAnalysis,
   type CodexSessionFileRef,
+  type CodexToolCallRecord,
   type CodexTranscript,
+  computeCodexBashEntries,
+  computeCodexForestBashStats,
   computeDelegationSummary,
   type FileAccessEntry,
   getCodexRecordDetail,
   getCodexToolCallDetail,
   listCodexSessionFiles,
+  listCodexToolCalls,
   loadCodexSessionIndexTitles,
   type ModelUsageSummary,
   mergeCodexFileAccess,
   mergeUsageByModel,
+  type NeutralBashThread,
   parseCodexTranscriptFile,
   type RecordDetail,
   resolveCodexHome,
@@ -174,6 +180,54 @@ function collectForestFileAccess(
   };
   visit(nodes);
   return out;
+}
+
+/**
+ * Every descendant sub-agent thread's own PARSED transcript, resolved via
+ * `codexTranscriptCached` (mtime-keyed — cheap on repeat calls) — unlike
+ * `collectForestFileAccess` above, `bashStats` genuinely needs each
+ * descendant's raw records, not just its already-computed (main-thread-only)
+ * `BashStats`: ranking fields (`heavyHitters`, `byCommand.sharePct`) can't be
+ * additively folded after the fact, only recomputed jointly (see
+ * `@junrei/core`'s `shared/bash-stats.ts` module doc comment) — so this is
+ * the one forest walk that re-parses rather than re-associates. A descendant
+ * whose rollout can't be found or read is silently skipped (same "don't fail
+ * the whole session over one bad leaf" posture `getCodexSession` already
+ * takes elsewhere), not fabricated as empty.
+ */
+async function collectForestTranscripts(
+  nodes: readonly SubagentNode[],
+  refBySessionId: ReadonlyMap<string, CodexSessionFileRef>,
+): Promise<Array<{ thread: string; transcript: CodexTranscript }>> {
+  const out: Array<{ thread: string; transcript: CodexTranscript }> = [];
+  const visit = async (list: readonly SubagentNode[]): Promise<void> => {
+    for (const node of list) {
+      const ref = refBySessionId.get(node.agentId);
+      if (ref !== undefined) {
+        try {
+          const transcript = await codexTranscriptCached(ref);
+          if (transcript.format === "current") out.push({ thread: node.agentId, transcript });
+        } catch {
+          // Unreadable descendant transcript — skip it rather than failing the whole request.
+        }
+      }
+      await visit(node.children);
+    }
+  };
+  await visit(nodes);
+  return out;
+}
+
+/** Every descendant sub-agent thread's shell-call entries — see `collectForestTranscripts`. */
+async function collectForestBashThreads(
+  nodes: readonly SubagentNode[],
+  refBySessionId: ReadonlyMap<string, CodexSessionFileRef>,
+): Promise<NeutralBashThread[]> {
+  const transcripts = await collectForestTranscripts(nodes, refBySessionId);
+  return transcripts.map(({ thread, transcript }) => ({
+    thread,
+    calls: computeCodexBashEntries(transcript),
+  }));
 }
 
 /**
@@ -547,6 +601,14 @@ export async function getCodexSession(
       found.analysis,
       buildRepoRootByUrl(pool.map((p) => p.analysis)),
     );
+    // `bashStats` is main-thread-only on `found.analysis` (see
+    // `analyzeCodexSession`) — a forest-less session (the common case) keeps
+    // that value unchanged; only a session with descendants pays the extra
+    // re-parse cost of a joint recompute (see `collectForestBashThreads`).
+    const bashStats =
+      forest.length === 0
+        ? found.analysis.bashStats
+        : await computeForestBashStats(found, forest, pool);
     return {
       ...found.analysis,
       ...(repoRoot !== undefined && { repoRoot }),
@@ -558,9 +620,39 @@ export async function getCodexSession(
       fileAccess,
       fileAccessTruncated,
       ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
+      bashStats,
     };
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Joint main+forest `BashStats`, re-parsing the main transcript AND every
+ * descendant's (see `collectForestBashThreads`) rather than reusing any
+ * already-computed `BashStats` — ranking fields can't be additively folded,
+ * only recomputed over the full raw call list (module doc comment,
+ * `@junrei/core`'s `shared/bash-stats.ts`). Falls back to `found.analysis`'s
+ * own main-thread-only value if the main transcript itself can't be
+ * re-parsed (should be unreachable — it was just successfully analyzed into
+ * `found.analysis` — but never silently drops the field to `undefined`).
+ */
+async function computeForestBashStats(
+  found: CodexAnalyzedRef,
+  forest: readonly SubagentNode[],
+  pool: readonly CodexAnalyzedRef[],
+): Promise<BashStats> {
+  const refBySessionId = new Map(pool.map((p) => [p.analysis.sessionId, p.ref] as const));
+  try {
+    const mainTranscript = await codexTranscriptCached(found.ref);
+    if (mainTranscript.format !== "current") return found.analysis.bashStats;
+    const descendantThreads = await collectForestBashThreads(forest, refBySessionId);
+    return computeCodexForestBashStats([
+      { thread: "main", calls: computeCodexBashEntries(mainTranscript) },
+      ...descendantThreads,
+    ]);
+  } catch {
+    return found.analysis.bashStats;
   }
 }
 
@@ -640,6 +732,66 @@ export async function getCodexSessionToolCallDetail(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * This session's own main-thread-only `BashStats` (`analyzeCodexSession`'s
+ * value, no forest override) — the codex counterpart of the Claude
+ * `get_bash_stats` tool's `includeSubagents: false` recompute
+ * (`@junrei/server`'s `mcp.ts`), which for Codex is just a cheap pool lookup
+ * rather than a recompute: `found.analysis.bashStats` IS already
+ * main-thread-only, no re-parsing needed. `undefined` for an unknown session
+ * id.
+ */
+export async function getCodexSessionBashStatsMainOnly(
+  sessionId: string,
+): Promise<BashStats | undefined> {
+  const pool = await listCodexAnalyzed();
+  const found = pool.find((p) => p.analysis.sessionId === sessionId);
+  return found?.analysis.bashStats;
+}
+
+/**
+ * Every thread's `CodexToolCallRecord[]` the `get_tool_calls` MCP tool needs,
+ * per its `thread` filter — main only, subagent forest only, or both. Mirrors
+ * `mcp.ts`'s own Claude-side `collectToolCallThreads`, but Codex's "threads"
+ * are sibling rollout files rather than sidecar transcripts, so this walks
+ * the sub-agent forest (`collectForestTranscripts`) instead of
+ * `listSubagentRefs`. `undefined` only when the session itself can't be
+ * found.
+ */
+export async function collectCodexToolCallThreads(
+  sessionId: string,
+  thread: "main" | "subagents" | "all",
+): Promise<Array<{ thread: string; records: CodexToolCallRecord[] }> | undefined> {
+  const pool = await listCodexAnalyzed();
+  const found = pool.find((p) => p.analysis.sessionId === sessionId);
+  if (found === undefined) return undefined;
+
+  const out: Array<{ thread: string; records: CodexToolCallRecord[] }> = [];
+  if (thread !== "subagents") {
+    try {
+      const mainTranscript = await codexTranscriptCached(found.ref);
+      if (mainTranscript.format === "current") {
+        out.push({ thread: "main", records: listCodexToolCalls(mainTranscript) });
+      }
+    } catch {
+      // Unreadable main transcript — fall through with whatever (if
+      // anything) subagent threads below still contribute.
+    }
+  }
+  if (thread !== "main") {
+    const forest = buildCodexSubagentForest(
+      pool.map((p) => p.analysis),
+      sessionId,
+    );
+    const refBySessionId = new Map(pool.map((p) => [p.analysis.sessionId, p.ref] as const));
+    const descendants = await collectForestTranscripts(forest, refBySessionId);
+    for (const { thread: agentId, transcript } of descendants) {
+      out.push({ thread: agentId, records: listCodexToolCalls(transcript) });
+    }
+  }
+  return out;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { SessionJson } from "../api.js";
+import type { AnySessionJson } from "../api.js";
 import { BashStatsSummary } from "./bash/BashStatsSummary.js";
 import { hasBashActivity } from "./bash/bashLensFormat.js";
 import { CommandRankingTable } from "./bash/CommandRankingTable.js";
@@ -6,18 +6,18 @@ import { HeavyHittersTable } from "./bash/HeavyHittersTable.js";
 import { WasteDetectionPanel } from "./bash/WasteDetectionPanel.js";
 
 interface Props {
-  session: SessionJson;
+  session: AnySessionJson;
   /** Opens the record slide-over (L3) for a source line — see `HeavyHittersTable`. `agentId` scopes the fetch to a subagent's own transcript, when the line came from one. */
   onOpenRecord?: (line: number, agentId?: string) => void;
 }
 
 /**
- * Bash lens (L2) — Claude-only (see `bashStats` on `ClaudeSessionAnalysis` in
- * `@junrei/core`'s `claude/analyze.ts`; `router.ts`'s `Lens` doc comment
- * covers why it's absent from `CODEX_LENSES`). Three panels, laid out
- * top-to-bottom as full-width sections (unlike Files & skills/Context &
- * cost's two-column rows, since none of these three panels pair naturally
- * side-by-side):
+ * Bash lens (L2) — source-uniform (see `bashStats` on `SessionAnalysisCore`
+ * in `@junrei/core`'s `shared/session-analysis.ts`; both `analyzeClaudeSession`
+ * and `analyzeCodexSession`/`getCodexSession` populate it). Three panels,
+ * laid out top-to-bottom as full-width sections (unlike Files & skills/
+ * Context & cost's two-column rows, since none of these three panels pair
+ * naturally side-by-side):
  *
  *   1. Command ranking — `byCommand`, one row per resolved family+subcommand
  *      group, already sorted by result chars desc.

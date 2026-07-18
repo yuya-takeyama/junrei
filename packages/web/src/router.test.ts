@@ -24,24 +24,8 @@ import {
 } from "./router.js";
 
 describe("CODEX_LENSES", () => {
-  it("offers overview/timeline/orchestration/context/files, in that order", () => {
-    expect(CODEX_LENSES).toEqual(["overview", "timeline", "orchestration", "context", "files"]);
-  });
-
-  it("includes 'files', now shared with Claude (fileAccess/skillInvocations are SessionAnalysisCore fields)", () => {
-    expect(CODEX_LENSES).toContain("timeline");
-    expect(CODEX_LENSES).toContain("orchestration");
-    expect(CODEX_LENSES).toContain("files");
-  });
-
-  it("does NOT include 'bash' — no Codex shell-call source feeds bashStats yet (see Lens's doc comment)", () => {
-    expect(CODEX_LENSES).not.toContain("bash");
-  });
-});
-
-describe("CLAUDE_LENSES", () => {
-  it("is the pre-Bash-lens lineup plus 'bash' at the end", () => {
-    expect(CLAUDE_LENSES).toEqual([
+  it("offers overview/timeline/orchestration/context/files/bash, in that order", () => {
+    expect(CODEX_LENSES).toEqual([
       "overview",
       "timeline",
       "orchestration",
@@ -51,16 +35,35 @@ describe("CLAUDE_LENSES", () => {
     ]);
   });
 
-  it("is the only lens lineup that includes 'bash' (Claude-only, see Lens's doc comment)", () => {
-    expect(CLAUDE_LENSES).toContain("bash");
-    expect(CODEX_LENSES).not.toContain("bash");
+  it("includes 'files', shared with Claude (fileAccess/skillInvocations are SessionAnalysisCore fields)", () => {
+    expect(CODEX_LENSES).toContain("timeline");
+    expect(CODEX_LENSES).toContain("orchestration");
+    expect(CODEX_LENSES).toContain("files");
+  });
+
+  it("includes 'bash' — codex/bash-stats.ts (@junrei/core) feeds SessionAnalysisCore.bashStats for Codex sessions too", () => {
+    expect(CODEX_LENSES).toContain("bash");
+  });
+});
+
+describe("CLAUDE_LENSES", () => {
+  it("is identical to CODEX_LENSES — both harnesses populate every current lens", () => {
+    expect(CLAUDE_LENSES).toEqual([
+      "overview",
+      "timeline",
+      "orchestration",
+      "context",
+      "files",
+      "bash",
+    ]);
+    expect(CLAUDE_LENSES).toEqual(CODEX_LENSES);
   });
 });
 
 describe("LENSES_BY_SOURCE", () => {
-  it("gives Claude sessions the 'bash' tab and Codex sessions the 'not available' fallback — SessionShell/AgentShell gate each tab's content on `lensTabs.includes(lens)`, so this lookup is the actual source of truth for whether the Bash lens tab appears/works for a given session", () => {
+  it("gives both sources the 'bash' tab", () => {
     expect(LENSES_BY_SOURCE["claude-code"]).toContain("bash");
-    expect(LENSES_BY_SOURCE.codex).not.toContain("bash");
+    expect(LENSES_BY_SOURCE.codex).toContain("bash");
   });
 });
 

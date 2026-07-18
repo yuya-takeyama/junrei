@@ -672,4 +672,50 @@ describe("getCodexSession — sub-agent orchestration (77777777 -> 88888888 -> 9
       ]),
     );
   });
+
+  // Only the grandchild (Scout, 99999999) has any shell calls (2x
+  // exec_command "cat" — see the fixture); neither the root (77777777) nor
+  // the middle node (Aquinas, 88888888) has any of its own. `bashStats`
+  // ranking fields can't be additively folded (see `@junrei/core`'s
+  // `shared/bash-stats.ts` module doc comment), so this only proves out
+  // right if `getCodexSession` genuinely RE-PARSES every descendant
+  // transcript for a joint recompute, not just reuses each node's own
+  // (all-zero, for 77777777/88888888) `bashStats`.
+  it("folds a grandchild's shell calls into the root's joint bashStats, attributed to the grandchild's own thread", async () => {
+    const parent = await getCodexSession("77777777-7777-7777-7777-777777777777");
+    expect(parent).toBeDefined();
+    if (parent === undefined) return;
+
+    expect(parent.bashStats.totals.calls).toBe(2);
+    expect(parent.bashStats.totals.errors).toBe(0);
+    expect(
+      parent.bashStats.heavyHitters.every(
+        (h) => h.thread === "99999999-9999-9999-9999-999999999999",
+      ),
+    ).toBe(true);
+    const commands = parent.bashStats.heavyHitters.map((h) => h.command).sort();
+    expect(commands).toEqual(["cat src/auth.ts", "cat src/scout-only.ts"]);
+  });
+
+  it("folds the same grandchild's shell calls into the MIDDLE node's own joint bashStats too", async () => {
+    const aquinas = await getCodexSession("88888888-8888-8888-8888-888888888888");
+    expect(aquinas).toBeDefined();
+    if (aquinas === undefined) return;
+
+    expect(aquinas.bashStats.totals.calls).toBe(2);
+    expect(
+      aquinas.bashStats.heavyHitters.every(
+        (h) => h.thread === "99999999-9999-9999-9999-999999999999",
+      ),
+    ).toBe(true);
+  });
+
+  it("a leaf sub-agent's own bashStats is untouched by the forest override — tagged thread 'main'", async () => {
+    const scout = await getCodexSession("99999999-9999-9999-9999-999999999999");
+    expect(scout).toBeDefined();
+    if (scout === undefined) return;
+
+    expect(scout.bashStats.totals.calls).toBe(2);
+    expect(scout.bashStats.heavyHitters.every((h) => h.thread === "main")).toBe(true);
+  });
 });

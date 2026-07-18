@@ -226,7 +226,7 @@ function readPathsFromCommand(tokens: readonly string[]): string[] {
 const EMBEDDED_PATCH_HEADER_PATTERN = /\*\*\* (?:Update|Add|Delete) File: ([^\\\n"'`]+)/g;
 
 /** One `tools.exec_command({...})` call site lifted out of a unified-exec JS program — the raw command string plus its per-call `workdir`. */
-interface UnifiedExecCommand {
+export interface UnifiedExecCommand {
   cmd: string;
   workdir?: string;
 }
@@ -317,8 +317,13 @@ function scanStringLiteral(
  * (bare or quoted keys — both spellings occur in real rollouts). A call
  * whose argument is a variable reference is skipped — the conservative
  * under-report the read heuristic already accepts everywhere else.
+ *
+ * Exported so `codex/bash-stats.ts` reuses the exact same call-site
+ * extraction for shell-command analytics over 0.144+ unified-exec sessions,
+ * rather than re-scanning the JS program with a second, subtly different
+ * parser.
  */
-function extractUnifiedExecCommands(source: string): UnifiedExecCommand[] {
+export function extractUnifiedExecCommands(source: string): UnifiedExecCommand[] {
   const calls: UnifiedExecCommand[] = [];
   let from = 0;
   for (;;) {

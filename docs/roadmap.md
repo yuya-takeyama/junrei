@@ -76,10 +76,28 @@ subagent), estimated-token figures always marked as estimates
   `router.ts`) — command ranking table, a context-consumption stat row +
   heavy hitters table, and the four waste subsections; quantitative only,
   no advice/hint prose
-- ⬜ Codex shell-call support — `parseShellCommand`/`primaryCommand`
-  (`shared/shell/parser.ts`) are already harness-agnostic (see
-  `bash-stats.ts`'s module doc comment), but no Codex tool-call source feeds
-  them yet, so the "Bash" tab stays Claude-only until then
+- ✅ Codex shell-call support (PR 4 of 4) — `computeBashStats` extracted
+  into a harness-neutral engine (`@junrei/core`'s `shared/bash-stats.ts`);
+  Claude's own adapter (`claude/bash-stats.ts`) unchanged in behavior. Codex
+  adapter (`codex/bash-stats.ts` + `codex/tool-calls.ts`) extracts shell
+  calls from three wire surfaces: `function_call` `shell`/`exec_command`
+  (unwrapping a `bash`/`sh`/`zsh -lc`/`-c` wrapper argv, reassembling a plain
+  argv with quoting), `local_shell_call` + `exec_command_end` (the only
+  source of that surface's command text — it carries no real output, only a
+  synthesized "exited with code N"), and the 0.144+ unified-exec
+  `custom_tool_call` (embedded `tools.exec_command(...)` calls joined into
+  one entry, reusing `files-skills.ts`'s existing extractor). `bashStats`
+  moved onto `SessionAnalysisCore` (both harnesses); a Codex session's
+  sub-agent forest is folded in with a joint recompute at serve time
+  (`getCodexSession`, mirroring `fileAccess`'s override pattern — ranking
+  fields can't be additively merged). MCP: `get_bash_stats`/`get_tool_calls`
+  now serve both sources (`get_tool_calls` lists Codex's own wire tool names
+  generically). Web: "Bash" tab added to `CODEX_LENSES` (now identical to
+  `CLAUDE_LENSES`); the agent-detail (L3) placeholder applies to both
+  sources' sub-agents. `exec_command_end.duration` is NOT mapped to
+  `wallClockMs` (undocumented wire shape); Codex has no
+  `run_in_background` concept, so a Codex session's `background` is always
+  `[]`.
 
 ## Open items
 

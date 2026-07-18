@@ -10,6 +10,7 @@ import { estimateCostComponents } from "../shared/pricing/pricing.js";
 import { deriveRepoIdentity, normalizeRepoUrl } from "../shared/repo.js";
 import type { CompactionEvent, SessionAnalysisCore } from "../shared/session-analysis.js";
 import type { TokenUsage } from "../shared/types.js";
+import { computeCodexBashStats } from "./bash-stats.js";
 import type { CodexSessionFileRef } from "./discovery.js";
 import { computeCodexFileAccess, computeCodexSkillInvocations } from "./files-skills.js";
 import type {
@@ -434,6 +435,12 @@ export function analyzeCodexSession(
     new Map(),
   );
   const skillInvocations = computeCodexSkillInvocations(transcript);
+  // This session's own shell calls only — main-thread-only, same
+  // "own-thread value, overridden at serve time" pattern as `fileAccess`
+  // above; `getCodexSession` (server) re-derives the joint main+forest value
+  // once this session's descendant sub-agent threads are known — see
+  // `bash-stats.ts`'s module doc comment.
+  const bashStats = computeCodexBashStats(transcript);
   const userTurnCount =
     eventUserMessageCount > 0 ? eventUserMessageCount : fallbackUserMessageCount;
   if (firstUserPrompt === undefined) {
@@ -512,6 +519,7 @@ export function analyzeCodexSession(
     fileAccessTruncated,
     ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
     skillInvocations,
+    bashStats,
     codex,
     ...(sessionMeta?.cwd !== undefined && { cwd: sessionMeta.cwd }),
     ...(repoRoot !== undefined && { repoRoot }),
