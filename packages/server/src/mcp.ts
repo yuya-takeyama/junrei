@@ -882,7 +882,9 @@ const BASH_STATS_DEFAULT_TOP_COMMANDS = 20;
 const BASH_STATS_MAX_TOP_COMMANDS = 100;
 /** Fixed (not caller-configurable) — `programFrequency` has no dedicated cap param, unlike `byCommand`'s `topCommands`. */
 const BASH_STATS_PROGRAM_FREQUENCY_LIMIT = 30;
-/** Shared cap for every OTHER list in the response (background tasks, each waste category) — `byCommand`/`programFrequency` have their own caps above. */
+const BASH_STATS_DEFAULT_TOP_WASTE = 20;
+const BASH_STATS_MAX_TOP_WASTE = 100;
+/** Cap for `background.tasks` — the four waste lists (nearDuplicates/largeResults/rerunAfterError/bashAsRead) have their own caller-configurable cap, `topWaste`, and `byCommand`/`programFrequency` have their own caps above. */
 const BASH_STATS_LIST_CAP = 20;
 /** Fixed (not caller-configurable) — `byThread` is inherently small (one row per thread-model), so this is defensive headroom, not a real-world cap. */
 const BASH_STATS_BY_THREAD_CAP = 50;
@@ -959,9 +961,15 @@ function toOpportunityItem(opportunity: BashOpportunity) {
  * real-world limit. `opportunities` (new in v2 PR D) is the ranked,
  * templated fix-suggestion list `@junrei/core`'s `computeBashOpportunities`
  * already sorts best-first — capped to `topOpportunities` and shaped via
- * `toOpportunityItem`.
+ * `toOpportunityItem`. `topWaste` caps the four waste lists only —
+ * `background.tasks` always uses the fixed `BASH_STATS_LIST_CAP`.
  */
-function toBashStatsResponse(stats: BashStats, topCommands: number, topOpportunities: number) {
+function toBashStatsResponse(
+  stats: BashStats,
+  topCommands: number,
+  topOpportunities: number,
+  topWaste: number,
+) {
   const byStatus = { completed: 0, failed: 0, unresolved: 0 };
   for (const task of stats.background) byStatus[task.status] += 1;
   const cappedOpportunities = capList(stats.opportunities, topOpportunities);
@@ -973,10 +981,10 @@ function toBashStatsResponse(stats: BashStats, topCommands: number, topOpportuni
     heavyHitters: stats.heavyHitters,
     background: { byStatus, tasks: capList(stats.background, BASH_STATS_LIST_CAP) },
     waste: {
-      nearDuplicates: capList(stats.waste.nearDuplicates, BASH_STATS_LIST_CAP),
-      largeResults: capList(stats.waste.largeResults, BASH_STATS_LIST_CAP),
-      rerunAfterError: capList(stats.waste.rerunAfterError, BASH_STATS_LIST_CAP),
-      bashAsRead: capList(stats.waste.bashAsRead, BASH_STATS_LIST_CAP),
+      nearDuplicates: capList(stats.waste.nearDuplicates, topWaste),
+      largeResults: capList(stats.waste.largeResults, topWaste),
+      rerunAfterError: capList(stats.waste.rerunAfterError, topWaste),
+      bashAsRead: capList(stats.waste.bashAsRead, topWaste),
     },
     opportunities: {
       items: cappedOpportunities.items.map(toOpportunityItem),
@@ -2129,13 +2137,25 @@ export function createMcpServer(): McpServer {
               `(default ${BASH_STATS_DEFAULT_TOP_OPPORTUNITIES}, ` +
               `max ${BASH_STATS_MAX_TOP_OPPORTUNITIES})`,
           ),
+        topWaste: z
+          .number()
+          .int()
+          .min(1)
+          .max(BASH_STATS_MAX_TOP_WASTE)
+          .optional()
+          .describe(
+            "Cap on each waste list's length (nearDuplicates/largeResults/rerunAfterError/bashAsRead) " +
+              `(default ${BASH_STATS_DEFAULT_TOP_WASTE}, max ${BASH_STATS_MAX_TOP_WASTE})`,
+          ),
       },
     },
-    async ({ source, sessionId, includeSubagents, topCommands, topOpportunities }) => {
-      // zod already enforces topCommands <= BASH_STATS_MAX_TOP_COMMANDS and
-      // topOpportunities <= BASH_STATS_MAX_TOP_OPPORTUNITIES.
+    async ({ source, sessionId, includeSubagents, topCommands, topOpportunities, topWaste }) => {
+      // zod already enforces topCommands <= BASH_STATS_MAX_TOP_COMMANDS,
+      // topOpportunities <= BASH_STATS_MAX_TOP_OPPORTUNITIES, and
+      // topWaste <= BASH_STATS_MAX_TOP_WASTE.
       const cap = topCommands ?? BASH_STATS_DEFAULT_TOP_COMMANDS;
       const oppCap = topOpportunities ?? BASH_STATS_DEFAULT_TOP_OPPORTUNITIES;
+      const wasteCap = topWaste ?? BASH_STATS_DEFAULT_TOP_WASTE;
       const includeSub = includeSubagents ?? true;
 
       if (source === "codex") {
@@ -2162,7 +2182,7 @@ export function createMcpServer(): McpServer {
           {
             sessionId,
             includeSubagents: includeSub,
-            ...toBashStatsResponse(stats, cap, oppCap),
+            ...toBashStatsResponse(stats, cap, oppCap, wasteCap),
             ...(bashPercentile !== undefined && {
               bashPercentile: {
                 ...bashPercentile,
@@ -2196,7 +2216,7 @@ export function createMcpServer(): McpServer {
           {
             sessionId,
             includeSubagents: true,
-            ...toBashStatsResponse(analysis.bashStats, cap, oppCap),
+            ...toBashStatsResponse(analysis.bashStats, cap, oppCap, wasteCap),
             ...(bashPercentile !== undefined && { bashPercentile }),
           },
           ["claude-session-jsonl"],
@@ -2210,7 +2230,7 @@ export function createMcpServer(): McpServer {
         {
           sessionId,
           includeSubagents: false,
-          ...toBashStatsResponse(stats, cap, oppCap),
+          ...toBashStatsResponse(stats, cap, oppCap, wasteCap),
           ...(bashPercentile !== undefined && { bashPercentile }),
         },
         ["claude-session-jsonl"],

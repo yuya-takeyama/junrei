@@ -1633,9 +1633,15 @@ describe("MCP tools", () => {
         estUsd: 0.00026000000000000003,
       });
 
+      // `sleep 10 && pnpm build` used to primary-attribute to `sleep` (the
+      // first non-cd segment); `sleep` is now in NEAR_ZERO_OUTPUT_COMMANDS,
+      // so attribution skips it and lands on `pnpm build` instead — value
+      // moved from a standalone "sleep" family/no-subcommand group to a
+      // "pnpm"/"build" group because attribution now skips near-zero-output
+      // segments (see primaryCommand's contract).
       expect(body.byCommand.items).toEqual([
         expect.objectContaining({ family: "pnpm", subcommand: "test", calls: 2, sharePct: 51.5 }),
-        expect.objectContaining({ family: "sleep", calls: 1, sharePct: 48.5 }),
+        expect.objectContaining({ family: "pnpm", subcommand: "build", calls: 1, sharePct: 48.5 }),
       ]);
       expect(body.byCommand.totalCount).toBe(2);
       expect(body.byCommand.truncated).toBe(false);
@@ -2038,9 +2044,11 @@ describe("MCP tools", () => {
         subcommand: "test",
       });
 
+      // `sleep 10 && pnpm build` now attributes to `pnpm build` (subcommand
+      // "build") instead of standalone "sleep" — see the near-identical
+      // comment on the get_bash_stats byCommand assertion above.
       const bgBash = body.toolCalls.find((c) => c.toolUseId === "toolu_bgbash1");
-      expect(bgBash).toMatchObject({ family: "sleep", resultChars: 47 });
-      expect(bgBash?.subcommand).toBeUndefined();
+      expect(bgBash).toMatchObject({ family: "pnpm", subcommand: "build", resultChars: 47 });
 
       expect(body.sourceCompleteness.sources).toEqual([
         { source: "claude-session-jsonl", dimensions: expect.any(Object) },
@@ -2704,6 +2712,272 @@ describe("MCP tools", () => {
       expect(body.opportunities.items).toHaveLength(1);
       expect(body.opportunities.totalCount).toBe(2);
       expect(body.opportunities.truncated).toBe(true);
+    });
+  });
+
+  describe("get_bash_stats — topWaste parameter", () => {
+    // A fixture whose waste lists and background-task list both exceed the
+    // fixed/default caps, so capping and the `topWaste` param's decoupling
+    // from `background.tasks` are actually exercised (the shared
+    // CLAUDE_SESSION_ID fixture has far too few Bash calls for that): 25
+    // single-segment `cat fileN.log` reads (each its own distinct
+    // bashAsRead — no repeated normalized pattern, so nearDuplicates never
+    // fires) and 22 `run_in_background` launches (each its own background
+    // task).
+    const TOP_WASTE_FIXTURE_SESSION_ID = "77777777-7777-7777-7777-777777777777";
+    const TOP_WASTE_FIXTURE_PROJECT_DIR = "-tmp-bash-topwaste-fixture-proj";
+    const BASH_AS_READ_COUNT = 25; // > BASH_STATS_DEFAULT_TOP_WASTE (20)
+    const BACKGROUND_TASK_COUNT = 22; // > BASH_STATS_LIST_CAP (20)
+
+    let topWasteFixtureDir: string | undefined;
+    let previousConfigDirForTopWasteFixture: string | undefined;
+
+    beforeAll(async () => {
+      previousConfigDirForTopWasteFixture = process.env.CLAUDE_CONFIG_DIR;
+      topWasteFixtureDir = await mkdtemp(join(tmpdir(), "junrei-mcp-bashstats-topwaste-fixture-"));
+      const projectDir = join(topWasteFixtureDir, "projects", TOP_WASTE_FIXTURE_PROJECT_DIR);
+      await mkdir(projectDir, { recursive: true });
+
+      const lines: unknown[] = [
+        {
+          type: "user",
+          uuid: "wu0",
+          parentUuid: null,
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-19T00:00:00.000Z",
+          isSidechain: false,
+          cwd: "/tmp/bash-topwaste-fixture",
+          version: "2.1.202",
+          message: { role: "user", content: "read a bunch of files and launch background tasks" },
+        },
+      ];
+      let prevUuid = "wu0";
+
+      for (let i = 1; i <= BASH_AS_READ_COUNT; i += 1) {
+        const assistantUuid = `wa${i}`;
+        const userUuid = `wu${i}`;
+        lines.push({
+          type: "assistant",
+          uuid: assistantUuid,
+          parentUuid: prevUuid,
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          timestamp: `2026-07-19T00:00:${String(i).padStart(2, "0")}.000Z`,
+          isSidechain: false,
+          requestId: `req_read_${i}`,
+          message: {
+            id: `msg_read_${i}`,
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [
+              {
+                type: "tool_use",
+                id: `toolu_read_${i}`,
+                name: "Bash",
+                input: { command: `cat file${i}.log` },
+              },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        });
+        lines.push({
+          type: "user",
+          uuid: userUuid,
+          parentUuid: assistantUuid,
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          timestamp: `2026-07-19T00:00:${String(i).padStart(2, "0")}.500Z`,
+          isSidechain: false,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: `toolu_read_${i}`,
+                is_error: null,
+                content: `line ${i}`,
+              },
+            ],
+          },
+        });
+        prevUuid = userUuid;
+      }
+
+      for (let j = 1; j <= BACKGROUND_TASK_COUNT; j += 1) {
+        const assistantUuid = `wba${j}`;
+        const launchUuid = `wbu${j}`;
+        const notifUuid = `wbn${j}`;
+        lines.push({
+          type: "assistant",
+          uuid: assistantUuid,
+          parentUuid: prevUuid,
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          timestamp: `2026-07-19T00:01:${String(j).padStart(2, "0")}.000Z`,
+          isSidechain: false,
+          requestId: `req_bg_${j}`,
+          message: {
+            id: `msg_bg_${j}`,
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [
+              {
+                type: "tool_use",
+                id: `toolu_bg_${j}`,
+                name: "Bash",
+                input: { command: `sleep ${j}`, description: `bg ${j}`, run_in_background: true },
+              },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        });
+        lines.push({
+          type: "user",
+          uuid: launchUuid,
+          parentUuid: assistantUuid,
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          timestamp: `2026-07-19T00:01:${String(j).padStart(2, "0")}.500Z`,
+          isSidechain: false,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: `toolu_bg_${j}`,
+                is_error: null,
+                content: `Command running in background with ID: bg_task_${j}`,
+              },
+            ],
+          },
+          toolUseResult: {
+            stdout: "",
+            stderr: "",
+            interrupted: false,
+            isImage: false,
+            backgroundTaskId: `bg_task_${j}`,
+          },
+        });
+        lines.push({
+          type: "user",
+          uuid: notifUuid,
+          parentUuid: launchUuid,
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          timestamp: `2026-07-19T00:02:${String(j).padStart(2, "0")}.000Z`,
+          isSidechain: false,
+          message: {
+            role: "user",
+            content:
+              `<task-notification>\n<task-id>bg_task_${j}</task-id>\n` +
+              `<tool-use-id>toolu_bg_${j}</tool-use-id>\n<status>completed</status>\n` +
+              `<summary>Background command "bg ${j}" completed (exit code 0)</summary>\n` +
+              `</task-notification>`,
+          },
+        });
+        prevUuid = notifUuid;
+      }
+
+      await writeFile(
+        join(projectDir, `${TOP_WASTE_FIXTURE_SESSION_ID}.jsonl`),
+        `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      );
+
+      process.env.CLAUDE_CONFIG_DIR = `${CLAUDE_FIXTURES_DIR},${topWasteFixtureDir}`;
+    });
+
+    afterAll(async () => {
+      if (previousConfigDirForTopWasteFixture === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDirForTopWasteFixture;
+      }
+      if (topWasteFixtureDir !== undefined) {
+        await rm(topWasteFixtureDir, { recursive: true, force: true });
+      }
+    });
+
+    it("defaults each waste list's cap to BASH_STATS_DEFAULT_TOP_WASTE (20), with accurate totalCount/truncated", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: TOP_WASTE_FIXTURE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        waste: { bashAsRead: { items: unknown[]; totalCount: number; truncated: boolean } };
+      };
+      expect(body.waste.bashAsRead.items).toHaveLength(20);
+      expect(body.waste.bashAsRead.totalCount).toBe(25);
+      expect(body.waste.bashAsRead.truncated).toBe(true);
+    });
+
+    it("topWaste raises the cap, returning more entries and flipping truncated to false once it covers every entry", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          topWaste: 30,
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        waste: { bashAsRead: { items: unknown[]; totalCount: number; truncated: boolean } };
+      };
+      expect(body.waste.bashAsRead.items).toHaveLength(25);
+      expect(body.waste.bashAsRead.totalCount).toBe(25);
+      expect(body.waste.bashAsRead.truncated).toBe(false);
+    });
+
+    it("does not affect background.tasks, which always uses the fixed BASH_STATS_LIST_CAP", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          topWaste: 100,
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        background: { tasks: { items: unknown[]; totalCount: number; truncated: boolean } };
+      };
+      expect(body.background.tasks.items).toHaveLength(20);
+      expect(body.background.tasks.totalCount).toBe(22);
+      expect(body.background.tasks.truncated).toBe(true);
+    });
+
+    it("rejects topWaste out of bounds (min 1, max 100)", async () => {
+      client = await connect();
+      const tooSmall = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          topWaste: 0,
+        },
+      });
+      expect(tooSmall.isError).toBe(true);
+      expect(textOf(tooSmall)).toContain("topWaste");
+
+      const tooLarge = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: TOP_WASTE_FIXTURE_SESSION_ID,
+          topWaste: 101,
+        },
+      });
+      expect(tooLarge.isError).toBe(true);
+      expect(textOf(tooLarge)).toContain("topWaste");
     });
   });
 
