@@ -80,7 +80,7 @@ describe("computeBashStats", () => {
 
       // Two DIFFERENT commands both primary-attribute to git/diff: the plain
       // `git diff --stat` call and the `git diff | grep -c TODO` pipeline
-      // (primaryCommand picks the first non-cd segment, i.e. the git side).
+      // (primaryCommand picks the first non-trivial segment, i.e. the git side).
       expect(byKey.get("git:diff")).toMatchObject({
         calls: 2,
         totalResultChars: 62,
@@ -89,9 +89,13 @@ describe("computeBashStats", () => {
 
       expect(byKey.get("git:status")).toMatchObject({ calls: 1, totalResultChars: 52 });
 
-      // `sleep 30 && pnpm build` primary-attributes to `sleep` (the FIRST
-      // non-cd segment), not `pnpm build` — see primaryCommand's contract.
-      expect(byKey.get("sleep:")).toMatchObject({ calls: 1, totalResultChars: 48 });
+      // `sleep 30 && pnpm build` used to primary-attribute to `sleep` (the
+      // first non-cd segment); `sleep` is now in NEAR_ZERO_OUTPUT_COMMANDS, so
+      // attribution skips it and lands on `pnpm build` instead — value moved
+      // from "sleep:" to "pnpm:build" because attribution now skips
+      // near-zero-output segments (see primaryCommand's contract).
+      expect(byKey.get("sleep:")).toBeUndefined();
+      expect(byKey.get("pnpm:build")).toMatchObject({ calls: 1, totalResultChars: 48 });
 
       // cat is not a known command family, so no subcommand is extracted;
       // both the plain `cat` read and the `cat | grep` pipeline (which
