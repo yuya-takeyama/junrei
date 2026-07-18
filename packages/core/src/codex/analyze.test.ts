@@ -153,6 +153,14 @@ describe("analyzeCodexSession", () => {
     expect(analysis.totalUsage.outputTokens).toBe(450);
     expect(analysis.totalUsage.cacheReadTokens).toBe(300);
 
+    // v2 PR A's $ weighting: bashStats' "main" thread is tagged with the
+    // DOMINANT-by-input-tokens model — claude-sonnet-4-5 (800) over gpt-5.5
+    // (400) — not simply the first/last model seen.
+    expect(analysis.bashStats.byThread).toEqual([
+      expect.objectContaining({ thread: "main", model: "claude-sonnet-4-5" }),
+    ]);
+    expect(analysis.bashStats.totals.estUsd).toBeGreaterThan(0);
+
     expect(analysis.codex.reasoningOutputTokens).toBe(70);
   });
 

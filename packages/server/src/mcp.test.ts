@@ -1398,6 +1398,7 @@ describe("MCP tools", () => {
         inputChars: 40,
         resultChars: 97,
         estimatedTokens: 35,
+        estUsd: 0.00026000000000000003,
       });
 
       expect(body.byCommand.items).toEqual([
@@ -1429,7 +1430,7 @@ describe("MCP tools", () => {
         {
           pattern: "pnpm test",
           count: 1,
-          occurrences: [{ thread: "main", errorLine: 5, rerunLine: 8 }],
+          occurrences: [{ thread: "main", errorLine: 5, rerunLine: 8, resultChars: 25 }],
         },
       ]);
       // "pnpm test" occurs only twice — below nearDuplicates' >=3 threshold.
@@ -1528,6 +1529,7 @@ describe("MCP tools", () => {
         estimatedTokens: Math.ceil(
           (PYTEST_CMD_CHARS * 2 + REAL_OUTPUT_CHARS + SYNTHETIC_OUTPUT_CHARS) / 4,
         ),
+        estUsd: 0.000021000000000000002,
       });
       expect(body.byCommand.items).toEqual([
         expect.objectContaining({ family: "pytest", calls: 2, errors: 2 }),

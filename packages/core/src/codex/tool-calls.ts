@@ -174,6 +174,15 @@ export interface CodexToolCallRecord {
   inputSummary: string;
   /** Reconstructed shell command text, set ONLY when this call is a genuine shell execution — see the module doc comment for exactly which wire surfaces this covers and what it can't recover (real output size for `local_shell_call`, in particular). */
   shellCommand?: string;
+  /**
+   * `true` for a `local_shell_call`-sourced record — its `resultChars` is the
+   * synthesized `"exited with code N"` placeholder's length, NEVER a real
+   * captured output size (see this module's doc comment, surface 2). Omitted
+   * (never `false`) for every other surface. Threaded into
+   * `NeutralBashCall.resultIsPlaceholder` by `codex/bash-stats.ts` so
+   * `shared/bash-stats.ts`'s $ weighting excludes it from every `estUsd` sum.
+   */
+  resultIsPlaceholder?: boolean;
 }
 
 function inputCharsOf(raw: string | undefined): number {
@@ -235,6 +244,7 @@ function toRecord(
         ? ""
         : summarizeCodexArgs(item.kind === "functionCall" ? item.argumentsJson : item.input),
     ...(shellCommand !== undefined && { shellCommand }),
+    ...(item.kind === "localShellCall" && { resultIsPlaceholder: true }),
   };
 }
 

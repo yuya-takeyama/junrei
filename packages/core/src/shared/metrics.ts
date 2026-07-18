@@ -106,6 +106,23 @@ export function mergeUsageByModel(
   return [...totals.values()];
 }
 
+/**
+ * The model responsible for the most INPUT tokens among `byModel` entries —
+ * used as a single transcript's "dominant model" label when its own API
+ * messages span more than one model (a mid-session model switch), e.g. a
+ * thread's model tag for `shared/bash-stats.ts`'s $ weighting. Ties keep
+ * whichever entry appeared first in `byModel`. `undefined` for an empty list.
+ */
+export function dominantModelByInputTokens(
+  byModel: readonly ModelUsageSummary[],
+): string | undefined {
+  let best: ModelUsageSummary | undefined;
+  for (const entry of byModel) {
+    if (best === undefined || entry.inputTokens > best.inputTokens) best = entry;
+  }
+  return best?.model;
+}
+
 // ---------------------------------------------------------------------------
 // Context timeline
 // ---------------------------------------------------------------------------

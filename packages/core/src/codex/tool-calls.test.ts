@@ -61,4 +61,17 @@ describe("listCodexToolCalls", () => {
     expect(call1?.shellCommand).toBe("git status");
     expect(call1?.inputChars).toBe(JSON.stringify({ command: ["git", "status"] }).length);
   });
+
+  it("flags only the local_shell_call record's resultChars as a placeholder (v2 PR A's $ weighting)", async () => {
+    const transcript = await parseCodexTranscriptFile(join(FIXTURES_DIR, "main.jsonl"));
+    const records = listCodexToolCalls(transcript);
+    expect(records.find((r) => r.callId === "call-6")?.resultIsPlaceholder).toBe(true);
+    // Every other record — function_call, custom_tool_call, web_search_call,
+    // apply_patch — carries real (or at least non-synthesized) result text,
+    // so the key is omitted entirely (never `false`).
+    for (const record of records) {
+      if (record.callId === "call-6") continue;
+      expect(record).not.toHaveProperty("resultIsPlaceholder");
+    }
+  });
 });

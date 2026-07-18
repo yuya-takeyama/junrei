@@ -147,7 +147,7 @@ describe("computeCodexBashEntries / computeCodexBashStats", () => {
       {
         pattern: "pnpm test",
         count: 1,
-        occurrences: [{ thread: "main", errorLine: 7, rerunLine: 9 }],
+        occurrences: [{ thread: "main", errorLine: 7, rerunLine: 9, resultChars: 5 }],
       },
     ]);
   });
@@ -172,6 +172,53 @@ describe("computeCodexBashEntries / computeCodexBashStats", () => {
     const stats = computeCodexBashStats(transcript);
     expect(stats.background).toEqual([]);
     expect(stats.heavyHitters.every((h) => h.thread === "main")).toBe(true);
+  });
+
+  describe("$ weighting (v2 PR A)", () => {
+    /** `claude-fable-5`'s `input_cost_per_token` — see `../shared/pricing/prices.json`. */
+    const FABLE_INPUT_RATE = 0.00001;
+
+    it("propagates resultIsPlaceholder from the local_shell_call record (call-6) only", async () => {
+      const transcript = await parseCodexTranscriptFile(join(FIXTURES_DIR, "main.jsonl"));
+      const entries = computeCodexBashEntries(transcript);
+      expect(entries.find((e) => e.id === "call-6")?.resultIsPlaceholder).toBe(true);
+      for (const entry of entries) {
+        if (entry.id === "call-6") continue;
+        expect(entry.resultIsPlaceholder).toBeUndefined();
+      }
+    });
+
+    it("tags the main thread with the supplied model, excludes the placeholder call from estUsd, and prices everything else", async () => {
+      const transcript = await parseCodexTranscriptFile(join(FIXTURES_DIR, "main.jsonl"));
+      const stats = computeCodexBashStats(transcript, "claude-fable-5");
+
+      const call6 = stats.heavyHitters.find((h) => h.toolUseId === "call-6");
+      expect(call6).toMatchObject({ resultIsPlaceholder: true });
+      expect(call6).not.toHaveProperty("estUsd");
+
+      // The 20000-char call-7 is real (non-placeholder) output, so it IS priced.
+      const call7 = stats.heavyHitters.find((h) => h.toolUseId === "call-7");
+      expect(call7?.estUsd).toBe(Math.ceil(20_000 / 4) * FABLE_INPUT_RATE);
+      expect(call7).not.toHaveProperty("resultIsPlaceholder");
+
+      // totals.estUsd sums every NON-placeholder call's own priced resultChars
+      // — re-derived from the neutral entries (same order, same arithmetic) so
+      // this doesn't hard-code the fixture's overall byte count.
+      const entries = computeCodexBashEntries(transcript);
+      let expectedEstUsd = 0;
+      for (const entry of entries) {
+        if (entry.resultIsPlaceholder === true) continue;
+        expectedEstUsd += Math.ceil(entry.resultChars / 4) * FABLE_INPUT_RATE;
+      }
+      expect(stats.totals.estUsd).toBe(expectedEstUsd);
+    });
+
+    it("leaves estUsd absent throughout when no model is supplied", async () => {
+      const transcript = await parseCodexTranscriptFile(join(FIXTURES_DIR, "main.jsonl"));
+      const stats = computeCodexBashStats(transcript);
+      expect(stats.totals).not.toHaveProperty("estUsd");
+      expect(stats.heavyHitters.every((h) => !("estUsd" in h))).toBe(true);
+    });
   });
 
   it("returns empty entries for a transcript with no shell calls", async () => {

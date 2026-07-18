@@ -45,6 +45,13 @@ export { LARGE_RESULT_CHARS_THRESHOLD, normalizeCommandForDedup } from "../share
 export interface BashStatsThread {
   thread: string;
   data: SessionData;
+  /**
+   * This thread's own dominant model (v2 PR A's $ weighting) — the caller
+   * (`analyze.ts`) supplies the main transcript's highest-input-token model
+   * (`dominantModelByInputTokens`) and each subagent's own
+   * `SubagentNode.model`. `undefined` when unknown.
+   */
+  model?: string;
 }
 
 /** Same 200-char cap (with an ellipsis marker) the shared engine's own `cap` applies to every other command string — duplicated here (not exported by the shared module) since `background` is resolved entirely in this Claude-specific adapter. */
@@ -120,8 +127,9 @@ function toBackgroundCalls(thread: string, data: SessionData): BashBackgroundCal
  * fold+merge.
  */
 export function computeBashStats(threads: readonly BashStatsThread[]): BashStats {
-  const neutralThreads: NeutralBashThread[] = threads.map(({ thread, data }) => ({
+  const neutralThreads: NeutralBashThread[] = threads.map(({ thread, data, model }) => ({
     thread,
+    ...(model !== undefined && { model }),
     calls: toNeutralCalls(data),
     background: toBackgroundCalls(thread, data),
   }));

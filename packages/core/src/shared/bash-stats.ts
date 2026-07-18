@@ -44,8 +44,26 @@
  * with — no real tokenizer runs over Bash input/output text. Good for
  * relative comparison ("which command group is expensive"), not exact
  * accounting.
+ *
+ * $ weighting (v2 PR A): chars alone mislead — 98%+ of a session's Bash chars
+ * can sit in a cheap subagent thread's context, not the expensive
+ * orchestrator's. `NeutralBashThread.model` (optional — an adapter can leave
+ * it undefined) lets `estUsdForChars` price a call's `resultChars` at its OWN
+ * thread's model, and every `estUsd?` field below is that priced figure,
+ * NEVER a chars-only stand-in. `byThread` is the new per-thread rollup this
+ * PR adds specifically to make "how much of this session's Bash spend sat in
+ * the orchestrator vs. a subagent" answerable; `byCommand.orchestratorSharePct`
+ * answers the same question per command group. `computeBashOpportunities`
+ * (`./bash-opportunities.ts`) turns the enriched `waste`/`byThread` data into
+ * ranked, templated fix suggestions and is wired in as `BashStats.opportunities`
+ * at the bottom of `computeBashStats` — the one seam both harnesses (and the
+ * server's Codex forest-joint recompute, which just re-exports this same
+ * function) share.
  */
 
+import type { BashOpportunity } from "./bash-opportunities.js";
+import { computeBashOpportunities } from "./bash-opportunities.js";
+import { findModelPricing } from "./pricing/pricing.js";
 import type { ShellSegment } from "./shell/parser.js";
 import { parseShellCommand, primaryCommand } from "./shell/parser.js";
 
@@ -58,6 +76,16 @@ export interface BashTotals {
   resultChars: number;
   /** `Math.ceil((inputChars + resultChars) / 4)` — see the module doc comment. */
   estimatedTokens: number;
+  /**
+   * Sum of every non-placeholder call's `estUsdForChars(resultChars, thread's
+   * model)` that resolved to a real number — a PARTIAL sum, silently skipping
+   * any call whose thread has no known/priced model (or whose result is a
+   * placeholder, see `NeutralBashCall.resultIsPlaceholder`), so this is
+   * "known-priced Bash $ spend", not "total Bash $ spend". `undefined` only
+   * when NOT ONE call anywhere resolved a price — never `0` for "nothing
+   * priced". See the module doc comment's "$ weighting" section.
+   */
+  estUsd?: number;
 }
 
 export interface BashCommandGroup {
@@ -77,6 +105,44 @@ export interface BashCommandGroup {
   sharePct: number;
   /** Up to 3 DISTINCT raw commands from this group, each capped to ~200 chars. */
   sampleCommands: string[];
+  /** Same partial-sum/never-0-for-unknown rule as `BashTotals.estUsd`, scoped to this group's own calls. */
+  estUsd?: number;
+  /**
+   * Share (0-100, 1 decimal) of this group's OWN `totalResultChars` that sat
+   * in the `"main"` (top-level/orchestrator) thread, as opposed to a
+   * subagent's — a high value means an expensive orchestrator turn is paying
+   * for this command's chars directly; a low value means a cheap subagent is
+   * absorbing most of it. Always computable from thread names alone (no
+   * pricing dependency) — `0` when `totalResultChars` is 0 or no occurrence
+   * came from `"main"`.
+   */
+  orchestratorSharePct?: number;
+}
+
+/**
+ * Per-thread rollup — new in v2 PR A, alongside `byCommand`'s per-command
+ * rollup, specifically to make "how much of this session's Bash spend sat in
+ * the orchestrator vs. a subagent" answerable without eyeballing
+ * `heavyHitters`/`byCommand`'s `thread` tags one at a time. Built the same
+ * way `byCommand` is: one row per thread that has at least one Bash call
+ * (a thread with zero Bash calls never appears), ranked by `resultChars` desc.
+ */
+export interface BashThreadGroup {
+  thread: string;
+  /** This thread's own model, when the adapter supplied one — see `NeutralBashThread.model`. */
+  model?: string;
+  calls: number;
+  errors: number;
+  inputChars: number;
+  resultChars: number;
+  /** `Math.ceil((inputChars + resultChars) / 4)`. */
+  estimatedTokens: number;
+  /** Same partial-sum/never-0-for-unknown rule as `BashTotals.estUsd`, scoped to this thread's own calls. */
+  estUsd?: number;
+  /** This thread's share of `BashStats.totals.resultChars`, 0-100 rounded to 1 decimal. `0` when totals.resultChars is 0. */
+  charsSharePct: number;
+  /** This thread's share of `BashStats.totals.estUsd`, 0-100 rounded to 1 decimal — `undefined` whenever either this thread's own `estUsd` or the session `totals.estUsd` is itself unknown (never a share of an unpriced total). */
+  usdSharePct?: number;
 }
 
 export interface BashProgramFrequency {
@@ -95,6 +161,10 @@ export interface BashHeavyHitter {
   line: number;
   toolUseId: string;
   thread: string;
+  /** Same partial/never-0-for-unknown rule as `BashTotals.estUsd`, priced from THIS call's own `resultChars` at its thread's model — `undefined` when unknown OR when `resultIsPlaceholder` is set (a placeholder's `resultChars` is never priced). */
+  estUsd?: number;
+  /** `true` only when this call's `resultChars` is a synthesized placeholder, not real captured output — see `NeutralBashCall.resultIsPlaceholder`. Omitted (never `false`) when not a placeholder. */
+  resultIsPlaceholder?: boolean;
 }
 
 export interface BashBackgroundCall {
@@ -120,8 +190,17 @@ export interface BashNearDuplicateGroup {
   count: number;
   /** Up to 3 distinct original (un-normalized) commands, capped to ~200 chars. */
   examples: string[];
-  /** One entry per occurrence, in detection order — which thread it came from and its line number, since occurrences here are folded across every thread (see the module doc comment). */
-  occurrences: Array<{ thread: string; line: number }>;
+  /**
+   * One entry per occurrence, in detection order — which thread it came
+   * from, its line number, and its own `resultChars` (since occurrences here
+   * are folded across every thread, see the module doc comment;
+   * `resultChars` lets `computeBashOpportunities` price each occurrence
+   * individually). `resultChars` is OPTIONAL on the type only for backward
+   * compatibility with existing hand-built literals elsewhere in the
+   * monorepo that predate it (e.g. presentational formatting tests that never
+   * read it) — `computeBashStats` itself always sets a real value here.
+   */
+  occurrences: Array<{ thread: string; line: number; resultChars?: number }>;
 }
 
 export interface BashLargeResult {
@@ -137,13 +216,32 @@ export interface BashLargeResult {
    * until a real marker is identified.
    */
   truncatedByHarness: boolean;
+  /** Same rule as `BashHeavyHitter.estUsd`. */
+  estUsd?: number;
+  /** Same rule as `BashHeavyHitter.resultIsPlaceholder`. */
+  resultIsPlaceholder?: boolean;
 }
 
 export interface BashRerunAfterError {
   pattern: string;
   count: number;
-  /** One entry per occurrence, in detection order — the thread it happened in (rerun-after-error is always looked up within a single thread, see `computeRerunAfterError`), plus the failing call's line and the rerun's line. */
-  occurrences: Array<{ thread: string; errorLine: number; rerunLine: number }>;
+  /**
+   * One entry per occurrence, in detection order — the thread it happened in
+   * (rerun-after-error is always looked up within a single thread, see
+   * `computeRerunAfterError`), the failing call's line, the rerun's line, and
+   * the RERUN call's own `resultChars` (not the failing call's — the rerun is
+   * the avoidable re-fetch `computeBashOpportunities` prices; the error's own
+   * result is usually just a short error message, not the waste signal).
+   * `resultChars` is OPTIONAL on the type for the same backward-compatibility
+   * reason as `BashNearDuplicateGroup.occurrences` — `computeBashStats`
+   * itself always sets a real value here.
+   */
+  occurrences: Array<{
+    thread: string;
+    errorLine: number;
+    rerunLine: number;
+    resultChars?: number;
+  }>;
 }
 
 export interface BashAsReadCall {
@@ -151,6 +249,10 @@ export interface BashAsReadCall {
   resultChars: number;
   line: number;
   thread: string;
+  /** Same rule as `BashHeavyHitter.estUsd`. */
+  estUsd?: number;
+  /** Same rule as `BashHeavyHitter.resultIsPlaceholder`. */
+  resultIsPlaceholder?: boolean;
 }
 
 /**
@@ -172,12 +274,16 @@ export interface BashStats {
   totals: BashTotals;
   /** Grouped by resolved family + subcommand, sorted by `totalResultChars` desc. */
   byCommand: BashCommandGroup[];
+  /** Grouped by thread, sorted by `resultChars` desc — see `BashThreadGroup`'s doc comment. */
+  byThread: BashThreadGroup[];
   /** Sorted by `count` desc. */
   programFrequency: BashProgramFrequency[];
   /** Top 10 calls by `resultChars`, across every thread. */
   heavyHitters: BashHeavyHitter[];
   background: BashBackgroundCall[];
   waste: BashWaste;
+  /** Ranked, templated fix suggestions derived from `waste`/`byThread` — see `./bash-opportunities.ts`. */
+  opportunities: BashOpportunity[];
 }
 
 /**
@@ -197,11 +303,31 @@ export interface NeutralBashCall {
   resultChars: number;
   /** Defaults to `false` when omitted (no recorded result, or a result that isn't flagged as an error). */
   isError?: boolean;
+  /**
+   * `true` when `resultChars` is a synthesized placeholder rather than real
+   * captured output — currently only Codex's `local_shell_call` surface,
+   * whose only "result" is a synthesized `"exited with code N"` string (see
+   * `codex/tool-calls.ts`'s module doc comment). Placeholder calls are
+   * excluded from every `estUsd` sum (their `resultChars` is real chars, but
+   * pricing it would silently misrepresent a tiny placeholder string as the
+   * command's real output cost) and marked via the matching entry's own
+   * `resultIsPlaceholder`. Defaults to `false` when omitted.
+   */
+  resultIsPlaceholder?: boolean;
 }
 
 /** One thread's neutral call list, tagged with how it should be attributed — `"main"` for the top-level transcript, else a subagent's own id. */
 export interface NeutralBashThread {
   thread: string;
+  /**
+   * This thread's own dominant model, when the adapter can supply one — the
+   * Claude adapter uses the main transcript's highest-input-token model (or a
+   * subagent's own `SubagentNode.model`), the Codex adapter uses the
+   * transcript's session-level model. `undefined` when unknown (never
+   * guessed) — every `estUsd` figure derived from this thread's calls stays
+   * `undefined` too, rather than defaulting to some other model's price.
+   */
+  model?: string;
   calls: NeutralBashCall[];
   /**
    * This thread's own background-task entries, already fully resolved by the
@@ -222,6 +348,13 @@ const RERUN_LOOKAHEAD = 3;
 const NEAR_DUPLICATE_MIN_COUNT = 3;
 const UNPARSED_FAMILY = "(unparsed)";
 
+/**
+ * The harness-wide convention (both adapters use it, see `NeutralBashThread`'s
+ * own doc comment) for "the top-level transcript, not a subagent" — the
+ * `BashCommandGroup.orchestratorSharePct` calculation's reference thread.
+ */
+const ORCHESTRATOR_THREAD = "main";
+
 const READ_LIKE_COMMANDS: ReadonlySet<string> = new Set(["cat", "head", "tail", "less", "more"]);
 
 function estimateTokens(chars: number): number {
@@ -230,6 +363,26 @@ function estimateTokens(chars: number): number {
 
 function cap(text: string, limit = SAMPLE_COMMAND_LIMIT): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+/**
+ * $ weighting's one pricing hook: `chars` (a call's `resultChars`) priced at
+ * `model`'s INPUT rate — deliberately the input rate, never output. A Bash
+ * result isn't "generated" by the model the way a completion is; it's text
+ * that gets read back in as INPUT context on every subsequent turn, so the
+ * input rate is what actually recurs each time the agent re-reads it (and,
+ * for the CURRENT turn, is a closer proxy than the output rate the harness
+ * paid once to produce the tool_use that requested it).
+ *
+ * `undefined` — NEVER `0` — whenever `model` is unknown or has no priced
+ * `input_cost_per_token` entry (`findModelPricing`), so callers can tell
+ * "genuinely free" apart from "can't estimate".
+ */
+export function estUsdForChars(chars: number, model: string | undefined): number | undefined {
+  if (model === undefined) return undefined;
+  const inputRate = findModelPricing(model)?.input_cost_per_token;
+  if (inputRate === undefined) return undefined;
+  return estimateTokens(chars) * inputRate;
 }
 
 /**
@@ -317,28 +470,38 @@ export function normalizeCommandForDedup(command: string): string {
 
 interface BashEntry {
   thread: string;
+  model: string | undefined;
   toolUseId: string;
   line: number;
   command: string;
   inputChars: number;
   resultChars: number;
   isError: boolean;
+  resultIsPlaceholder: boolean;
   segments: readonly ShellSegment[];
   primary: ShellSegment | undefined;
   family: string;
 }
 
-function toBashEntry(thread: string, call: NeutralBashCall): BashEntry {
+/** This entry's own `estUsdForChars`, or `undefined` for a placeholder result (never priced) or an unknown/unpriced model. */
+function entryEstUsd(entry: BashEntry): number | undefined {
+  if (entry.resultIsPlaceholder) return undefined;
+  return estUsdForChars(entry.resultChars, entry.model);
+}
+
+function toBashEntry(thread: string, model: string | undefined, call: NeutralBashCall): BashEntry {
   const parsed = parseShellCommand(call.command);
   const primary = primaryCommand(parsed);
   return {
     thread,
+    model,
     toolUseId: call.id,
     line: call.line,
     command: call.command,
     inputChars: call.command.length,
     resultChars: call.resultChars,
     isError: call.isError === true,
+    resultIsPlaceholder: call.resultIsPlaceholder === true,
     segments: parsed.segments,
     primary,
     family: primary?.executable ?? UNPARSED_FAMILY,
@@ -347,8 +510,8 @@ function toBashEntry(thread: string, call: NeutralBashCall): BashEntry {
 
 function collectEntries(threads: readonly NeutralBashThread[]): BashEntry[] {
   const entries: BashEntry[] = [];
-  for (const { thread, calls } of threads) {
-    for (const call of calls) entries.push(toBashEntry(thread, call));
+  for (const { thread, model, calls } of threads) {
+    for (const call of calls) entries.push(toBashEntry(thread, model, call));
   }
   return entries;
 }
@@ -357,10 +520,17 @@ function computeTotals(entries: readonly BashEntry[]): BashTotals {
   let errors = 0;
   let inputChars = 0;
   let resultChars = 0;
+  let estUsd = 0;
+  let estUsdKnown = false;
   for (const entry of entries) {
     if (entry.isError) errors += 1;
     inputChars += entry.inputChars;
     resultChars += entry.resultChars;
+    const usd = entryEstUsd(entry);
+    if (usd !== undefined) {
+      estUsd += usd;
+      estUsdKnown = true;
+    }
   }
   return {
     calls: entries.length,
@@ -368,6 +538,7 @@ function computeTotals(entries: readonly BashEntry[]): BashTotals {
     inputChars,
     resultChars,
     estimatedTokens: estimateTokens(inputChars + resultChars),
+    ...(estUsdKnown && { estUsd }),
   };
 }
 
@@ -380,6 +551,10 @@ interface GroupAccumulator {
   totalResultChars: number;
   sampleSeen: Set<string>;
   sampleCommands: string[];
+  estUsd: number;
+  estUsdKnown: boolean;
+  /** This group's own `totalResultChars` restricted to `ORCHESTRATOR_THREAD` occurrences — `orchestratorSharePct`'s numerator. */
+  orchestratorResultChars: number;
 }
 
 function computeByCommand(entries: readonly BashEntry[], totals: BashTotals): BashCommandGroup[] {
@@ -398,6 +573,9 @@ function computeByCommand(entries: readonly BashEntry[], totals: BashTotals): Ba
         totalResultChars: 0,
         sampleSeen: new Set(),
         sampleCommands: [],
+        estUsd: 0,
+        estUsdKnown: false,
+        orchestratorResultChars: 0,
       };
       groups.set(key, group);
     }
@@ -405,6 +583,12 @@ function computeByCommand(entries: readonly BashEntry[], totals: BashTotals): Ba
     if (entry.isError) group.errors += 1;
     group.totalInputChars += entry.inputChars;
     group.totalResultChars += entry.resultChars;
+    if (entry.thread === ORCHESTRATOR_THREAD) group.orchestratorResultChars += entry.resultChars;
+    const usd = entryEstUsd(entry);
+    if (usd !== undefined) {
+      group.estUsd += usd;
+      group.estUsdKnown = true;
+    }
     if (group.sampleCommands.length < MAX_SAMPLE_COMMANDS && !group.sampleSeen.has(entry.command)) {
       group.sampleSeen.add(entry.command);
       group.sampleCommands.push(cap(entry.command));
@@ -425,6 +609,11 @@ function computeByCommand(entries: readonly BashEntry[], totals: BashTotals): Ba
         ? Math.round((group.totalResultChars / totals.resultChars) * 1000) / 10
         : 0,
     sampleCommands: group.sampleCommands,
+    ...(group.estUsdKnown && { estUsd: group.estUsd }),
+    orchestratorSharePct:
+      group.totalResultChars > 0
+        ? Math.round((group.orchestratorResultChars / group.totalResultChars) * 1000) / 10
+        : 0,
   }));
 
   result.sort((a, b) => {
@@ -434,6 +623,68 @@ function computeByCommand(entries: readonly BashEntry[], totals: BashTotals): Ba
       a.family.localeCompare(b.family) || (a.subcommand ?? "").localeCompare(b.subcommand ?? "")
     );
   });
+  return result;
+}
+
+interface ThreadAccumulator {
+  thread: string;
+  model: string | undefined;
+  calls: number;
+  errors: number;
+  inputChars: number;
+  resultChars: number;
+  estUsd: number;
+  estUsdKnown: boolean;
+}
+
+/** New in v2 PR A — see `BashThreadGroup`'s doc comment. */
+function computeByThread(entries: readonly BashEntry[], totals: BashTotals): BashThreadGroup[] {
+  const groups = new Map<string, ThreadAccumulator>();
+  for (const entry of entries) {
+    let group = groups.get(entry.thread);
+    if (group === undefined) {
+      group = {
+        thread: entry.thread,
+        model: entry.model,
+        calls: 0,
+        errors: 0,
+        inputChars: 0,
+        resultChars: 0,
+        estUsd: 0,
+        estUsdKnown: false,
+      };
+      groups.set(entry.thread, group);
+    }
+    group.calls += 1;
+    if (entry.isError) group.errors += 1;
+    group.inputChars += entry.inputChars;
+    group.resultChars += entry.resultChars;
+    const usd = entryEstUsd(entry);
+    if (usd !== undefined) {
+      group.estUsd += usd;
+      group.estUsdKnown = true;
+    }
+  }
+
+  const result: BashThreadGroup[] = [...groups.values()].map((group) => ({
+    thread: group.thread,
+    ...(group.model !== undefined && { model: group.model }),
+    calls: group.calls,
+    errors: group.errors,
+    inputChars: group.inputChars,
+    resultChars: group.resultChars,
+    estimatedTokens: estimateTokens(group.inputChars + group.resultChars),
+    ...(group.estUsdKnown && { estUsd: group.estUsd }),
+    charsSharePct:
+      totals.resultChars > 0 ? Math.round((group.resultChars / totals.resultChars) * 1000) / 10 : 0,
+    ...(group.estUsdKnown &&
+      totals.estUsd !== undefined &&
+      totals.estUsd > 0 && {
+        usdSharePct: Math.round((group.estUsd / totals.estUsd) * 1000) / 10,
+      }),
+  }));
+
+  result.sort((a, b) => b.resultChars - a.resultChars || a.thread.localeCompare(b.thread));
   return result;
 }
 
@@ -463,14 +714,19 @@ function computeHeavyHitters(entries: readonly BashEntry[]): BashHeavyHitter[] {
       return a.line - b.line;
     })
     .slice(0, HEAVY_HITTER_LIMIT)
-    .map((entry) => ({
-      command: cap(entry.command),
-      family: entry.family,
-      resultChars: entry.resultChars,
-      line: entry.line,
-      toolUseId: entry.toolUseId,
-      thread: entry.thread,
-    }));
+    .map((entry) => {
+      const estUsd = entryEstUsd(entry);
+      return {
+        command: cap(entry.command),
+        family: entry.family,
+        resultChars: entry.resultChars,
+        line: entry.line,
+        toolUseId: entry.toolUseId,
+        thread: entry.thread,
+        ...(estUsd !== undefined && { estUsd }),
+        ...(entry.resultIsPlaceholder && { resultIsPlaceholder: true }),
+      };
+    });
 }
 
 function computeNearDuplicates(entries: readonly BashEntry[]): BashNearDuplicateGroup[] {
@@ -478,7 +734,7 @@ function computeNearDuplicates(entries: readonly BashEntry[]): BashNearDuplicate
     count: number;
     exampleSeen: Set<string>;
     examples: string[];
-    occurrences: Array<{ thread: string; line: number }>;
+    occurrences: Array<{ thread: string; line: number; resultChars: number }>;
   }
   const groups = new Map<string, Acc>();
   for (const entry of entries) {
@@ -489,7 +745,11 @@ function computeNearDuplicates(entries: readonly BashEntry[]): BashNearDuplicate
       groups.set(pattern, acc);
     }
     acc.count += 1;
-    acc.occurrences.push({ thread: entry.thread, line: entry.line });
+    acc.occurrences.push({
+      thread: entry.thread,
+      line: entry.line,
+      resultChars: entry.resultChars,
+    });
     if (acc.examples.length < MAX_SAMPLE_COMMANDS && !acc.exampleSeen.has(entry.command)) {
       acc.exampleSeen.add(entry.command);
       acc.examples.push(cap(entry.command));
@@ -510,25 +770,41 @@ function computeNearDuplicates(entries: readonly BashEntry[]): BashNearDuplicate
 function computeLargeResults(entries: readonly BashEntry[]): BashLargeResult[] {
   return entries
     .filter((entry) => entry.resultChars >= LARGE_RESULT_CHARS_THRESHOLD)
-    .map((entry) => ({
-      command: cap(entry.command),
-      resultChars: entry.resultChars,
-      line: entry.line,
-      thread: entry.thread,
-      truncatedByHarness: detectHarnessTruncation(),
-    }))
+    .map((entry) => {
+      const estUsd = entryEstUsd(entry);
+      return {
+        command: cap(entry.command),
+        resultChars: entry.resultChars,
+        line: entry.line,
+        thread: entry.thread,
+        truncatedByHarness: detectHarnessTruncation(),
+        ...(estUsd !== undefined && { estUsd }),
+        ...(entry.resultIsPlaceholder && { resultIsPlaceholder: true }),
+      };
+    })
     .sort((a, b) => b.resultChars - a.resultChars);
 }
 
 /**
  * Per-thread (a subagent's retries have nothing to do with the main
  * transcript's next call, so cross-thread lookahead would be meaningless),
- * but the result is grouped globally by normalized pattern.
+ * but the result is grouped globally by normalized pattern. Each occurrence's
+ * `resultChars` is the RERUN's own (`candidate`, not `failing`) — the rerun
+ * is the avoidable re-fetch `computeBashOpportunities` prices, not the
+ * failing call's (usually short) error output.
  */
 function computeRerunAfterError(threads: readonly NeutralBashThread[]): BashRerunAfterError[] {
   const byPattern = new Map<
     string,
-    { count: number; occurrences: Array<{ thread: string; errorLine: number; rerunLine: number }> }
+    {
+      count: number;
+      occurrences: Array<{
+        thread: string;
+        errorLine: number;
+        rerunLine: number;
+        resultChars: number;
+      }>;
+    }
   >();
 
   for (const { thread, calls } of threads) {
@@ -547,7 +823,12 @@ function computeRerunAfterError(threads: readonly NeutralBashThread[]): BashReru
           byPattern.set(failingPattern, acc);
         }
         acc.count += 1;
-        acc.occurrences.push({ thread, errorLine: failing.line, rerunLine: candidate.line });
+        acc.occurrences.push({
+          thread,
+          errorLine: failing.line,
+          rerunLine: candidate.line,
+          resultChars: candidate.resultChars,
+        });
         break; // one rerun credited per failing call
       }
     }
@@ -564,11 +845,14 @@ function computeBashAsRead(entries: readonly BashEntry[]): BashAsReadCall[] {
     if (entry.segments.length !== 1) continue;
     const segment = entry.segments[0];
     if (segment === undefined || !isBashAsRead(segment)) continue;
+    const estUsd = entryEstUsd(entry);
     result.push({
       command: cap(entry.command),
       resultChars: entry.resultChars,
       line: entry.line,
       thread: entry.thread,
+      ...(estUsd !== undefined && { estUsd }),
+      ...(entry.resultIsPlaceholder && { resultIsPlaceholder: true }),
     });
   }
   return result;
@@ -583,17 +867,21 @@ function computeBashAsRead(entries: readonly BashEntry[]): BashAsReadCall[] {
 export function computeBashStats(threads: readonly NeutralBashThread[]): BashStats {
   const entries = collectEntries(threads);
   const totals = computeTotals(entries);
+  const byThread = computeByThread(entries, totals);
+  const waste: BashWaste = {
+    nearDuplicates: computeNearDuplicates(entries),
+    largeResults: computeLargeResults(entries),
+    rerunAfterError: computeRerunAfterError(threads),
+    bashAsRead: computeBashAsRead(entries),
+  };
   return {
     totals,
     byCommand: computeByCommand(entries, totals),
+    byThread,
     programFrequency: computeProgramFrequency(entries),
     heavyHitters: computeHeavyHitters(entries),
     background: threads.flatMap((t) => t.background ?? []),
-    waste: {
-      nearDuplicates: computeNearDuplicates(entries),
-      largeResults: computeLargeResults(entries),
-      rerunAfterError: computeRerunAfterError(threads),
-      bashAsRead: computeBashAsRead(entries),
-    },
+    waste,
+    opportunities: computeBashOpportunities({ byThread, waste }),
   };
 }

@@ -53,14 +53,29 @@ export function computeCodexBashEntries(transcript: CodexTranscript): NeutralBas
       command: record.shellCommand,
       resultChars: record.resultChars,
       isError: record.status === "error",
+      ...(record.resultIsPlaceholder === true && { resultIsPlaceholder: true }),
     });
   }
   return calls;
 }
 
-/** Bash-command analytics for one Codex transcript, main thread only — see this module's doc comment on why the forest-joint version lives on the server. */
-export function computeCodexBashStats(transcript: CodexTranscript): BashStats {
-  return computeBashStats([{ thread: "main", calls: computeCodexBashEntries(transcript) }]);
+/**
+ * Bash-command analytics for one Codex transcript, main thread only — see
+ * this module's doc comment on why the forest-joint version lives on the
+ * server. `model` (optional — the session's own dominant model, see
+ * `codex/analyze.ts`'s `dominantModelByInputTokens` call) tags the single
+ * `"main"` thread this function computes so `shared/bash-stats.ts`'s $
+ * weighting has a price to work with; `undefined` leaves every `estUsd`
+ * field on the result absent, same as an unpriced model would.
+ */
+export function computeCodexBashStats(transcript: CodexTranscript, model?: string): BashStats {
+  return computeBashStats([
+    {
+      thread: "main",
+      ...(model !== undefined && { model }),
+      calls: computeCodexBashEntries(transcript),
+    },
+  ]);
 }
 
 /**
