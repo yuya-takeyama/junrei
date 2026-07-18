@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  isResultCapped,
-  prettyJson,
-  rawJson,
-  resultSectionLabel,
-  TOOL_RESULT_TEXT_CAP,
-} from "./recordFormat.js";
+import { isResultCapped, prettyJson, rawJson, resultSectionLabel } from "./recordFormat.js";
 
 describe("prettyJson", () => {
   it("pretty-prints an object with 2-space indent", () => {
@@ -32,16 +26,15 @@ describe("rawJson", () => {
 });
 
 describe("isResultCapped", () => {
-  it("is false for undefined text", () => {
+  it("is false when the backend reports no fullCharCount (text is already complete)", () => {
     expect(isResultCapped(undefined)).toBe(false);
   });
 
-  it("is false when text is shorter than the cap", () => {
-    expect(isResultCapped("short result")).toBe(false);
-  });
-
-  it("is true when text length hits the parser's capture cap exactly", () => {
-    expect(isResultCapped("x".repeat(TOOL_RESULT_TEXT_CAP))).toBe(true);
+  it("is true whenever the backend reports a fullCharCount, regardless of text length", () => {
+    // Driven entirely by the explicit signal now — a long recovered text
+    // (e.g. 2,200 chars, past the old 2,000-char parser cap) must NOT read
+    // as capped just because of its length.
+    expect(isResultCapped(2200)).toBe(true);
   });
 });
 

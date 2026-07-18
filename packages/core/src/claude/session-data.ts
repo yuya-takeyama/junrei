@@ -82,6 +82,16 @@ export interface TaskNotificationEvent {
 
 /** Structured view of one transcript, ready for metric computation. */
 export interface SessionData {
+  /**
+   * Store-scoped URI of the transcript this data was built from (see
+   * `store.ts`'s doc comment on `filePath` conventions) — `undefined` only
+   * for hand-built `SessionData` (test fixtures constructed without going
+   * through `buildSessionData`). Lets `timeline.ts`'s drill-down recovery
+   * path (`getClaudeRecordDetail`/`getClaudeToolCallDetail`) re-read a
+   * record's own raw source line through the SAME store/file `data` came
+   * from, whether that's the main transcript or a subagent's own sidecar.
+   */
+  filePath?: string;
   records: ClaudeSessionRecord[];
   apiMessages: ApiMessage[];
   toolCalls: ToolCall[];
@@ -296,6 +306,7 @@ export function buildSessionData(transcript: ClaudeTranscript): SessionData {
 
   const title = customTitle ?? aiTitle;
   return {
+    filePath: transcript.filePath,
     records: transcript.records,
     apiMessages: [...apiMessagesById.values()],
     toolCalls,

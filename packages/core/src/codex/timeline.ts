@@ -30,6 +30,7 @@ import type {
   RecordDetail,
   ThinkingEntry,
   TimelineEntry,
+  ToolCallDetail,
   ToolCallEntry,
   ToolCallRecordDetail,
   ToolCallStatus,
@@ -543,6 +544,86 @@ export function getCodexRecordDetail(
       kind: "compaction",
       line,
       ...(target.timestamp !== undefined && { timestamp: target.timestamp }),
+    };
+  }
+
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// getCodexToolCallDetail
+// ---------------------------------------------------------------------------
+
+/**
+ * Codex analog of `getClaudeToolCallDetail` (`claude/timeline.ts`) — same
+ * "call + result as one evidence unit" shape, resolved by `toolUseId`
+ * instead of by line. `toolUseId` matches the SAME id `getCodexRecordDetail`/
+ * `buildCodexTimeline` already expose on `ToolCallRecordDetail`/
+ * `ToolCallEntry`: `call_id` for `function_call`/`custom_tool_call`/
+ * `local_shell_call`, or the synthesized `L<line>` id for a `web_search_call`
+ * (which carries no `call_id` at all) — reuses the exact same linkage
+ * (`buildCodexLinkMaps`/`resolveCodexToolOutcome`) `getCodexRecordDetail`
+ * relies on, not a new heuristic. Codex has no hook/attachment-record
+ * concept, so `relatedRecords` is always `[]`; Codex records carry no
+ * `uuid`, so `call.uuid` is always unset.
+ */
+export function getCodexToolCallDetail(
+  transcript: CodexTranscript,
+  toolUseId: string,
+): ToolCallDetail | undefined {
+  const records = transcript.records;
+  const linkMaps = buildCodexLinkMaps(records);
+
+  for (const record of records) {
+    if (record.type !== "responseItem") continue;
+    const item = record.item;
+
+    let callId: string | undefined;
+    let name: string;
+    let input: unknown;
+    if (item.kind === "functionCall") {
+      callId = item.callId;
+      name = item.name;
+      input = parseCodexInput(item.argumentsJson);
+    } else if (item.kind === "customToolCall") {
+      callId = item.callId;
+      name = item.name;
+      input = parseCodexInput(item.input);
+    } else if (item.kind === "localShellCall") {
+      callId = item.callId;
+      name = "shell";
+      input = parseCodexInput(undefined);
+    } else if (item.kind === "webSearchCall") {
+      callId = undefined;
+      name = "web_search";
+      input = { query: item.query };
+    } else {
+      continue;
+    }
+
+    const resolvedId = callId ?? `L${String(record.line)}`;
+    if (resolvedId !== toolUseId) continue;
+
+    const outcome = resolveCodexToolOutcome(callId, linkMaps);
+    return {
+      toolUseId: resolvedId,
+      call: {
+        name,
+        input,
+        line: record.line,
+        ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+      },
+      result:
+        outcome.resultLine === undefined
+          ? null
+          : {
+              isError: outcome.status === "error",
+              text: outcome.text ?? "",
+              line: outcome.resultLine,
+              ...(outcome.resultTimestamp !== undefined && { timestamp: outcome.resultTimestamp }),
+            },
+      resultMissing: outcome.resultLine === undefined,
+      relatedRecords: [],
     };
   }
 

@@ -121,6 +121,7 @@ export {
   getClaudeLastActivityAt,
   getSession,
   getSessionRecordDetail,
+  getSessionToolCallDetail,
   getTimeline,
 } from "./sources/claude.js";
 export {
@@ -131,5 +132,6 @@ export {
   getCodexLastActivityAt,
   getCodexSession,
   getCodexSessionRecordDetail,
+  getCodexSessionToolCallDetail,
   getCodexTimeline,
 } from "./sources/codex.js";

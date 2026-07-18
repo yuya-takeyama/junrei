@@ -427,4 +427,282 @@ describe("MCP tools", () => {
     expect(overview.sessionCount).toBe(0);
     expect(overview.totalCostUsd).toBe(0);
   });
+
+  describe("get_records", () => {
+    it("returns full record content with correct line numbers, and lists an out-of-range line in missingLines", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          lines: [3, 27, 99999],
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sessionId: string;
+        source: string;
+        records: Array<{
+          line: number;
+          detail: Record<string, unknown>;
+          contentTruncated: boolean;
+        }>;
+        missingLines: number[];
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.sessionId).toBe(CLAUDE_SESSION_ID);
+      expect(body.source).toBe("claude-code");
+      expect(body.records).toHaveLength(2);
+
+      const toolCall = body.records.find((r) => r.line === 3);
+      expect(toolCall?.detail).toMatchObject({
+        kind: "tool-call",
+        toolUseId: "toolu_read1",
+        name: "Read",
+        input: { file_path: "/p/foo.ts" },
+        resultText: "const x = 1;",
+        resultLine: 4,
+      });
+      expect(toolCall?.contentTruncated).toBe(false);
+
+      const assistantText = body.records.find((r) => r.line === 27);
+      expect(assistantText?.detail).toMatchObject({ kind: "assistant-text", text: "All done." });
+
+      // Line 4 is a tool_result-only carrier — not independently addressable
+      // — and 99999 is past the end of the file; neither is silently dropped.
+      expect(body.missingLines).toEqual([99999]);
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("flags contentTruncated with a small maxCharsPerRecord and actually caps the returned (recovered, full) text", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          lines: [29], // toolu_skill1 tool_use — its result (line 30) is 2200 raw chars
+          maxCharsPerRecord: 200,
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        records: Array<{
+          line: number;
+          detail: { kind: string; resultText?: string };
+          contentTruncated: boolean;
+          originalCharCount?: number;
+        }>;
+      };
+      const record = body.records[0];
+      expect(record?.contentTruncated).toBe(true);
+      expect(record?.detail.resultText?.length).toBeLessThanOrEqual(201);
+      expect(record?.detail.resultText?.endsWith("…")).toBe(true);
+      // originalCharCount sums EVERY text-bearing field's pre-cut length
+      // (input's JSON-stringified length too, not just resultText) — at
+      // least the TRUE 2200-char tool_result (recovered from the raw source
+      // line), not just the 2000 chars the parser itself captured.
+      expect(record?.originalCharCount).toBeGreaterThanOrEqual(2200);
+    });
+
+    it("returns the full 2200-char result text by default (recovered from the raw source line), not the parser's 2000-char capture cap", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, lines: [29] },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        records: Array<{ detail: { resultText?: string }; contentTruncated: boolean }>;
+      };
+      // Default maxCharsPerRecord (30000) easily fits the true 2200-char
+      // result — the record-detail path recovers the full text from the raw
+      // JSONL line instead of silently handing back the parser's own
+      // upstream-capped 2000-char snapshot with contentTruncated: false.
+      expect(body.records[0]?.detail.resultText?.length).toBe(2200);
+      expect(body.records[0]?.contentTruncated).toBe(false);
+    });
+
+    it("works for a Codex session, resolving full tool-call content by line", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, lines: [4, 6] },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        source: string;
+        records: Array<{ line: number; detail: Record<string, unknown> }>;
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.source).toBe("codex");
+      const user = body.records.find((r) => r.line === 4);
+      expect(user?.detail).toMatchObject({
+        kind: "user",
+        text: "Fix the flaky test in foo.spec.ts",
+      });
+      const shell = body.records.find((r) => r.line === 6);
+      expect(shell?.detail).toMatchObject({
+        kind: "tool-call",
+        toolUseId: "call-1",
+        input: { command: ["pytest", "foo.spec.ts"] },
+      });
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "codex-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("404s clearly for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: { source: "claude-code", sessionId: "does-not-exist", lines: [1] },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+  });
+
+  describe("get_tool_call", () => {
+    it("returns the call and result as one evidence unit with plausible line numbers and full content", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_read1",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        toolUseId: string;
+        call: { name: string; input: unknown; line: number; inputTruncated: boolean };
+        result: { isError: boolean; text: string; line: number; textTruncated: boolean } | null;
+        resultMissing: boolean;
+        relatedRecords: unknown[];
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.toolUseId).toBe("toolu_read1");
+      expect(body.call).toMatchObject({
+        name: "Read",
+        input: { file_path: "/p/foo.ts" },
+        line: 3,
+        inputTruncated: false,
+      });
+      expect(body.result).toMatchObject({ isError: false, text: "const x = 1;", line: 4 });
+      expect(body.result?.textTruncated).toBe(false);
+      expect(body.resultMissing).toBe(false);
+      expect(body.relatedRecords).toEqual([]);
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("declares result: null and resultMissing: true instead of silently omitting a missing result", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_webfetch1", // never resulted in the fixture
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { result: unknown; resultMissing: boolean };
+      expect(body.result).toBeNull();
+      expect(body.resultMissing).toBe(true);
+    });
+
+    it("flags result.textTruncated with a small maxCharsPerField and reports the TRUE full char count", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_skill1", // result is 2200 raw chars, parser-capped to 2000
+          maxCharsPerField: 200,
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        result: { text: string; textTruncated: boolean; textFullCharCount?: number } | null;
+      };
+      expect(body.result?.textTruncated).toBe(true);
+      expect(body.result?.text.length).toBeLessThanOrEqual(201);
+      // The TRUE original count (2200), not the parser's own 2000-char capture cap.
+      expect(body.result?.textFullCharCount).toBe(2200);
+    });
+
+    it("returns the full 2200-char result text at the default maxCharsPerField (recovered from the raw source line)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_skill1",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        result: { text: string; textTruncated: boolean; textFullCharCount?: number } | null;
+      };
+      // Default maxCharsPerField (30000) never cuts a 2200-char string, and
+      // the drill-down evidence path now recovers the tool's true 2200-char
+      // output from the raw source line instead of handing back the
+      // parser's own 2000-char capture cap — genuinely complete, not just
+      // under the caller's own limit.
+      expect(body.result?.text.length).toBe(2200);
+      expect(body.result?.textTruncated).toBe(false);
+      expect(body.result?.textFullCharCount).toBeUndefined();
+    });
+
+    it("returns a clear not-found error for an unknown toolUseId", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "does-not-exist",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("toolUseId not found");
+    });
+
+    it("works for a Codex session (function_call/local_shell_call pairing), with no uuid and no relatedRecords", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, toolUseId: "call-3" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        call: { name: string; uuid?: string };
+        result: { isError: boolean; text: string } | null;
+        relatedRecords: unknown[];
+      };
+      expect(body.call.name).toBe("shell");
+      expect(body.call.uuid).toBeUndefined();
+      expect(body.result).toMatchObject({ isError: true, text: "exited with code 2" });
+      expect(body.relatedRecords).toEqual([]);
+    });
+
+    it("404s clearly for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: { source: "claude-code", sessionId: "does-not-exist", toolUseId: "anything" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+  });
 });

@@ -197,12 +197,26 @@ export interface ToolCallRecordDetail extends DetailBase {
   /** Full input — caller pretty-prints. */
   input: unknown;
   status: ToolCallStatus;
-  /** Full result text as captured (bounded by the parser's global capture cap). */
+  /**
+   * The tool_result's text — genuinely full whenever the Claude producer
+   * (`claude/timeline.ts`'s `buildToolCallDetail`) could recover it (re-reads
+   * the record's raw source line to undo the parser's parse-time capture
+   * cap; see that module's doc comment). Codex never caps this field at all.
+   */
   resultText?: string;
   resultLineCount?: number;
   resultLine?: number;
   resultTimestamp?: string;
   durationMs?: number;
+  /**
+   * The result's TRUE original character count — Claude only, present ONLY
+   * when recovery couldn't close the gap (line unreadable, no matching
+   * block, or no source file at all) and `resultText` is therefore STILL
+   * short of the truth. Absent whenever `resultText` is already complete,
+   * whether because there was never a cap or because recovery succeeded.
+   * Mirrors `ToolCallDetailResult.fullTextLength`'s contract exactly.
+   */
+  resultTextFullCharCount?: number;
 }
 
 export interface SubagentLaunchRecordDetail extends DetailBase {
@@ -215,7 +229,12 @@ export interface SubagentLaunchRecordDetail extends DetailBase {
   effort?: string;
   /** Full prompt as given to the subagent (from the spawning tool call's input). */
   prompt?: string;
-  /** Full parent-side tool_result text. */
+  /**
+   * Full parent-side tool_result text — genuinely full whenever recovery
+   * succeeded, same "undo the parser's capture cap" mechanism `resultText`
+   * uses on `ToolCallRecordDetail` (the launch's own tool_result is capped
+   * the identical way). See `returnedTextFullCharCount`.
+   */
   returnedText?: string;
   resultLine?: number;
   resultTimestamp?: string;
@@ -225,6 +244,13 @@ export interface SubagentLaunchRecordDetail extends DetailBase {
   durationMs?: number;
   toolCallCount?: number;
   toolErrorCount?: number;
+  /**
+   * The TRUE original character count of `returnedText` — present ONLY when
+   * recovery couldn't close the gap and `returnedText` is therefore still
+   * short of the truth. Same contract as `ToolCallRecordDetail
+   * .resultTextFullCharCount`.
+   */
+  returnedTextFullCharCount?: number;
 }
 
 export interface TaskNotificationRecordDetail extends DetailBase {
@@ -262,6 +288,74 @@ export type RecordDetail =
   | TaskNotificationRecordDetail
   | CompactionRecordDetail
   | ApiErrorRecordDetail;
+
+// ---------------------------------------------------------------------------
+// Tool-call detail (get_tool_call MCP tool) — a full call+result UNIT,
+// distinct from the single-line `RecordDetail` above: a call's own line and
+// its result's line are always different JSONL records, so this type carries
+// BOTH plus explicit "is anything missing" signaling instead of resolving one
+// line at a time. Cross-harness, same reasoning as `RecordDetail`: one
+// vocabulary, two producers (Claude: `claude/timeline.ts`'s
+// `getClaudeToolCallDetail`; Codex: `codex/timeline.ts`'s
+// `getCodexToolCallDetail`).
+// ---------------------------------------------------------------------------
+
+export interface ToolCallDetailCall {
+  name: string;
+  /** Full input as parsed — caller pretty-prints. */
+  input: unknown;
+  /** 1-based source line of the tool_use/function_call record. */
+  line: number;
+  timestamp?: string;
+  /** uuid of the containing record, when cheaply resolvable — Claude only (Codex records carry no uuid). */
+  uuid?: string;
+}
+
+export interface ToolCallDetailResult {
+  isError: boolean;
+  /** Full result text as captured (Claude: bounded by the parser's global capture cap — see `fullTextLength`). */
+  text: string;
+  /**
+   * The result's TRUE original character count, present only when it exceeds
+   * `text.length` — Claude only (the parser caps captured tool_result text at
+   * a fixed length; Codex captures result text uncapped, so this never
+   * appears there). Lets a caller distinguish "the tool said this much" from
+   * "the tool said at least this much, more was cut before it ever reached
+   * this API" — never mistake `text.length` alone for the tool's true output
+   * size.
+   */
+  fullTextLength?: number;
+  /** 1-based source line of the tool_result/`*_output`/`exec_command_end` record. */
+  line: number;
+  timestamp?: string;
+}
+
+/**
+ * A record linked to a tool call by structure the parser already
+ * establishes — today only a background task's completion notification,
+ * linked via `toolUseId` -> `taskId` (Claude only; Codex has no background-
+ * task/notification concept, so this list is always empty there). Never
+ * heuristic: an empty array means no such linkage exists in the parsed data,
+ * not that none was looked for.
+ */
+export interface ToolCallRelatedRecord {
+  kind: "task-notification";
+  taskId: string;
+  line: number;
+  timestamp?: string;
+  status?: string;
+  exitCode?: number;
+}
+
+export interface ToolCallDetail {
+  toolUseId: string;
+  call: ToolCallDetailCall;
+  /** `null` when the result record can't be found — see `resultMissing`. */
+  result: ToolCallDetailResult | null;
+  /** Explicit companion to `result: null` — absence is declared, never implied. */
+  resultMissing: boolean;
+  relatedRecords: ToolCallRelatedRecord[];
+}
 
 export interface TimelineOptions {
   /**

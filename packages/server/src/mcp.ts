@@ -1,4 +1,10 @@
-import { buildSourceCompleteness, type ClaudeSessionAnalysis, type SourceKind } from "@junrei/core";
+import {
+  buildSourceCompleteness,
+  type ClaudeSessionAnalysis,
+  type RecordDetail,
+  type SourceKind,
+  type ToolCallDetail,
+} from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getRepoOverview } from "./overview.js";
@@ -12,7 +18,11 @@ import {
 import {
   type CodexSessionAnalysisWithSubagents,
   getCodexSession,
+  getCodexSessionRecordDetail,
+  getCodexSessionToolCallDetail,
   getSession,
+  getSessionRecordDetail,
+  getSessionToolCallDetail,
   listSessions,
   MAX_LIST_LIMIT,
 } from "./sessions.js";
@@ -207,6 +217,186 @@ function toCodexSummary(analysis: CodexSessionAnalysisWithSubagents) {
         peakOutputTokens: Math.max(0, ...turns.map((t) => t.outputTokens)),
       },
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// get_records / get_tool_call — line-level evidence primitives. Both cap
+// their text fields EXPLICITLY: a value that got cut always says so, via a
+// `*Truncated` flag plus the field's original char count, rather than
+// silently handing back a shorter string.
+// ---------------------------------------------------------------------------
+
+const GET_RECORDS_DEFAULT_MAX_CHARS = 30000;
+const GET_RECORDS_MIN_MAX_CHARS = 200;
+const GET_RECORDS_MAX_LINES = 50;
+const GET_TOOL_CALL_DEFAULT_MAX_CHARS = 30000;
+const GET_TOOL_CALL_MIN_MAX_CHARS = 200;
+
+/**
+ * The text-bearing fields of one `RecordDetail`, by kind — exactly the
+ * fields `get_records` may need to cap. Listed explicitly (not a generic
+ * "every string field" walk) so a numeric/boolean field can never be
+ * mistaken for capturable text, and so `tool-call`'s `input` (typed
+ * `unknown`, not `string`) gets JSON-stringified before length checks.
+ */
+function textFieldsOf(detail: RecordDetail): { key: string; value: string }[] {
+  switch (detail.kind) {
+    case "user":
+    case "injected-context":
+    case "assistant-text":
+    case "thinking":
+      return [{ key: "text", value: detail.text }];
+    case "tool-call": {
+      const fields = [
+        {
+          key: "input",
+          value:
+            typeof detail.input === "string" ? detail.input : JSON.stringify(detail.input ?? null),
+        },
+      ];
+      if (detail.resultText !== undefined)
+        fields.push({ key: "resultText", value: detail.resultText });
+      return fields;
+    }
+    case "subagent-launch": {
+      const fields: { key: string; value: string }[] = [];
+      if (detail.prompt !== undefined) fields.push({ key: "prompt", value: detail.prompt });
+      if (detail.returnedText !== undefined) {
+        fields.push({ key: "returnedText", value: detail.returnedText });
+      }
+      return fields;
+    }
+    case "task-notification":
+    case "compaction":
+      return [];
+    case "api-error":
+      return detail.message !== undefined ? [{ key: "message", value: detail.message }] : [];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Per-field TRUE length, when it differs from the field's own `.length` —
+ * `get_records`' analog of `capTextField`'s `trueLength` parameter (used by
+ * `get_tool_call`). Only `tool-call.resultText` and `subagent-launch
+ * .returnedText` ever carry this today: Claude's parser can cap the
+ * underlying tool_result before this API ever sees it, and drill-down
+ * recovery (`claude/timeline.ts`) doesn't always manage to close the gap —
+ * see `ToolCallRecordDetail.resultTextFullCharCount`'s doc comment in
+ * `@junrei/core`. Absent from the returned map (falls back to the field's
+ * own `.length` in `truncateRecordDetail`) whenever a field is already
+ * complete.
+ */
+function trueLengthsOf(detail: RecordDetail): Record<string, number> {
+  if (detail.kind === "tool-call" && detail.resultTextFullCharCount !== undefined) {
+    return { resultText: detail.resultTextFullCharCount };
+  }
+  if (detail.kind === "subagent-launch" && detail.returnedTextFullCharCount !== undefined) {
+    return { returnedText: detail.returnedTextFullCharCount };
+  }
+  return {};
+}
+
+/**
+ * Cap `detail`'s text-bearing fields (see `textFieldsOf`) to `maxChars`,
+ * reporting whether ANY field was actually cut OR is already short of its
+ * own true length (see `trueLengthsOf` — a field can be incomplete
+ * independent of `maxChars`, e.g. Claude drill-down recovery that couldn't
+ * close the parser's own capture-cap gap), plus the pre-cut TRUE total char
+ * count across every text-bearing field (not just the cut ones) — "how much
+ * text this record really carries, of which you're seeing a capped slice".
+ * A capped `tool-call.input` is replaced by its JSON-stringified, capped
+ * text — no longer the structured value — precisely because `contentTruncated`
+ * flags that swap; an untruncated `input` stays whatever value it always was.
+ */
+function truncateRecordDetail(
+  detail: RecordDetail,
+  maxChars: number,
+): { detail: RecordDetail; contentTruncated: boolean; originalCharCount?: number } {
+  const fields = textFieldsOf(detail);
+  const trueLengths = trueLengthsOf(detail);
+  let totalChars = 0;
+  let truncatedAny = false;
+  const patch: Record<string, string> = {};
+  for (const { key, value } of fields) {
+    const trueLength = trueLengths[key] ?? value.length;
+    totalChars += trueLength;
+    if (value.length > maxChars) {
+      truncatedAny = true;
+      patch[key] = `${value.slice(0, maxChars)}…`;
+    } else if (trueLength > value.length) {
+      // Already short of the truth (recovery couldn't close the gap) even
+      // though this cap didn't need to cut it further — still truncated.
+      truncatedAny = true;
+    }
+  }
+  if (!truncatedAny) return { detail, contentTruncated: false };
+  return {
+    detail: { ...detail, ...patch } as RecordDetail,
+    contentTruncated: true,
+    originalCharCount: totalChars,
+  };
+}
+
+/**
+ * Cap one already-string field (e.g. `get_tool_call`'s `result.text`) to
+ * `maxChars`. `trueLength`, when given and larger than `text.length`, flags
+ * truncation EVEN WHEN `text` itself is under `maxChars` — the Claude Code
+ * parser caps captured tool_result text at a fixed length before this API
+ * ever sees it (see `ToolCallDetailResult.fullTextLength`'s doc comment in
+ * `@junrei/core`), so a field can be "already short of the truth" independent
+ * of this tool's own cap.
+ */
+function capTextField(
+  text: string,
+  maxChars: number,
+  trueLength?: number,
+): { text: string; truncated: boolean; fullCharCount?: number } {
+  const knownFullLength = trueLength ?? text.length;
+  const needsCut = text.length > maxChars;
+  const alreadyShort = knownFullLength > text.length;
+  if (!needsCut && !alreadyShort) return { text, truncated: false };
+  return {
+    text: needsCut ? `${text.slice(0, maxChars)}…` : text,
+    truncated: true,
+    fullCharCount: knownFullLength,
+  };
+}
+
+/** Cap `input` (arbitrary JSON) to `maxChars`, stringifying only when a cut is actually needed. */
+function capInputField(
+  input: unknown,
+  maxChars: number,
+): { input: unknown; truncated: boolean; fullCharCount?: number } {
+  const serialized = typeof input === "string" ? input : JSON.stringify(input ?? null);
+  if (serialized.length <= maxChars) return { input, truncated: false };
+  return {
+    input: `${serialized.slice(0, maxChars)}…`,
+    truncated: true,
+    fullCharCount: serialized.length,
+  };
+}
+
+/**
+ * `get_tool_call`'s not-found message — mirrors `notFound`'s "how to
+ * discover a valid one" pattern, pointed at the tools that surface a
+ * `toolUseId`.
+ */
+function toolCallNotFound(toolUseId: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `toolUseId not found in this session: ${toolUseId}. toolUseId comes from another ` +
+          'tool\'s own "toolUseId" field (get_records, get_context_timeline, find_repetitions, ' +
+          "get_subagent_tree) and must belong to THIS session's own transcript (source/sessionId) " +
+          "— a subagent's tool calls aren't reachable through this lookup.",
+      },
+    ],
+    isError: true,
   };
 }
 
@@ -574,6 +764,199 @@ export function createMcpServer(): McpServer {
     async ({ repo }) => {
       if (repo.trim() === "") return missingRepo();
       return jsonResult(await getRepoOverview(repo), BOTH_SOURCES);
+    },
+  );
+
+  server.registerTool(
+    "get_records",
+    {
+      description:
+        "Full record text for specific 1-based source lines in one session's JSONL — the SAME " +
+        "detail the record-detail slide-over (and the HTTP /record/:line route) shows, fetched " +
+        "in bulk (up to 50 lines per call) instead of one line at a time. Line numbers are " +
+        "1-based JSONL line numbers, the same provenance anchor every other tool's `line` / " +
+        "`resultLine` / `startLine` fields point at — use them to quote exact evidence back to " +
+        "the user. A requested line that doesn't resolve to an addressable record (out of " +
+        "range, or a tool_result-only carrier line that isn't independently addressable — see " +
+        "the owning tool-call's own `resultLine` instead) is listed in `missingLines`, never " +
+        "silently dropped. Each record's text fields (user/assistant/thinking text, tool-call " +
+        "input+result, subagent prompt+return, ...) are capped to `maxCharsPerRecord` (default " +
+        "30000, min 200) — raise it to see more. For Claude Code sessions, a tool-call's " +
+        "`resultText` / a subagent-launch's `returnedText` is recovered from the record's raw " +
+        "source line whenever the SESSION's own parser had capped it below the tool's true " +
+        "output, so you get the genuine full text there, not a stale capture cap. " +
+        "`contentTruncated: true` plus `originalCharCount` mark a record whose content is still " +
+        "short of the truth — either because `maxCharsPerRecord` cut it, or (rare) raw-line " +
+        "recovery itself couldn't complete; a capped tool-call `input` is replaced by its " +
+        "JSON-stringified, capped text (no longer the original structured value) — re-fetch with " +
+        "a larger `maxCharsPerRecord` if you need the real object. Works for both Claude Code " +
+        'sessions and Codex CLI sessions (source: "codex"). ' +
+        "Every response includes sourceCompleteness — a machine-readable declaration of what " +
+        "the underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        lines: z
+          .array(z.number().int().min(1))
+          .min(1)
+          .max(GET_RECORDS_MAX_LINES)
+          .describe(`1-based source line numbers to fetch (max ${GET_RECORDS_MAX_LINES} per call)`),
+        maxCharsPerRecord: z
+          .number()
+          .int()
+          .min(GET_RECORDS_MIN_MAX_CHARS)
+          .optional()
+          .describe(
+            "Cap per text field, per record " +
+              `(default ${GET_RECORDS_DEFAULT_MAX_CHARS}, min ${GET_RECORDS_MIN_MAX_CHARS})`,
+          ),
+      },
+    },
+    async (args) => {
+      const resolved = await resolveAnalysis(args);
+      if ("error" in resolved) return resolved.error;
+      const maxChars = args.maxCharsPerRecord ?? GET_RECORDS_DEFAULT_MAX_CHARS;
+
+      const records: Array<{
+        line: number;
+        detail: RecordDetail;
+        contentTruncated: boolean;
+        originalCharCount?: number;
+      }> = [];
+      const missingLines: number[] = [];
+      for (const line of args.lines) {
+        const detail =
+          resolved.source === "codex"
+            ? await getCodexSessionRecordDetail(args.sessionId, line)
+            : await getSessionRecordDetail(args.sessionId, line);
+        if (detail === undefined) {
+          missingLines.push(line);
+          continue;
+        }
+        const capped = truncateRecordDetail(detail, maxChars);
+        records.push({
+          line,
+          detail: capped.detail,
+          contentTruncated: capped.contentTruncated,
+          ...(capped.originalCharCount !== undefined && {
+            originalCharCount: capped.originalCharCount,
+          }),
+        });
+      }
+
+      return jsonResult(
+        { sessionId: args.sessionId, source: resolved.source, records, missingLines },
+        [sourceKindFor(resolved.source)],
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_tool_call",
+    {
+      description:
+        "One tool call and everything associated with it, as a single evidence unit — the call " +
+        "(tool name, full input, source line) and its result (full text, error status, source " +
+        "line), resolved by `toolUseId` rather than by line number (a call and its result are " +
+        "always different JSONL lines). Line numbers are 1-based source lines in the session " +
+        "JSONL — provenance for quoting evidence. `toolUseId` comes from another tool's own " +
+        '"toolUseId" field (get_records, get_context_timeline, find_repetitions, ' +
+        "get_subagent_tree) and must belong to THIS session's own transcript (a subagent's tool " +
+        "calls aren't reachable through this lookup). When the result can't be found (e.g. the " +
+        "session was cut off mid-call), `result` is `null` and `resultMissing: true` makes that " +
+        "explicit — absence is declared, never implied. `relatedRecords` carries records the " +
+        "parser already links to this call (today: a background task's completion " +
+        "notification); an empty array means no such linkage exists in the log, not that none " +
+        "was checked — no linkage is ever invented beyond what the parser already establishes. " +
+        "Truncation is always explicit: `call.inputTruncated` / `result.textTruncated` flag a " +
+        "field actually cut to `maxCharsPerField` (default 30000, min 200) — raise it to see " +
+        "more. For Claude Code sessions specifically, `result.text` is recovered from the " +
+        "record's raw source line whenever the SESSION's own parser had capped the captured " +
+        "tool-result text below the tool's true output, so you normally get the genuine full " +
+        "text even when it exceeds the parser's own capture cap. `result.textTruncated: true` " +
+        "with no cut visible in `text.length` vs. `maxCharsPerField` means that raw-line " +
+        "recovery itself couldn't complete (rare — e.g. the source line became unreadable) and " +
+        "`text` is still the parser's capped snapshot; `result.textFullCharCount` is the true " +
+        "original count either way. Works for both Claude Code sessions and Codex CLI sessions " +
+        '(source: "codex") — Codex\'s function_call/custom_tool_call/local_shell_call pairing ' +
+        "resolves the same way; Codex records carry no `uuid` and no hook/attachment linkage, so " +
+        "`call.uuid` stays unset and `relatedRecords` is always `[]` there. Every response " +
+        "includes sourceCompleteness — a machine-readable declaration of what the underlying " +
+        "session source cannot show; treat absent/not-recorded dimensions as unknowable from " +
+        "this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        toolUseId: z
+          .string()
+          .min(1)
+          .describe(
+            'A toolUseId from another tool\'s own "toolUseId" field (get_records, ' +
+              "get_context_timeline, find_repetitions, get_subagent_tree)",
+          ),
+        maxCharsPerField: z
+          .number()
+          .int()
+          .min(GET_TOOL_CALL_MIN_MAX_CHARS)
+          .optional()
+          .describe(
+            "Cap per text field " +
+              `(default ${GET_TOOL_CALL_DEFAULT_MAX_CHARS}, min ${GET_TOOL_CALL_MIN_MAX_CHARS})`,
+          ),
+      },
+    },
+    async (args) => {
+      const resolved = await resolveAnalysis(args);
+      if ("error" in resolved) return resolved.error;
+      const maxChars = args.maxCharsPerField ?? GET_TOOL_CALL_DEFAULT_MAX_CHARS;
+
+      const detail: ToolCallDetail | undefined =
+        resolved.source === "codex"
+          ? await getCodexSessionToolCallDetail(args.sessionId, args.toolUseId)
+          : await getSessionToolCallDetail(args.sessionId, args.toolUseId);
+      if (detail === undefined) return toolCallNotFound(args.toolUseId);
+
+      const cappedInput = capInputField(detail.call.input, maxChars);
+      const cappedResult =
+        detail.result === null
+          ? undefined
+          : capTextField(detail.result.text, maxChars, detail.result.fullTextLength);
+
+      return jsonResult(
+        {
+          sessionId: args.sessionId,
+          source: resolved.source,
+          toolUseId: detail.toolUseId,
+          call: {
+            name: detail.call.name,
+            input: cappedInput.input,
+            inputTruncated: cappedInput.truncated,
+            ...(cappedInput.fullCharCount !== undefined && {
+              inputFullCharCount: cappedInput.fullCharCount,
+            }),
+            line: detail.call.line,
+            ...(detail.call.timestamp !== undefined && { timestamp: detail.call.timestamp }),
+            ...(detail.call.uuid !== undefined && { uuid: detail.call.uuid }),
+          },
+          result:
+            detail.result === null || cappedResult === undefined
+              ? null
+              : {
+                  isError: detail.result.isError,
+                  text: cappedResult.text,
+                  textTruncated: cappedResult.truncated,
+                  ...(cappedResult.fullCharCount !== undefined && {
+                    textFullCharCount: cappedResult.fullCharCount,
+                  }),
+                  line: detail.result.line,
+                  ...(detail.result.timestamp !== undefined && {
+                    timestamp: detail.result.timestamp,
+                  }),
+                },
+          resultMissing: detail.resultMissing,
+          relatedRecords: detail.relatedRecords,
+        },
+        [sourceKindFor(resolved.source)],
+      );
     },
   );
 

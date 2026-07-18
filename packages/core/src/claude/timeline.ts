@@ -14,11 +14,17 @@
  *    (checked against real `Agent`/`Task` tool inputs and subagent meta
  *    files), so `subagent-launch` entries never populate `effort`.
  *  - Tool result text is already capped at parse time
- *    (`TOOL_RESULT_TEXT_LIMIT` in parser.ts); `resultLineCount` and full
- *    result text in record detail reflect that captured slice, not
- *    necessarily the tool's true output length.
+ *    (`TOOL_RESULT_TEXT_LIMIT` in parser.ts). Timeline entries (list view)
+ *    and `SessionData.toolCalls[].result.text` itself keep reflecting that
+ *    captured slice, unchanged — but the drill-down evidence path
+ *    (`getClaudeRecordDetail`'s tool-call/subagent-launch kinds,
+ *    `getClaudeToolCallDetail`) re-reads the record's own raw source line to
+ *    recover the tool's TRUE full output whenever the cap actually cut it
+ *    (see "Full tool_result text recovery" below) — `resultLineCount` there
+ *    is counted over the recovered text, not the capped snapshot.
  */
 
+import { parseJsonlLine } from "../shared/jsonl.js";
 import { estimateCostUsd } from "../shared/pricing/pricing.js";
 import {
   type AssistantTextEntry,
@@ -36,14 +42,17 @@ import {
   type ThinkingRecordDetail,
   type TimelineEntry,
   type TimelineOptions,
+  type ToolCallDetail,
   type ToolCallEntry,
   type ToolCallRecordDetail,
+  type ToolCallRelatedRecord,
   type ToolCallStatus,
   truncate,
   truncateOneLine,
 } from "../shared/timeline.js";
 import type { TokenUsage } from "../shared/types.js";
 import { computeUsage } from "./metrics.js";
+import { extractRawToolResultText } from "./parser.js";
 import type { ApiMessage, SessionData, ToolCall } from "./session-data.js";
 import { asyncAgentLaunchToolUseIds } from "./session-data.js";
 import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
@@ -107,6 +116,66 @@ const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
 
 function isSubagentLaunchTool(name: string): boolean {
   return SUBAGENT_TOOL_NAMES.has(name);
+}
+
+// ---------------------------------------------------------------------------
+// Full tool_result text recovery — DRILL-DOWN EVIDENCE PATH ONLY
+// (getClaudeRecordDetail / getClaudeToolCallDetail, in turn get_records /
+// get_tool_call). Never used by buildClaudeTimeline or any other summary —
+// those keep showing the parser's TOOL_RESULT_TEXT_LIMIT-capped snapshot
+// unchanged, per that limit's own doc comment.
+// ---------------------------------------------------------------------------
+
+/**
+ * Read + JSON-parse exactly one 1-based line from `filePath` via `store`.
+ * Stops iterating the moment the target line is reached (or passed), so a
+ * recovery attempt near the top of a huge transcript never pays to stream
+ * the rest of it. `undefined` when the line doesn't exist or isn't valid
+ * JSON — callers treat that as "can't recover", not an error.
+ */
+async function readRawLineAt(
+  filePath: string,
+  line: number,
+  store: ClaudeSessionStore,
+): Promise<unknown | undefined> {
+  let i = 0;
+  for await (const text of store.openLines(filePath)) {
+    i += 1;
+    if (i === line) return parseJsonlLine(text);
+    if (i > line) break;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the FULL text of a `tool_result` the parser capped at parse time
+ * (`result.fullTextLength > result.text.length` — see `parser.ts`'s
+ * `TOOL_RESULT_TEXT_LIMIT`) by re-reading the record's own raw JSONL line
+ * (`result.line`, in the transcript at `filePath`) through `store` and
+ * re-extracting the block matching `toolUseId` (`extractRawToolResultText`).
+ * Never throws and never silently keeps a stale cap unflagged: on ANY
+ * recovery failure — `filePath` unset (hand-built `SessionData` with no
+ * source file), the line unreadable, or no matching block found there — this
+ * returns `result.text` UNCHANGED, still short of `result.fullTextLength`.
+ * Callers compare the returned string's length against `result.fullTextLength`
+ * themselves to know whether recovery actually happened — exactly the same
+ * signal they'd get had no cap ever existed, so no separate "did it work"
+ * flag is threaded through.
+ */
+async function resolveFullResultText(
+  result: NonNullable<ToolCall["result"]>,
+  toolUseId: string,
+  filePath: string | undefined,
+  store: ClaudeSessionStore,
+): Promise<string> {
+  if (result.fullTextLength <= result.text.length || filePath === undefined) return result.text;
+  try {
+    const raw = await readRawLineAt(filePath, result.line, store);
+    if (raw === undefined) return result.text;
+    return extractRawToolResultText(raw, toolUseId) ?? result.text;
+  } catch {
+    return result.text;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -595,9 +664,9 @@ export async function getClaudeRecordDetail(
       };
       if (isSubagentLaunchTool(call.name) || (await hasSubagentRef(call.toolUseId, opts, store))) {
         const ref = await findSubagentRef(call.toolUseId, opts, store);
-        return buildSubagentDetail(call, ref, opts, store);
+        return buildSubagentDetail(call, ref, opts, store, data.filePath);
       }
-      return buildToolCallDetail(call);
+      return buildToolCallDetail(call, data.filePath, store);
     }
     const text = record.blocks.find((b): b is ContentBlockText => b.kind === "text");
     if (text !== undefined) return buildAssistantTextDetail(record, text, data);
@@ -710,9 +779,25 @@ function buildThinkingDetail(
   };
 }
 
-function buildToolCallDetail(call: ToolCall): ToolCallRecordDetail {
+/**
+ * `filePath`/`store` enable the drill-down recovery path
+ * (`resolveFullResultText`) when `call.result` was capped by the parser's
+ * `TOOL_RESULT_TEXT_LIMIT` — `resultTextFullCharCount` stays set on the
+ * returned detail only when recovery DIDN'T fully close the gap (unset once
+ * `resultText` is genuinely complete), mirroring `ToolCallDetailResult
+ * .fullTextLength`'s "present only when still short of the truth" contract.
+ */
+async function buildToolCallDetail(
+  call: ToolCall,
+  filePath: string | undefined,
+  store: ClaudeSessionStore,
+): Promise<ToolCallRecordDetail> {
   const status = toolCallStatus(call);
   const durationMs = durationBetween(call.timestamp, call.result?.timestamp);
+  const resultText =
+    call.result === undefined
+      ? undefined
+      : await resolveFullResultText(call.result, call.toolUseId, filePath, store);
   return {
     kind: "tool-call",
     toolUseId: call.toolUseId,
@@ -721,12 +806,16 @@ function buildToolCallDetail(call: ToolCall): ToolCallRecordDetail {
     status,
     line: call.line,
     ...(call.timestamp !== undefined && { timestamp: call.timestamp }),
-    ...(call.result !== undefined && {
-      resultText: call.result.text,
-      resultLineCount: countLines(call.result.text),
-      resultLine: call.result.line,
-      ...(call.result.timestamp !== undefined && { resultTimestamp: call.result.timestamp }),
-    }),
+    ...(call.result !== undefined &&
+      resultText !== undefined && {
+        resultText,
+        resultLineCount: countLines(resultText),
+        resultLine: call.result.line,
+        ...(call.result.timestamp !== undefined && { resultTimestamp: call.result.timestamp }),
+        ...(call.result.fullTextLength > resultText.length && {
+          resultTextFullCharCount: call.result.fullTextLength,
+        }),
+      }),
     ...(durationMs !== undefined && { durationMs }),
   };
 }
@@ -749,17 +838,30 @@ async function hasSubagentRef(
   return (await findSubagentRef(toolUseId, opts, store)) !== undefined;
 }
 
+/**
+ * `filePath`/`store` enable the same drill-down recovery `buildToolCallDetail`
+ * applies to `resultText` — a subagent launch's `returnedText` is the parent-
+ * side `tool_result` of the SAME Agent/Task call, subject to the identical
+ * parser cap. `returnedTextFullCharCount` stays set only when recovery
+ * didn't fully close the gap, same "still short of the truth" contract as
+ * `resultTextFullCharCount`.
+ */
 async function buildSubagentDetail(
   call: ToolCall,
   ref: SubagentRef | undefined,
   opts: TimelineOptions,
   store: ClaudeSessionStore,
+  filePath: string | undefined,
 ): Promise<SubagentLaunchRecordDetail> {
   const input = asRecord(call.input);
   const agentType = ref?.meta.agentType ?? strField(input, "subagent_type");
   const name = ref?.meta.description ?? strField(input, "description");
   const inputModel = strField(input, "model");
   const prompt = strField(input, "prompt");
+  const returnedText =
+    call.result === undefined
+      ? undefined
+      : await resolveFullResultText(call.result, call.toolUseId, filePath, store);
 
   const detail: SubagentLaunchRecordDetail = {
     kind: "subagent-launch",
@@ -771,11 +873,15 @@ async function buildSubagentDetail(
     ...(name !== undefined && { name }),
     ...(inputModel !== undefined && { model: inputModel }),
     ...(prompt !== undefined && { prompt }),
-    ...(call.result !== undefined && {
-      returnedText: call.result.text,
-      resultLine: call.result.line,
-      ...(call.result.timestamp !== undefined && { resultTimestamp: call.result.timestamp }),
-    }),
+    ...(call.result !== undefined &&
+      returnedText !== undefined && {
+        returnedText,
+        resultLine: call.result.line,
+        ...(call.result.timestamp !== undefined && { resultTimestamp: call.result.timestamp }),
+        ...(call.result.fullTextLength > returnedText.length && {
+          returnedTextFullCharCount: call.result.fullTextLength,
+        }),
+      }),
   };
 
   if (ref !== undefined && opts.mainFilePath !== undefined) {
@@ -817,5 +923,93 @@ function buildTaskNotificationDetail(
     ...(notification.exitCode !== undefined && { exitCode: notification.exitCode }),
     ...(durationMs !== undefined && { durationMs }),
     ...(startLine !== undefined && { startLine }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// getClaudeToolCallDetail
+// ---------------------------------------------------------------------------
+
+/**
+ * One tool call and everything associated with it, as a single evidence
+ * unit — the call (full input, source line), its result (full text, source
+ * line, error status) when resolved, and any records the parser already
+ * links to it (today: a background launch's completion notification via
+ * `toolUseId` -> `taskId`). Distinct from `getClaudeRecordDetail`: that
+ * resolves ONE source line; this resolves one `toolUseId` regardless of
+ * which (different) lines the call and its result live on.
+ *
+ * `undefined` when no tool call with this `toolUseId` exists in `data` —
+ * callers can't distinguish "unknown id" from "wrong session" here, same as
+ * `getClaudeRecordDetail`'s `undefined` for an unaddressable line; the MCP
+ * layer resolves the session separately before calling this.
+ *
+ * `store` (defaults to the local filesystem) enables the same drill-down
+ * recovery `getClaudeRecordDetail` applies — when the result's captured text
+ * was capped by the parser's `TOOL_RESULT_TEXT_LIMIT`, this re-reads `data
+ * .filePath`'s raw source line to recover the true text (see
+ * `resolveFullResultText`) before applying the caller's own cap.
+ * `result.fullTextLength` stays set on the response only when recovery
+ * didn't fully close the gap (unset once `result.text` is genuinely
+ * complete) — same "still short of the truth" contract it always had.
+ */
+export async function getClaudeToolCallDetail(
+  data: SessionData,
+  toolUseId: string,
+  store: ClaudeSessionStore = localClaudeSessionStore,
+): Promise<ToolCallDetail | undefined> {
+  const call = data.toolCalls.find((c) => c.toolUseId === toolUseId);
+  if (call === undefined) return undefined;
+
+  // The assistant record that carried this tool_use block — its `uuid` is
+  // useful cross-reference context, already in `data.records` at zero extra
+  // read/parse cost.
+  const containingRecord = data.records.find(
+    (r): r is AssistantRecord => r.type === "assistant" && "blocks" in r && r.line === call.line,
+  );
+
+  const launch = data.backgroundLaunches.find((l) => l.toolUseId === toolUseId);
+  const relatedRecords: ToolCallRelatedRecord[] =
+    launch === undefined
+      ? []
+      : data.taskNotifications
+          .filter((n) => n.taskId === launch.taskId)
+          .map((n) => ({
+            kind: "task-notification" as const,
+            taskId: n.taskId,
+            line: n.line,
+            ...(n.timestamp !== undefined && { timestamp: n.timestamp }),
+            ...(n.status !== undefined && { status: n.status }),
+            ...(n.exitCode !== undefined && { exitCode: n.exitCode }),
+          }));
+
+  const resultText =
+    call.result === undefined
+      ? undefined
+      : await resolveFullResultText(call.result, toolUseId, data.filePath, store);
+
+  return {
+    toolUseId,
+    call: {
+      name: call.name,
+      input: call.input,
+      line: call.line,
+      ...(call.timestamp !== undefined && { timestamp: call.timestamp }),
+      ...(containingRecord?.uuid !== undefined && { uuid: containingRecord.uuid }),
+    },
+    result:
+      call.result === undefined || resultText === undefined
+        ? null
+        : {
+            isError: call.result.isError,
+            text: resultText,
+            ...(call.result.fullTextLength > resultText.length && {
+              fullTextLength: call.result.fullTextLength,
+            }),
+            line: call.result.line,
+            ...(call.result.timestamp !== undefined && { timestamp: call.result.timestamp }),
+          },
+    resultMissing: call.result === undefined,
+    relatedRecords,
   };
 }
