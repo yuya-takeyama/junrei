@@ -48,6 +48,12 @@ import {
   listSessions,
   MAX_LIST_LIMIT,
 } from "./sessions.js";
+import {
+  capturedByteSizes,
+  createFilesystemCaptureStore,
+  extractResponseMeta,
+  findCapturedRequest,
+} from "./sources/captures.js";
 import { claudeStoreForFilePath } from "./sources/claude.js";
 import { readOtelLines, resolveOtelDir } from "./sources/otel.js";
 import {
@@ -183,6 +189,36 @@ function notAvailableForObservability() {
           "Claude-Code-specific capability (Claude Code's own OTEL_LOGS_EXPORTER/" +
           "OTEL_METRICS_EXPORTER telemetry, ingested by junrei's OTLP receiver); Codex CLI has " +
           "no equivalent export in Junrei today.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * The wire-capture tools (`get_actual_request`/`get_hidden_calls`) draw on the
+ * session log AND its opt-in wire capture, so they declare both — the log for
+ * the `requestId` join, the capture for the actual bytes/latency.
+ */
+const CAPTURE_KINDS: SourceKind[] = ["claude-session-jsonl", "claude-wire-capture"];
+
+/**
+ * `get_actual_request`/`get_hidden_calls` are Claude-Code-only: the wire
+ * capture proxy captures Anthropic API traffic keyed by
+ * `x-claude-code-session-id` — a Claude Code concept with no Codex analog.
+ * Distinct from "captures unavailable" (a DECLARED non-error, `captureAvailable:
+ * false`): a Codex session can NEVER have Claude wire captures, so it's a clear
+ * up-front rejection like `notAvailableForReconstruction`.
+ */
+function notAvailableForCaptures() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "not available for Codex sessions (source: codex) — wire capture is a " +
+          "Claude-Code-specific capability (the local pass-through proxy captures Anthropic API " +
+          "traffic keyed by x-claude-code-session-id); Codex CLI has no equivalent in Junrei today.",
       },
     ],
     isError: true,
@@ -483,6 +519,9 @@ function toolCallNotFound(toolUseId: string) {
 
 const GET_RECONSTRUCTED_REQUEST_DEFAULT_MAX_CHARS = 20000;
 const GET_RECONSTRUCTED_REQUEST_MIN_MAX_CHARS = 200;
+
+const GET_ACTUAL_REQUEST_DEFAULT_MAX_CHARS = 30000;
+const GET_ACTUAL_REQUEST_MIN_MAX_CHARS = 200;
 
 function cappedSystemBlock(block: ReconstructedSystemBlock, maxChars: number) {
   const capped = block.text !== undefined ? capTextField(block.text, maxChars) : undefined;
@@ -1735,6 +1774,205 @@ export function createMcpServer(): McpServer {
       const toolCalls = items.slice(off, off + lim);
 
       return jsonResult({ sessionId, totalCount, toolCalls }, ["claude-session-jsonl"]);
+    },
+  );
+
+  server.registerTool(
+    "get_actual_request",
+    {
+      description:
+        "The ACTUAL captured Anthropic /v1/messages wire exchange for one request — GROUND TRUTH " +
+        "from the opt-in local wire-capture proxy (`@junrei/capture-proxy`; see README 'Wire " +
+        "capture'), not a reconstruction. JOIN KEY: `requestId` is the SAME id the session log " +
+        "records as its own `requestId` on the assistant records of a turn (the discovery " +
+        "listing of get_reconstructed_request, and other tools' `requestId` fields, surface it) " +
+        "— the capture proxy reads it from the response `request-id` header, so the two line up " +
+        "with zero heuristics. Returns the captured REQUEST BODY (capped to `maxCharsPerField`, " +
+        "default 30000, min 200, with an explicit `request.bodyTruncated` flag plus " +
+        "`request.bodyFullCharCount` when cut — never silently shortened), the RESPONSE META " +
+        "parsed from the captured stream (`response.status`, `response.model`, `response.usage` " +
+        "when present — for an SSE response these come from the reassembled message), the " +
+        "MEASURED `latencyMs` (wall-clock at the proxy, authoritative — the session log records " +
+        "no latency at all), `isSubagent` (from the `cc_is_subagent=true` marker Claude Code " +
+        "stamps on subagent requests), and request/response byte sizes. Auth headers " +
+        "(authorization, x-api-key, cookies, *token*/*secret*) were REDACTED at write time and " +
+        "are never present. Declared non-errors (never a crash): with no captures directory or " +
+        "no capture file for this session, `captureAvailable: false` with a note (wire capture is " +
+        "opt-in — nothing is recorded unless the user ran the proxy); with captures present but " +
+        "this exact `requestId` absent, `captureAvailable: true` + `requestNotCaptured: true`. " +
+        "Claude Code sessions only (source: codex is rejected — capture is Claude-specific). " +
+        "Every response includes sourceCompleteness — a machine-readable declaration of what the " +
+        "underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        requestId: z
+          .string()
+          .min(1)
+          .describe(
+            "The request's id — the SAME value the session log records as `requestId` (from " +
+              "get_reconstructed_request's discovery listing or another tool's `requestId` field)",
+          ),
+        maxCharsPerField: z
+          .number()
+          .int()
+          .min(GET_ACTUAL_REQUEST_MIN_MAX_CHARS)
+          .optional()
+          .describe(
+            "Cap for the captured request body " +
+              `(default ${GET_ACTUAL_REQUEST_DEFAULT_MAX_CHARS}, min ${GET_ACTUAL_REQUEST_MIN_MAX_CHARS})`,
+          ),
+      },
+    },
+    async (args) => {
+      if (args.source === "codex") return notAvailableForCaptures();
+      const maxChars = args.maxCharsPerField ?? GET_ACTUAL_REQUEST_DEFAULT_MAX_CHARS;
+      const store = createFilesystemCaptureStore();
+      const lookup = await store.readSessionCaptures(args.sessionId);
+      if (!lookup.available) {
+        return jsonResult(
+          {
+            sessionId: args.sessionId,
+            source: "claude-code" as const,
+            captureAvailable: false,
+            note:
+              lookup.reason === "captures-dir-missing"
+                ? "no captures directory — wire capture is opt-in; start junrei-capture-proxy and " +
+                  "route Claude Code through it (README 'Wire capture')."
+                : "this session was not captured — no capture file exists for it (the proxy was " +
+                  "not active for this session).",
+          },
+          CAPTURE_KINDS,
+        );
+      }
+      const record = findCapturedRequest(lookup.records, args.requestId);
+      if (record === undefined) {
+        return jsonResult(
+          {
+            sessionId: args.sessionId,
+            source: "claude-code" as const,
+            captureAvailable: true,
+            requestNotCaptured: true,
+            requestId: args.requestId,
+            note:
+              "no captured request with this requestId in this session's capture file — it may " +
+              "predate capture, or the id belongs to a different session.",
+          },
+          CAPTURE_KINDS,
+        );
+      }
+      const cappedBody = capInputField(record.requestBody, maxChars);
+      const meta = extractResponseMeta(record);
+      const sizes = capturedByteSizes(record);
+      return jsonResult(
+        {
+          sessionId: args.sessionId,
+          source: "claude-code" as const,
+          captureAvailable: true,
+          requestId: args.requestId,
+          ...(record.method !== undefined && { method: record.method }),
+          ...(record.path !== undefined && { path: record.path }),
+          isSubagent: record.isSubagent ?? false,
+          ...(record.latencyMs !== undefined && { latencyMs: record.latencyMs }),
+          request: {
+            body: cappedBody.input,
+            bodyTruncated: cappedBody.truncated,
+            ...(cappedBody.fullCharCount !== undefined && {
+              bodyFullCharCount: cappedBody.fullCharCount,
+            }),
+            requestBytes: sizes.requestBytes,
+          },
+          response: {
+            ...(meta.status !== undefined && { status: meta.status }),
+            ...(meta.model !== undefined && { model: meta.model }),
+            ...(meta.usage !== undefined && { usage: meta.usage }),
+            responseBytes: sizes.responseBytes,
+          },
+        },
+        CAPTURE_KINDS,
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_hidden_calls",
+    {
+      description:
+        "The captured API requests for a session whose `requestId` DOES NOT appear anywhere in " +
+        "that session's own log (main transcript + subagent sidecars) — the STRUCTURAL evidence " +
+        "that session-log cost/latency accounting undercounts. These are real Anthropic calls the " +
+        "harness made (e.g. a background task-state classifier) that the session log has no " +
+        "channel to record, so summarizing tools built on the log alone cannot see them; the " +
+        "join is exact — a captured response `request-id` matched against every `requestId` the " +
+        "log records. Requires the opt-in wire capture (README 'Wire capture'); per hidden call " +
+        "it reports `requestId`, `path`, `model`, a `usage` summary, MEASURED `latencyMs`, " +
+        "request/response byte sizes, and `isSubagent`, plus `counts` " +
+        "(captured total, captured-with-requestId, logged requestId count, hidden count). The " +
+        "actual request/response CONTENT stays behind get_actual_request — call it with a hidden " +
+        "call's `requestId` to fetch the captured body (this tool intentionally returns only the " +
+        "metadata needed to decide which hidden call to open). Declared non-errors (never a " +
+        "crash): with no captures directory or no capture file for this session, " +
+        "`captureAvailable: false` with a note. Claude Code sessions only (source: codex is " +
+        "rejected — capture is Claude-specific). Every response includes sourceCompleteness — a " +
+        "machine-readable declaration of what the underlying session source cannot show; treat " +
+        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
+      inputSchema: sessionRef,
+    },
+    async (args) => {
+      if (args.source === "codex") return notAvailableForCaptures();
+      const store = createFilesystemCaptureStore();
+      const lookup = await store.readSessionCaptures(args.sessionId);
+      if (!lookup.available) {
+        return jsonResult(
+          {
+            sessionId: args.sessionId,
+            source: "claude-code" as const,
+            captureAvailable: false,
+            note:
+              lookup.reason === "captures-dir-missing"
+                ? "no captures directory — wire capture is opt-in; start junrei-capture-proxy and " +
+                  "route Claude Code through it (README 'Wire capture')."
+                : "this session was not captured — no capture file exists for it (the proxy was " +
+                  "not active for this session).",
+          },
+          CAPTURE_KINDS,
+        );
+      }
+      const logged = await store.collectLoggedRequestIds(args.sessionId);
+      if (logged === undefined) return notFound(args.sessionId);
+
+      const withRequestId = lookup.records.filter((record) => typeof record.requestId === "string");
+      const hidden = withRequestId.filter((record) => !logged.has(record.requestId as string));
+      const hiddenCalls = hidden.map((record) => {
+        const meta = extractResponseMeta(record);
+        const sizes = capturedByteSizes(record);
+        return {
+          requestId: record.requestId,
+          ...(record.path !== undefined && { path: record.path }),
+          ...(meta.model !== undefined && { model: meta.model }),
+          ...(meta.usage !== undefined && { usage: meta.usage }),
+          ...(record.latencyMs !== undefined && { latencyMs: record.latencyMs }),
+          requestBytes: sizes.requestBytes,
+          responseBytes: sizes.responseBytes,
+          isSubagent: record.isSubagent ?? false,
+        };
+      });
+
+      return jsonResult(
+        {
+          sessionId: args.sessionId,
+          source: "claude-code" as const,
+          captureAvailable: true,
+          hiddenCalls,
+          counts: {
+            capturedRequestCount: lookup.records.length,
+            capturedWithRequestId: withRequestId.length,
+            loggedRequestIdCount: logged.size,
+            hiddenCallCount: hiddenCalls.length,
+          },
+        },
+        CAPTURE_KINDS,
+      );
     },
   );
 

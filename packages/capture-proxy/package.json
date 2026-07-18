@@ -1,10 +1,13 @@
 {
-  "name": "@junrei/server",
+  "name": "@junrei/capture-proxy",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/app.ts"
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "junrei-capture-proxy": "./src/main.ts"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
@@ -12,16 +15,6 @@
     "build": "true",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.1086.0",
-    "@hono/mcp": "^0.3.0",
-    "@hono/node-server": "^1.19.7",
-    "@junrei/capture-proxy": "workspace:*",
-    "@junrei/core": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "hono": "^4.11.9",
-    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
