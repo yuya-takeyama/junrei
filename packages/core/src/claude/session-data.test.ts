@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TokenUsage } from "../shared/types.js";
-import { buildSessionData } from "./session-data.js";
-import type { AssistantRecord, ClaudeTranscript } from "./types.js";
+import { buildSessionData, transcriptEndsAtRest } from "./session-data.js";
+import type { AssistantRecord, ClaudeTranscript, UserRecord } from "./types.js";
 
 function assistantRecord(
   line: number,
@@ -67,5 +67,55 @@ describe("buildSessionData usage dedup", () => {
     );
     expect(data.apiMessages[0]?.usage).toEqual(usage(42));
     expect(data.apiMessages[0]?.line).toBe(1);
+  });
+});
+
+describe("transcriptEndsAtRest", () => {
+  const userPrompt = (line: number): UserRecord => ({
+    type: "user",
+    line,
+    promptText: "do the thing",
+    toolResults: [],
+  });
+  const finalAssistant = (line: number, stopReason?: string): AssistantRecord => ({
+    ...assistantRecord(line, `msg_${String(line)}`, usage(10)),
+    ...(stopReason !== undefined && { stopReason }),
+  });
+
+  it("is true when the last message record is an assistant end_turn", () => {
+    const records = [userPrompt(1), finalAssistant(2, "end_turn")];
+    expect(transcriptEndsAtRest({ records })).toBe(true);
+  });
+
+  it("is false without a captured stop_reason (old-version-style records)", () => {
+    const records = [userPrompt(1), finalAssistant(2)];
+    expect(transcriptEndsAtRest({ records })).toBe(false);
+  });
+
+  it("is false for non-end_turn stop reasons (tool_use mid-flight, synthetic stop_sequence)", () => {
+    expect(transcriptEndsAtRest({ records: [userPrompt(1), finalAssistant(2, "tool_use")] })).toBe(
+      false,
+    );
+    expect(
+      transcriptEndsAtRest({ records: [userPrompt(1), finalAssistant(2, "stop_sequence")] }),
+    ).toBe(false);
+  });
+
+  it("is false again when a user record follows the final answer (agent resumed)", () => {
+    const records = [userPrompt(1), finalAssistant(2, "end_turn"), userPrompt(3)];
+    expect(transcriptEndsAtRest({ records })).toBe(false);
+  });
+
+  it("ignores trailing non-message records (queue-operation, permission-mode, ...)", () => {
+    const records = [
+      userPrompt(1),
+      finalAssistant(2, "end_turn"),
+      { line: 3, type: "permission-mode" },
+    ];
+    expect(transcriptEndsAtRest({ records })).toBe(true);
+  });
+
+  it("is false for an empty transcript", () => {
+    expect(transcriptEndsAtRest({ records: [] })).toBe(false);
   });
 });

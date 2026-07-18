@@ -98,6 +98,13 @@ export interface AssistantRecord extends RecordBase {
   messageId?: string;
   model?: string;
   usage?: TokenUsage;
+  /**
+   * `message.stop_reason` as of this record — records of one API message are
+   * streaming snapshots, so intermediate ones carry null/undefined and only
+   * the final record of a finished turn carries a real value ("end_turn",
+   * "tool_use", ...; harness-synthetic records use "stop_sequence").
+   */
+  stopReason?: string;
   blocks: AssistantContentBlock[];
 }
 

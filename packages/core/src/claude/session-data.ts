@@ -154,6 +154,34 @@ export function agentLaunchToolUseIds(data: Pick<SessionData, "records">): Map<s
   return byAgentId;
 }
 
+/**
+ * Whether a transcript ends "at rest": its last user/assistant record is an
+ * assistant record whose `stopReason` is `"end_turn"` — the state an agent is
+ * in when it has produced a final answer and has nothing pending. For an
+ * async subagent's own sidecar this is completion EVIDENCE (the exact state
+ * the harness fires the completion notification from, and the one it
+ * describes as "had no active task" when the agent is later messaged) — a
+ * still-running agent's transcript instead ends mid-flight (a tool_use
+ * awaiting its result, a user record awaiting a response, or a streaming
+ * snapshot with no stop_reason yet). Structural, NOT timing: file mtime and
+ * record timestamps play no part. Harness-synthetic assistant records can't
+ * fake this — they carry `stop_reason: "stop_sequence"`, never "end_turn".
+ * Non-message records (queue-operation, attachments, permission-mode, ...)
+ * are ignored: trailing bookkeeping after the final answer doesn't un-rest a
+ * transcript.
+ */
+export function transcriptEndsAtRest(data: Pick<SessionData, "records">): boolean {
+  let atRest = false;
+  for (const record of data.records) {
+    if (record.type === "assistant" && "blocks" in record) {
+      atRest = record.stopReason === "end_turn";
+    } else if (record.type === "user" && "toolResults" in record) {
+      atRest = false;
+    }
+  }
+  return atRest;
+}
+
 export function buildSessionData(transcript: ClaudeTranscript): SessionData {
   const apiMessagesById = new Map<string, ApiMessage>();
   const toolCalls: ToolCall[] = [];
