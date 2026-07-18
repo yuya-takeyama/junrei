@@ -11,6 +11,7 @@ import {
   CODEX_LENSES,
   CODEX_SESSION_ROUTE_PATH,
   isLegacyClaudeProjectScopedUrl,
+  LENSES_BY_SOURCE,
   legacyClaudeSessionRedirectTarget,
   normalizeLens,
   parseListPage,
@@ -23,7 +24,7 @@ import {
 } from "./router.js";
 
 describe("CODEX_LENSES", () => {
-  it("offers overview/timeline/orchestration/context/files, in that order — identical to CLAUDE_LENSES now that the Codex-only 'turns' tab folded into Timeline", () => {
+  it("offers overview/timeline/orchestration/context/files, in that order", () => {
     expect(CODEX_LENSES).toEqual(["overview", "timeline", "orchestration", "context", "files"]);
   });
 
@@ -32,11 +33,34 @@ describe("CODEX_LENSES", () => {
     expect(CODEX_LENSES).toContain("orchestration");
     expect(CODEX_LENSES).toContain("files");
   });
+
+  it("does NOT include 'bash' — no Codex shell-call source feeds bashStats yet (see Lens's doc comment)", () => {
+    expect(CODEX_LENSES).not.toContain("bash");
+  });
 });
 
 describe("CLAUDE_LENSES", () => {
-  it("is unchanged by the Codex timeline addition", () => {
-    expect(CLAUDE_LENSES).toEqual(["overview", "timeline", "orchestration", "context", "files"]);
+  it("is the pre-Bash-lens lineup plus 'bash' at the end", () => {
+    expect(CLAUDE_LENSES).toEqual([
+      "overview",
+      "timeline",
+      "orchestration",
+      "context",
+      "files",
+      "bash",
+    ]);
+  });
+
+  it("is the only lens lineup that includes 'bash' (Claude-only, see Lens's doc comment)", () => {
+    expect(CLAUDE_LENSES).toContain("bash");
+    expect(CODEX_LENSES).not.toContain("bash");
+  });
+});
+
+describe("LENSES_BY_SOURCE", () => {
+  it("gives Claude sessions the 'bash' tab and Codex sessions the 'not available' fallback — SessionShell/AgentShell gate each tab's content on `lensTabs.includes(lens)`, so this lookup is the actual source of truth for whether the Bash lens tab appears/works for a given session", () => {
+    expect(LENSES_BY_SOURCE["claude-code"]).toContain("bash");
+    expect(LENSES_BY_SOURCE.codex).not.toContain("bash");
   });
 });
 
@@ -276,9 +300,20 @@ describe("legacyClaudeSessionRedirectTarget", () => {
 
 describe("normalizeLens", () => {
   it("passes through known lenses", () => {
-    for (const lens of ["overview", "timeline", "orchestration", "context", "files"] as const) {
+    for (const lens of [
+      "overview",
+      "timeline",
+      "orchestration",
+      "context",
+      "files",
+      "bash",
+    ] as const) {
       expect(normalizeLens(lens)).toBe(lens);
     }
+  });
+
+  it("passes through 'bash' regardless of source — per-source availability is SessionShell/AgentShell's job (lensAvailable), not normalizeLens's", () => {
+    expect(normalizeLens("bash")).toBe("bash");
   });
 
   it("redirects the removed 'turns' lens to 'timeline' — old Codex Turns-tab bookmarks must not 404 or fall to a broken state", () => {
