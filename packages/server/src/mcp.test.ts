@@ -669,6 +669,62 @@ describe("MCP tools", () => {
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain("Session not found");
     });
+
+    it("with agentId, resolves lines inside the subagent's own sidecar transcript (not the main one)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          lines: [1, 999],
+          agentId: "aaaa111122223333f",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        agentId?: string;
+        records: Array<{ line: number; detail: Record<string, unknown> }>;
+        missingLines: number[];
+      };
+      expect(body.agentId).toBe("aaaa111122223333f");
+      // Sidecar line 1 is the subagent's OWN opening user turn ("explore
+      // stuff") — proof this resolved inside the subagent transcript, not
+      // the main one (whose line 1 is unrelated main-session content).
+      const line1 = body.records.find((r) => r.line === 1);
+      expect(line1?.detail).toMatchObject({ kind: "user", text: "explore stuff" });
+      expect(body.missingLines).toEqual([999]);
+    });
+
+    it("errors clearly for an unknown agentId", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          lines: [1],
+          agentId: "does-not-exist",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Subagent not found");
+    });
+
+    it("rejects agentId for a Codex session", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_records",
+        arguments: {
+          source: "codex",
+          sessionId: CODEX_SESSION_ID,
+          lines: [1],
+          agentId: "does-not-matter",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("own session");
+    });
   });
 
   describe("get_tool_call", () => {
@@ -808,6 +864,89 @@ describe("MCP tools", () => {
       });
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain("Session not found");
+    });
+
+    it("with agentId, resolves a tool call that only exists in the subagent's own sidecar transcript", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_sa_read1",
+          agentId: "aaaa111122223333f",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        agentId?: string;
+        call: { name: string; line: number };
+        result: { text: string; line: number } | null;
+      };
+      expect(body.agentId).toBe("aaaa111122223333f");
+      expect(body.call.name).toBe("Read");
+      expect(body.call.line).toBeGreaterThanOrEqual(1);
+      expect(body.result?.text).toBeTruthy();
+      expect(body.result?.line).toBeGreaterThanOrEqual(1);
+    });
+
+    it("without agentId, a subagent-only toolUseId is not found in the main transcript (default scope preserved)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_sa_read1",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("toolUseId not found");
+    });
+
+    it("errors clearly for an unknown agentId", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_sa_read1",
+          agentId: "does-not-exist",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Subagent not found");
+    });
+
+    it("with a valid agentId, a toolUseId that only exists in the MAIN transcript is not found, and the error names the agentId", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          toolUseId: "toolu_read1", // main-transcript-only, see the main-hit test above
+          agentId: "aaaa111122223333f",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("aaaa111122223333f");
+    });
+
+    it("rejects agentId for a Codex session, since a Codex sub-agent is its own full session", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_call",
+        arguments: {
+          source: "codex",
+          sessionId: CODEX_SESSION_ID,
+          toolUseId: "call-3",
+          agentId: "does-not-matter",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("own session");
     });
   });
 

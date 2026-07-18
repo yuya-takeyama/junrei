@@ -544,18 +544,82 @@ function capInputField(
 /**
  * `get_tool_call`'s not-found message — mirrors `notFound`'s "how to
  * discover a valid one" pattern, pointed at the tools that surface a
- * `toolUseId`.
+ * `toolUseId`. `agentId`, when the caller supplied one (already confirmed to
+ * exist by `claudeSubagentExists`), narrows the message to that subagent's
+ * OWN transcript — the default (no `agentId`) still means the main
+ * transcript, and a subagent's calls ARE reachable here via the `agentId`
+ * input, so this no longer disclaims them.
  */
-function toolCallNotFound(toolUseId: string) {
+function toolCallNotFound(toolUseId: string, agentId?: string) {
   return {
     content: [
       {
         type: "text" as const,
         text:
-          `toolUseId not found in this session: ${toolUseId}. toolUseId comes from another ` +
-          'tool\'s own "toolUseId" field (get_records, get_context_timeline, find_repetitions, ' +
-          "get_subagent_tree) and must belong to THIS session's own transcript (source/sessionId) " +
-          "— a subagent's tool calls aren't reachable through this lookup.",
+          agentId === undefined
+            ? `toolUseId not found in this session: ${toolUseId}. toolUseId comes from another ` +
+              'tool\'s own "toolUseId" field (get_records, get_context_timeline, find_repetitions, ' +
+              "get_subagent_tree) and must belong to THIS session's own (main) transcript, or to " +
+              "a subagent's transcript — pass that subagent's agentId to scope the lookup there."
+            : `toolUseId not found in subagent ${agentId}'s transcript: ${toolUseId}. toolUseId ` +
+              'comes from another tool\'s own "toolUseId" field (get_records, get_context_timeline, ' +
+              "find_repetitions, get_subagent_tree) and must belong to that SAME thread's " +
+              "transcript — omit agentId to look in the main transcript instead.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * Does `agentId` name a real subagent of this Claude Code session? Exists so
+ * "unknown agentId" and "line/toolUseId not present in that (real) subagent's
+ * transcript" surface as distinct errors — both `getSessionRecordDetail` and
+ * `getSessionToolCallDetail` return `undefined` for either case (see their
+ * doc comments in `sources/claude.ts`), so the MCP layer has to check
+ * existence separately before it can tell the two apart. Same subagent
+ * discovery `collectToolCallThreads`/`get_subagent_tree` use — session's main
+ * `SessionData` (for its `filePath`) → the store that owns that file (local
+ * or S3) → that file's sidecar refs.
+ */
+async function claudeSubagentExists(sessionId: string, agentId: string): Promise<boolean> {
+  const mainData = await getSessionData(sessionId);
+  if (mainData === undefined || mainData.filePath === undefined) return false;
+  const store = claudeStoreForFilePath(mainData.filePath);
+  const refs = await listSubagentRefs(mainData.filePath, store);
+  return refs.some((ref) => ref.agentId === agentId);
+}
+
+/** `agentId` that doesn't name any subagent of the given session. */
+function subagentNotFound(agentId: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `Subagent not found in this session: ${agentId}. agentId comes from get_subagent_tree, ` +
+          'or the "thread" field of get_tool_calls/get_bash_stats.',
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * `agentId` supplied for a Codex session — Codex has no in-transcript
+ * subagent scoping because a Codex sub-agent is its own full session (own
+ * sessionId), unlike a Claude Code subagent (a sidecar transcript inside the
+ * SAME session file). See `get_subagent_tree`'s Codex behavior for the same
+ * distinction.
+ */
+function codexAgentIdUnsupported() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "agentId is not supported for Codex sessions: a Codex sub-agent is its own full " +
+          "session — call this tool with the sub-agent's own sessionId (see get_subagent_tree).",
       },
     ],
     isError: true,
@@ -1448,6 +1512,12 @@ export function createMcpServer(): McpServer {
         "JSON-stringified, capped text (no longer the original structured value) — re-fetch with " +
         "a larger `maxCharsPerRecord` if you need the real object. Works for both Claude Code " +
         'sessions and Codex CLI sessions (source: "codex"). ' +
+        "Default scope is THIS session's main transcript; for a Claude Code session, the " +
+        "optional `agentId` scopes the lookup to that subagent's own sidecar transcript instead " +
+        "— `lines`/`missingLines` are then 1-based lines in THAT subagent's own JSONL (the same " +
+        "thread-local line numbers get_tool_calls/get_bash_stats report), not the main " +
+        "transcript's. agentId is Claude Code only — a Codex sub-agent is its own full session, " +
+        "so pass that sub-agent's own sessionId instead of an agentId. " +
         "Every response includes sourceCompleteness — a machine-readable declaration of what " +
         "the underlying session source cannot show; treat absent/not-recorded dimensions as " +
         "unknowable from this data, not as evidence of absence.",
@@ -1467,11 +1537,27 @@ export function createMcpServer(): McpServer {
             "Cap per text field, per record " +
               `(default ${GET_RECORDS_DEFAULT_MAX_CHARS}, min ${GET_RECORDS_MIN_MAX_CHARS})`,
           ),
+        agentId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Claude Code sessions only: resolve inside this subagent's own transcript instead of " +
+              "the main transcript. agentId comes from get_subagent_tree or the `thread` field of " +
+              "get_tool_calls/get_bash_stats. A Codex sub-agent is its own full session — call this " +
+              "tool with that session's own sessionId instead.",
+          ),
       },
     },
     async (args) => {
       const resolved = await resolveAnalysis(args);
       if ("error" in resolved) return resolved.error;
+      if (args.agentId !== undefined) {
+        if (resolved.source === "codex") return codexAgentIdUnsupported();
+        if (!(await claudeSubagentExists(args.sessionId, args.agentId))) {
+          return subagentNotFound(args.agentId);
+        }
+      }
       const maxChars = args.maxCharsPerRecord ?? GET_RECORDS_DEFAULT_MAX_CHARS;
 
       const records: Array<{
@@ -1485,7 +1571,7 @@ export function createMcpServer(): McpServer {
         const detail =
           resolved.source === "codex"
             ? await getCodexSessionRecordDetail(args.sessionId, line)
-            : await getSessionRecordDetail(args.sessionId, line);
+            : await getSessionRecordDetail(args.sessionId, line, args.agentId);
         if (detail === undefined) {
           missingLines.push(line);
           continue;
@@ -1502,7 +1588,13 @@ export function createMcpServer(): McpServer {
       }
 
       return jsonResult(
-        { sessionId: args.sessionId, source: resolved.source, records, missingLines },
+        {
+          sessionId: args.sessionId,
+          source: resolved.source,
+          ...(args.agentId !== undefined && { agentId: args.agentId }),
+          records,
+          missingLines,
+        },
         [sourceKindFor(resolved.source)],
       );
     },
@@ -1518,8 +1610,14 @@ export function createMcpServer(): McpServer {
         "always different JSONL lines). Line numbers are 1-based source lines in the session " +
         "JSONL — provenance for quoting evidence. `toolUseId` comes from another tool's own " +
         '"toolUseId" field (get_records, get_context_timeline, find_repetitions, ' +
-        "get_subagent_tree) and must belong to THIS session's own transcript (a subagent's tool " +
-        "calls aren't reachable through this lookup). When the result can't be found (e.g. the " +
+        "get_subagent_tree). Default scope is THIS session's main transcript; for a Claude Code " +
+        "session, the optional `agentId` scopes the lookup to that subagent's own sidecar " +
+        "transcript instead, where `call.line`/`result.line` are 1-based lines in THAT " +
+        "subagent's own JSONL (the same thread-local line numbers get_tool_calls reports) — raw-" +
+        "line full-text recovery (below) applies there too, re-reading the subagent's own " +
+        "sidecar. agentId is Claude Code only — a Codex sub-agent is its own full session, so " +
+        "pass that sub-agent's own sessionId instead of an agentId. " +
+        "When the result can't be found (e.g. the " +
         "session was cut off mid-call), `result` is `null` and `resultMissing: true` makes that " +
         "explicit — absence is declared, never implied. `relatedRecords` carries records the " +
         "parser already links to this call (today: a background task's completion " +
@@ -1559,18 +1657,34 @@ export function createMcpServer(): McpServer {
             "Cap per text field " +
               `(default ${GET_TOOL_CALL_DEFAULT_MAX_CHARS}, min ${GET_TOOL_CALL_MIN_MAX_CHARS})`,
           ),
+        agentId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Claude Code sessions only: resolve inside this subagent's own transcript instead of " +
+              "the main transcript. agentId comes from get_subagent_tree or the `thread` field of " +
+              "get_tool_calls/get_bash_stats. A Codex sub-agent is its own full session — call this " +
+              "tool with that session's own sessionId instead.",
+          ),
       },
     },
     async (args) => {
       const resolved = await resolveAnalysis(args);
       if ("error" in resolved) return resolved.error;
+      if (args.agentId !== undefined) {
+        if (resolved.source === "codex") return codexAgentIdUnsupported();
+        if (!(await claudeSubagentExists(args.sessionId, args.agentId))) {
+          return subagentNotFound(args.agentId);
+        }
+      }
       const maxChars = args.maxCharsPerField ?? GET_TOOL_CALL_DEFAULT_MAX_CHARS;
 
       const detail: ToolCallDetail | undefined =
         resolved.source === "codex"
           ? await getCodexSessionToolCallDetail(args.sessionId, args.toolUseId)
-          : await getSessionToolCallDetail(args.sessionId, args.toolUseId);
-      if (detail === undefined) return toolCallNotFound(args.toolUseId);
+          : await getSessionToolCallDetail(args.sessionId, args.toolUseId, args.agentId);
+      if (detail === undefined) return toolCallNotFound(args.toolUseId, args.agentId);
 
       const cappedInput = capInputField(detail.call.input, maxChars);
       const cappedResult =
@@ -1582,6 +1696,7 @@ export function createMcpServer(): McpServer {
         {
           sessionId: args.sessionId,
           source: resolved.source,
+          ...(args.agentId !== undefined && { agentId: args.agentId }),
           toolUseId: detail.toolUseId,
           call: {
             name: detail.call.name,
