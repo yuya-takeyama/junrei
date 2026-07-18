@@ -41,6 +41,13 @@ export { deriveRepoIdentity, normalizeRepoUrl } from "./repo.js";
 export type { SearchableField, SearchFieldKind } from "./search.js";
 export { flattenToSearchText } from "./search.js";
 export type { CompactionEvent, SessionAnalysisCore, SessionSource } from "./session-analysis.js";
+export type { ParsedShellCommand, ShellSegment } from "./shell/parser.js";
+export {
+  KNOWN_COMMAND_FAMILIES,
+  KNOWN_WRAPPER_COMMANDS,
+  parseShellCommand,
+  primaryCommand,
+} from "./shell/parser.js";
 export type { SubagentNode } from "./subagent-node.js";
 export type {
   ApiErrorEntry,

@@ -83,6 +83,27 @@ describe("analyzeClaudeSession", () => {
     expect(byName.get("Agent")?.callCount).toBe(1);
   });
 
+  it("wires bashStats from the same 3 Bash calls toolStats counts (main transcript; this fixture's one subagent issues none)", async () => {
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
+    expect(analysis.bashStats.totals.calls).toBe(3);
+    expect(analysis.bashStats.totals.errors).toBe(2);
+
+    const pnpmTest = analysis.bashStats.byCommand.find(
+      (g) => g.family === "pnpm" && g.subcommand === "test",
+    );
+    expect(pnpmTest).toMatchObject({ calls: 2, errors: 2 });
+
+    // The `sleep 10 && pnpm build` run_in_background launch (toolu_bgbash1 /
+    // bgtask01) joined with its <task-notification> completion.
+    expect(analysis.bashStats.background).toEqual([
+      expect.objectContaining({
+        taskId: "bgtask01",
+        thread: "main",
+        status: "completed",
+      }),
+    ]);
+  });
+
   it("detects repetitions: identical runs, file re-reads, repeated failures", async () => {
     const analysis = await analyzeClaudeSession(SESSION_FILE);
     const kinds = analysis.repetitions.map((r) => r.kind);

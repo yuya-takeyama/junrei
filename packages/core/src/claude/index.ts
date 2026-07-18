@@ -5,6 +5,25 @@
 
 export type { ClaudeSessionAnalysis, ClaudeWorkflowRunSummary } from "./analyze.js";
 export { analyzeClaudeSession } from "./analyze.js";
+export type {
+  BashAsReadCall,
+  BashBackgroundCall,
+  BashCommandGroup,
+  BashHeavyHitter,
+  BashLargeResult,
+  BashNearDuplicateGroup,
+  BashProgramFrequency,
+  BashRerunAfterError,
+  BashStats,
+  BashStatsThread,
+  BashTotals,
+  BashWaste,
+} from "./bash-stats.js";
+export {
+  computeBashStats,
+  LARGE_RESULT_CHARS_THRESHOLD,
+  normalizeCommandForDedup,
+} from "./bash-stats.js";
 export { loadClaudeDesktopTitles, resolveClaudeDesktopSessionsDirs } from "./desktop.js";
 export type { ClaudeSessionFileRef } from "./discovery.js";
 export {
@@ -33,6 +52,7 @@ export {
   computeToolStats,
   computeTurnUsage,
   computeUsage,
+  spanMs,
 } from "./metrics.js";
 export type {
   OtelApiRequestStats,
