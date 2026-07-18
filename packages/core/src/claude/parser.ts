@@ -292,6 +292,8 @@ function normalizeAssistant(raw: Record<string, unknown>, line: number): Assista
   const model = str(message.model);
   if (model !== undefined) record.model = model;
   if (usage !== undefined) record.usage = usage;
+  const stopReason = str(message.stop_reason);
+  if (stopReason !== undefined) record.stopReason = stopReason;
   return record;
 }
 

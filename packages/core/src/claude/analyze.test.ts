@@ -448,7 +448,7 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
 
   it("recovers sync-launch linkage (returnedChars/returnedPreview) via toolUseResult.agentId", async () => {
     const analysis = await analyzeClaudeSession(NO_META_TOOLUSE_FILE);
-    expect(analysis.subagentCount).toBe(2);
+    expect(analysis.subagentCount).toBe(3);
     const agent = analysis.subagents.find((n) => n.agentId === "cccc777788889999b");
     expect(agent?.toolUseId).toBe("toolu_sync_nometa");
     expect(agent?.asyncLaunch).toBeUndefined();
@@ -473,9 +473,28 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
     expect(agent?.spawnedBy).toBe("main");
     expect(agent?.launchLine).toBe(2);
     // No task-notification exists anywhere in this fixture for taskId
-    // "dddd000011112222c" — an async launch with no completion evidence yet
-    // must read as "unresolved", never guessed as completed/failed.
+    // "dddd000011112222c", and the agent's own sidecar carries no
+    // `stop_reason` on its final assistant record (old-version-style log) —
+    // so neither evidence source resolves it, and the status must read as
+    // "unresolved", never guessed as completed/failed.
     expect(agent?.status).toBe("unresolved");
+  });
+
+  it("resolves a NESTED async launch as completed from the child's own at-rest sidecar", async () => {
+    // "eeee333344445555d" is async-launched by the "dddd…" SUBAGENT, and
+    // task-notifications only ever land in the MAIN transcript — so no
+    // notification join can ever resolve it. Its own sidecar ending with a
+    // final assistant message (`stop_reason: "end_turn"`) is the completion
+    // evidence instead.
+    const analysis = await analyzeClaudeSession(NO_META_TOOLUSE_FILE);
+    const parent = analysis.subagents.find((n) => n.agentId === "dddd000011112222c");
+    const agent = parent?.children.find((n) => n.agentId === "eeee333344445555d");
+    expect(agent).toBeDefined();
+    expect(agent?.toolUseId).toBe("toolu_async_nested");
+    expect(agent?.asyncLaunch).toBe(true);
+    expect(agent?.spawnedBy).toBe("dddd000011112222c");
+    expect(agent?.returnedChars).toBeUndefined();
+    expect(agent?.status).toBe("completed");
   });
 });
 

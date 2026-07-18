@@ -37,6 +37,7 @@ import {
   asyncAgentLaunchToolUseIds,
   buildSessionData,
   toolResultLength,
+  transcriptEndsAtRest,
 } from "./session-data.js";
 import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 import { listSubagentRefs, type SubagentRef } from "./subagents.js";
@@ -251,6 +252,11 @@ async function analyzeSubagents(
    *  receives a background task's completion notice, not the child's own sidecar, so status
    *  for an async launch is resolved from the SAME owner as the launch itself. */
   const taskNotificationsByOwner = new Map<string, readonly TaskNotificationEvent[]>();
+  /** agentId -> whether that agent's OWN sidecar ends at rest (final assistant "end_turn") —
+   *  the async-launch fallback evidence for when no notification ever reaches the owner
+   *  (nested async launches: the harness only writes task-notifications into the MAIN
+   *  transcript, never into a parent subagent's sidecar — observed on 2.1.202). */
+  const endsAtRestByAgentId = new Map<string, boolean>();
 
   const registerOwner = (ownerId: string, data: SessionData) => {
     toolCallsByOwner.set(ownerId, new Map(data.toolCalls.map((c) => [c.toolUseId, c])));
@@ -269,6 +275,7 @@ async function analyzeSubagents(
     const data = buildSessionData(transcript);
     const usage = computeUsage(data);
     registerOwner(agentId, data);
+    endsAtRestByAgentId.set(agentId, transcriptEndsAtRest(data));
     foldFileAccess(subagentFileAccess, computeFileAccess(data));
 
     subagentTotals.inputTokens += usage.total.inputTokens;
@@ -342,6 +349,7 @@ async function analyzeSubagents(
         asyncLaunchIds,
         backgroundLaunchesByOwner,
         taskNotificationsByOwner,
+        endsAtRestByAgentId.get(node.agentId) === true,
       ),
     );
     // Workflow agents have no per-agent Agent/Task tool_use of their own (one
@@ -453,8 +461,14 @@ function resolveWorkflowAgentStatus(state: string | undefined): SubagentStatus |
  *    -> its `taskId` -> the LAST task-notification for that taskId in the
  *    SAME owner's transcript (the owner is who receives the notification,
  *    never the child's own sidecar) -> `backgroundStatus` (shared with
- *    `computeTaskExecutions`). No matching launch or notification ->
- *    "unresolved".
+ *    `computeTaskExecutions`). No matching launch or notification -> fall
+ *    back to the child's OWN sidecar ending at rest (see
+ *    `transcriptEndsAtRest`) -> "completed"; otherwise "unresolved". The
+ *    fallback exists because a task-notification is only ever written into
+ *    the MAIN transcript: an async launch issued by a parent SUBAGENT gets
+ *    no notification record at all (the parent learns of completion out of
+ *    band — Monitor events, SendMessage, polling the output file), so
+ *    without child-side evidence those nodes could never resolve.
  *  - Sync launch: the launching call's `result` present -> `isError` picks
  *    completed/failed; absent -> "unresolved".
  */
@@ -465,21 +479,24 @@ function resolveNodeStatus(
   spawnedBy: string,
   backgroundLaunchesByOwner: ReadonlyMap<string, readonly BackgroundLaunch[]>,
   taskNotificationsByOwner: ReadonlyMap<string, readonly TaskNotificationEvent[]>,
+  childEndsAtRest: boolean,
 ): SubagentStatus {
   if (toolUseId === undefined) return "unresolved";
   if (asyncLaunch) {
     const launch = backgroundLaunchesByOwner
       .get(spawnedBy)
       ?.find((candidate) => candidate.toolUseId === toolUseId);
-    if (launch === undefined) return "unresolved";
-    // Last notification for that taskId wins (an agent can notify more than
-    // once) — same rule `computeTaskExecutions` applies.
-    let lastNotification: TaskNotificationEvent | undefined;
-    for (const notification of taskNotificationsByOwner.get(spawnedBy) ?? []) {
-      if (notification.taskId === launch.taskId) lastNotification = notification;
+    if (launch !== undefined) {
+      // Last notification for that taskId wins (an agent can notify more than
+      // once) — same rule `computeTaskExecutions` applies.
+      let lastNotification: TaskNotificationEvent | undefined;
+      for (const notification of taskNotificationsByOwner.get(spawnedBy) ?? []) {
+        if (notification.taskId === launch.taskId) lastNotification = notification;
+      }
+      const status = backgroundStatus(lastNotification);
+      if (status === "completed" || status === "failed") return status;
     }
-    const status = backgroundStatus(lastNotification);
-    return status === "completed" || status === "failed" ? status : "unresolved";
+    return childEndsAtRest ? "completed" : "unresolved";
   }
   if (launchCall?.result === undefined) return "unresolved";
   return launchCall.result.isError ? "failed" : "completed";
@@ -501,6 +518,7 @@ function launchLinkage(
   asyncLaunchIds: ReadonlySet<string>,
   backgroundLaunchesByOwner: ReadonlyMap<string, readonly BackgroundLaunch[]>,
   taskNotificationsByOwner: ReadonlyMap<string, readonly TaskNotificationEvent[]>,
+  childEndsAtRest: boolean,
 ): Pick<
   SubagentNode,
   | "returnedChars"
@@ -522,6 +540,7 @@ function launchLinkage(
     spawnedBy,
     backgroundLaunchesByOwner,
     taskNotificationsByOwner,
+    childEndsAtRest,
   );
   if (launchCall === undefined) {
     return { spawnedBy, status, ...(asyncLaunch && { asyncLaunch }) };

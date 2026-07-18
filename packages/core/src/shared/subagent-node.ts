@@ -15,16 +15,23 @@ import type { UsageSummary } from "./metrics.js";
  *    (`result.isError` picks completed vs. failed), OR an async launch's
  *    harness task-notification resolved (same join `computeTaskExecutions`
  *    uses: launch toolUseId -> taskId -> last notification for that taskId).
+ *  - "completed" (async fallback): no notification reached the launching
+ *    transcript, but the agent's OWN sidecar ends at rest — its last
+ *    user/assistant record is a final assistant message with `stop_reason
+ *    "end_turn"` (see `transcriptEndsAtRest` in claude/session-data.ts).
+ *    Task-notifications are only ever written into the MAIN transcript, so
+ *    an async launch issued by a parent SUBAGENT never gets one; the child's
+ *    own at-rest shape is the only completion evidence that exists there.
  *  - "unresolved": no completion evidence in the log at all — the launching
  *    tool_use couldn't be matched, the sync result never arrived, or the
- *    async notification never arrived (the task outlived the session, or is
- *    still running).
+ *    async agent's sidecar still ends mid-flight (a pending tool_use, or a
+ *    streaming snapshot with no stop_reason yet).
  *
  * `endedAt` (the sidecar transcript's last record timestamp) is deliberately
  * NEVER used as a completion signal here: a still-running agent's sidecar
  * keeps getting appended to, so `endedAt` just tracks "most recent record
- * observed so far", not "the agent finished". Only the two evidence sources
- * above count.
+ * observed so far", not "the agent finished". The at-rest fallback is
+ * structural (the SHAPE of the final record), not a timing inference.
  */
 export type SubagentStatus = "completed" | "failed" | "unresolved";
 
