@@ -1,11 +1,19 @@
 # Milestone proposal: Goshuin (御朱印) — evidence-grade agent analysis over Junrei MCP
 
-**Status: DECIDED** (2026-07-18). This document records the insights, verified
-evidence, and candidate approaches for the milestone. All nine open decisions
-were settled with Yuya on 2026-07-18 — see
-[Decisions](#decisions-2026-07-18). Implementation proceeds in the adopted
+**Status: SHIPPED** (2026-07-18). All six phases (B → A → C → D/E → F) are
+merged — PR 124 through PR 127, PR 129, PR 130, and PR 133, and PR 135 for
+phase F (evaluation-trace export + the `junrei-session-analysis` playbook
+skill). The centerpiece reconstruction layer (phase C) is calibrated at
+92.95% exact+template coverage of wire bytes on capture run A (acceptance
+bar ≥ 85% — see "Production calibration" below), and the milestone's
+acceptance test — an evidence-grade session analysis produced by a
+fresh-context, MCP-only agent — passed. This document records the insights,
+verified evidence, and candidate approaches for the milestone. All nine open
+decisions were settled with Yuya on 2026-07-18 — see
+[Decisions](#decisions-2026-07-18). Implementation proceeded in the adopted
 phase order (B → A → C → D/E → F) and is tracked in
-[the roadmap](../roadmap.md).
+[the roadmap](../roadmap.md) (now archived to
+[roadmap-archive.md](../roadmap-archive.md)).
 
 **Codename.** A *goshuin* is the seal a pilgrim collects at each temple as
 proof that the visit really happened. This milestone is about giving analyzing

@@ -4,6 +4,7 @@ import {
   type ClaudeSessionAnalysis,
   computeBashStats,
   durationBetween,
+  type EvaluationTraceEvent,
   listReconstructableRequests,
   listSubagentRefs,
   loadReconstructionInput,
@@ -28,6 +29,7 @@ import {
 } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import { getRepoOverview } from "./overview.js";
 import {
   DEFAULT_MAX_MATCHES_PER_SESSION,
@@ -219,6 +221,26 @@ function notAvailableForCaptures() {
           "not available for Codex sessions (source: codex) — wire capture is a " +
           "Claude-Code-specific capability (the local pass-through proxy captures Anthropic API " +
           "traffic keyed by x-claude-code-session-id); Codex CLI has no equivalent in Junrei today.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * `export_evaluation_trace` is Claude-Code-only: it merges the reconstruction
+ * layer, OTel, and wire capture — all three Claude-Code-specific — into one
+ * document. No HTTP route exists for Codex either (see app.ts).
+ */
+function notAvailableForEvaluationTrace() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "not available for Codex sessions (source: codex) — the evaluation trace merges " +
+          "Claude-Code-specific capabilities (request reconstruction, OTel, wire capture); Codex " +
+          "CLI has no equivalent in Junrei today.",
       },
     ],
     isError: true,
@@ -677,6 +699,71 @@ function observabilityUnavailable(
     },
     ["claude-session-jsonl", "claude-otel"],
   );
+}
+
+// ---------------------------------------------------------------------------
+// export_evaluation_trace — output shaping. `assembleEvaluationTrace`
+// (evaluation-trace.ts) does every fs/store read and hands back the FULL,
+// uncapped `EvaluationTrace` (the SAME object the HTTP route returns
+// verbatim); this tool caps it for a chat context: `maxEvents` truncates the
+// (already source-line/timestamp-ordered) event list with an explicit
+// `eventsTruncated` flag + exact `totalEvents`, and `maxCharsPerField` caps
+// each event's own known text-bearing attributes with the SAME
+// `capTextField`/`capInputField` explicit-truncation contract every other
+// drill-down tool uses (a `<field>Truncated` flag plus `<field>FullCharCount`
+// sibling key, never a silently shorter value).
+// ---------------------------------------------------------------------------
+
+const EXPORT_EVALUATION_TRACE_DEFAULT_MAX_EVENTS = 500;
+const EXPORT_EVALUATION_TRACE_MAX_MAX_EVENTS = 5000;
+const EXPORT_EVALUATION_TRACE_DEFAULT_MAX_CHARS = 4000;
+const EXPORT_EVALUATION_TRACE_MIN_MAX_CHARS = 200;
+
+/** Which of one event kind's `attributes` keys carry free-text worth capping as a STRING — see `EVALUATION_TRACE_INPUT_FIELDS` for the arbitrary-JSON counterpart (`gen_ai.tool.call`'s `input`). */
+const EVALUATION_TRACE_TEXT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "gen_ai.user.message": ["text"],
+  "gen_ai.assistant.message": ["text"],
+  "gen_ai.tool.result": ["text"],
+  "junrei.injected_context": ["text"],
+  "junrei.subagent_launch": ["prompt", "returnedText"],
+};
+
+/** Attribute keys capped via `capInputField` (arbitrary JSON, stringified only when a cut is actually needed) rather than `capTextField`. */
+const EVALUATION_TRACE_INPUT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "gen_ai.tool.call": ["input"],
+};
+
+/**
+ * Cap one event's known text/input attributes to `maxChars`, in place on a
+ * COPY of `attributes` — every other attribute (ids, model, usage, cost,
+ * confidence counts, ...) is small/structured and passes through unchanged.
+ * An event kind with no entry in either table above (e.g. `gen_ai.request`,
+ * `junrei.compaction`) is returned unmodified — its attributes are already
+ * small, structured values, nothing to cut.
+ */
+function cappedEvaluationTraceEvent(
+  event: EvaluationTraceEvent,
+  maxChars: number,
+): EvaluationTraceEvent {
+  const attributes: Record<string, unknown> = { ...event.attributes };
+  for (const field of EVALUATION_TRACE_TEXT_FIELDS[event.name] ?? []) {
+    const value = attributes[field];
+    if (typeof value !== "string") continue;
+    const capped = capTextField(value, maxChars);
+    attributes[field] = capped.text;
+    attributes[`${field}Truncated`] = capped.truncated;
+    if (capped.fullCharCount !== undefined)
+      attributes[`${field}FullCharCount`] = capped.fullCharCount;
+  }
+  for (const field of EVALUATION_TRACE_INPUT_FIELDS[event.name] ?? []) {
+    if (!(field in attributes)) continue;
+    const capped = capInputField(attributes[field], maxChars);
+    attributes[field] = capped.input;
+    attributes[`${field}Truncated`] = capped.truncated;
+    if (capped.fullCharCount !== undefined)
+      attributes[`${field}FullCharCount`] = capped.fullCharCount;
+  }
+  return { ...event, attributes };
 }
 
 // ---------------------------------------------------------------------------
@@ -1972,6 +2059,125 @@ export function createMcpServer(): McpServer {
           },
         },
         CAPTURE_KINDS,
+      );
+    },
+  );
+
+  server.registerTool(
+    "export_evaluation_trace",
+    {
+      description:
+        "Exports one session as a normalized, single-JSON EVALUATION TRACE — schema " +
+        "`junrei-evaluation-trace/v1` — for external eval pipelines and LLM-judges: " +
+        "`{schema, session, sourceCompleteness, enrichment, limitations, events}`. Every event " +
+        "(`{name, timestamp?, provenance: {line?, requestId?}, attributes}`) is OTel-GenAI-" +
+        "semconv-flavored: `gen_ai.user.message` / `gen_ai.assistant.message` / `gen_ai.tool.call` " +
+        "/ `gen_ai.tool.result` for ordinary turns (tool-result text is FULL-recovered past the " +
+        "session-log parser's capture cap, same mechanism get_tool_call uses), `gen_ai.request` " +
+        "once per main-loop requestId for per-request enrichment, and `junrei.*` for harness " +
+        "events (`junrei.subagent_launch`, `junrei.task_notification`, `junrei.compaction`, " +
+        "`junrei.api_error`, `junrei.injected_context`, `junrei.hidden_api_call`). Events are " +
+        "ordered by source line; a `junrei.hidden_api_call` (which by definition has no log line) " +
+        "is interpolated between the two log-anchored events its own capture timestamp falls " +
+        "between, never simply appended. " +
+        "PER-REQUEST ENRICHMENT (`gen_ai.request.attributes`): always carries a pricing-table " +
+        "`pricingEstimate` (the same estimate every other cost-bearing tool reports); `capture` " +
+        "(measured `latencyMs`/`isSubagent`) appears ONLY when wire capture is opt-in AND this " +
+        "exact requestId was captured; `reconstruction` (confidence-class COUNTS + appliedRules + " +
+        "limitations — DELIBERATELY NOT the full reconstructed payload, to avoid repeating, per " +
+        "request, bytes get_reconstructed_request already serves on demand) appears ONLY for " +
+        "locally-stored sessions when a reconstruction could be built for that requestId — call " +
+        "get_reconstructed_request with the cited requestId for the actual system/tools/messages " +
+        "content. OTel does NOT get a per-request field at all: Claude Code's OTel api_request " +
+        "event carries no request-id attribute to join against the session log's requestId (unlike " +
+        "wire capture, whose response request-id header IS the exact join key), so inventing an " +
+        "ordinal/heuristic join is refused — OTel's contribution is a SESSION-LEVEL aggregate on " +
+        "`enrichment.otel` instead (see below). " +
+        "OTEL/CAPTURE ARE OPT-IN AND DECLARED, NEVER SILENTLY ABSENT: `sourceCompleteness` lists " +
+        "`claude-otel`/`claude-wire-capture` ONLY when that channel actually had data for this " +
+        "session (an absent source there just means no data — it does NOT mean the channel wasn't " +
+        "checked); the trace-level `enrichment.otel`/`enrichment.captures` block is what always " +
+        "declares whether each channel was even consulted — `{consulted, available, note?}` plus " +
+        "`enrichment.otel`'s session-level `costUsd`/`costSource`/`apiRequestCount`/`durationMsAvg` " +
+        "and `enrichment.captures.hiddenCallCount` — so `consulted: true, available: false` (with " +
+        "a note) is always distinguishable from a channel this export never looked at. " +
+        "`limitations` (trace-level, mirroring a reconstruction's own `limitations` array) declares " +
+        "session-wide caveats: subagent trees are summarized (not merged — a subagent's own tool " +
+        "calls/messages stay in ITS sidecar transcript, drill in via get_subagent_tree / a " +
+        "sessionId-scoped call to this same tool), a capped api-error list, unattempted injected-" +
+        "context/reconstruction recovery (S3-merged sessions), and the OTel no-join note above. " +
+        "TRUNCATION: `maxEvents` (default " +
+        `${EXPORT_EVALUATION_TRACE_DEFAULT_MAX_EVENTS}, max ` +
+        `${EXPORT_EVALUATION_TRACE_MAX_MAX_EVENTS}) caps the event list (already in source-line ` +
+        "order) with explicit `eventsTruncated` + exact `totalEvents`; `maxCharsPerField` (default " +
+        `${EXPORT_EVALUATION_TRACE_DEFAULT_MAX_CHARS}, min ` +
+        `${EXPORT_EVALUATION_TRACE_MIN_MAX_CHARS} — traces are BROAD, covering an entire session, ` +
+        "so this default is deliberately more generous than get_tool_call's) caps each event's OWN " +
+        "known text-bearing attributes (message/tool-result/prompt text, tool-call input) with the " +
+        "SAME explicit `<field>Truncated` + `<field>FullCharCount` contract get_tool_call uses — " +
+        "raise it to see more; never a silently shorter value. This tool's response is always a " +
+        "CAPPED view for a chat context — `GET /api/sessions/claude-code/:id/evaluation-trace` on " +
+        "the junrei HTTP server returns the SAME trace with no event/field caps at all, for an " +
+        "external pipeline that wants everything at once (the response's own `note` field repeats " +
+        "this pointer). Claude Code sessions only (source: codex is rejected — the trace merges " +
+        "reconstruction/OTel/wire-capture, all three Claude-Code-specific; Codex has no HTTP route " +
+        "either). Every response includes sourceCompleteness — a machine-readable declaration of " +
+        "what the underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        maxEvents: z
+          .number()
+          .int()
+          .min(1)
+          .max(EXPORT_EVALUATION_TRACE_MAX_MAX_EVENTS)
+          .optional()
+          .describe(
+            "Cap on the events array, already in source-line order " +
+              `(default ${EXPORT_EVALUATION_TRACE_DEFAULT_MAX_EVENTS}, ` +
+              `max ${EXPORT_EVALUATION_TRACE_MAX_MAX_EVENTS}); totalEvents stays exact past the cap`,
+          ),
+        maxCharsPerField: z
+          .number()
+          .int()
+          .min(EXPORT_EVALUATION_TRACE_MIN_MAX_CHARS)
+          .optional()
+          .describe(
+            "Cap per text-bearing attribute, per event " +
+              `(default ${EXPORT_EVALUATION_TRACE_DEFAULT_MAX_CHARS}, ` +
+              `min ${EXPORT_EVALUATION_TRACE_MIN_MAX_CHARS})`,
+          ),
+      },
+    },
+    async (args) => {
+      if (args.source === "codex") return notAvailableForEvaluationTrace();
+      const trace = await assembleEvaluationTrace(args.sessionId);
+      if (trace === undefined) return notFound(args.sessionId);
+
+      const maxEvents = args.maxEvents ?? EXPORT_EVALUATION_TRACE_DEFAULT_MAX_EVENTS;
+      const maxChars = args.maxCharsPerField ?? EXPORT_EVALUATION_TRACE_DEFAULT_MAX_CHARS;
+      const totalEvents = trace.events.length;
+      const events = trace.events
+        .slice(0, maxEvents)
+        .map((event) => cappedEvaluationTraceEvent(event, maxChars));
+
+      return jsonResult(
+        {
+          sessionId: args.sessionId,
+          source: "claude-code" as const,
+          schema: trace.schema,
+          session: trace.session,
+          enrichment: trace.enrichment,
+          limitations: trace.limitations,
+          events,
+          totalEvents,
+          eventsTruncated: totalEvents > events.length,
+          note:
+            "This is a capped/truncated view for a chat context. " +
+            `GET /api/sessions/claude-code/${args.sessionId}/evaluation-trace on the junrei HTTP ` +
+            "server returns this SAME trace with no event/field caps at all.",
+        },
+        trace.sourceCompleteness.sources.map((s) => s.source),
       );
     },
   );

@@ -32,6 +32,23 @@ export {
   resolveClaudeProjectsDirs,
 } from "./discovery.js";
 export type {
+  EvaluationTrace,
+  EvaluationTraceCaptureEnrichment,
+  EvaluationTraceChannelDeclaration,
+  EvaluationTraceEnrichment,
+  EvaluationTraceEvent,
+  EvaluationTraceHiddenCall,
+  EvaluationTraceInjectedContext,
+  EvaluationTraceInputs,
+  EvaluationTraceOtelEnrichment,
+  EvaluationTraceProvenance,
+  EvaluationTraceReconstructionSummary,
+  EvaluationTraceRecoveredText,
+  EvaluationTraceRequestCapture,
+  EvaluationTraceSessionMeta,
+} from "./evaluation-trace.js";
+export { buildEvaluationTrace, EVALUATION_TRACE_SCHEMA } from "./evaluation-trace.js";
+export type {
   ClaudeTurnStep,
   ClaudeTurnUsage,
   ExplorationProfile,

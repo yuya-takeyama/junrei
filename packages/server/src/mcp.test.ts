@@ -2095,4 +2095,257 @@ describe("MCP tools", () => {
       expect(textOf(result)).toContain("not available for Codex sessions");
     });
   });
+
+  describe("export_evaluation_trace", () => {
+    it("returns the envelope: schema, session, source-line-ordered events, subagent launch summarized, and a note pointing at the HTTP route", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "export_evaluation_trace",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sessionId: string;
+        source: string;
+        schema: string;
+        session: { sessionId: string; cwd?: string };
+        enrichment: {
+          otel: { consulted: boolean; available: boolean };
+          captures: { consulted: boolean; available: boolean };
+        };
+        limitations: string[];
+        events: Array<{ name: string; provenance: { line?: number; requestId?: string } }>;
+        totalEvents: number;
+        eventsTruncated: boolean;
+        note: string;
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.schema).toBe("junrei-evaluation-trace/v1");
+      expect(body.session.sessionId).toBe(CLAUDE_SESSION_ID);
+      expect(body.session.cwd).toBe("/Users/test/proj");
+      expect(body.eventsTruncated).toBe(false);
+      expect(body.totalEvents).toBe(body.events.length);
+      expect(body.events.length).toBeGreaterThan(0);
+      expect(body.events.some((e) => e.name === "gen_ai.user.message")).toBe(true);
+      expect(body.events.some((e) => e.name === "gen_ai.assistant.message")).toBe(true);
+      expect(body.events.some((e) => e.name === "gen_ai.tool.call")).toBe(true);
+      expect(body.events.some((e) => e.name === "gen_ai.tool.result")).toBe(true);
+      expect(body.events.some((e) => e.name === "gen_ai.request")).toBe(true);
+      expect(body.events.some((e) => e.name === "junrei.subagent_launch")).toBe(true);
+      expect(body.events.some((e) => e.name === "junrei.compaction")).toBe(true);
+      expect(body.events.some((e) => e.name === "junrei.api_error")).toBe(true);
+      // Every event's own line-anchored provenance stays in ascending source order.
+      const lines = body.events
+        .map((e) => e.provenance.line)
+        .filter((l): l is number => l !== undefined);
+      expect(lines).toEqual([...lines].sort((a, b) => a - b));
+      // Locally-stored session: reconstruction WAS attempted (even with no
+      // template configured, confidence just degrades to unknown — see
+      // get_reconstructed_request's own "no template" test).
+      expect(body.limitations.some((l) => l.includes("reconstruction summaries"))).toBe(false);
+      // Opt-in channels declared, never silently absent.
+      expect(body.enrichment.otel).toMatchObject({ consulted: true, available: false });
+      expect(body.enrichment.captures).toMatchObject({ consulted: true, available: false });
+      expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+        "claude-session-jsonl",
+      ]);
+      expect(body.note).toContain(
+        `/api/sessions/claude-code/${CLAUDE_SESSION_ID}/evaluation-trace`,
+      );
+    });
+
+    it("caps events at maxEvents with an explicit eventsTruncated flag and exact totalEvents", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "export_evaluation_trace",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, maxEvents: 3 },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        events: unknown[];
+        totalEvents: number;
+        eventsTruncated: boolean;
+      };
+      expect(body.events).toHaveLength(3);
+      expect(body.eventsTruncated).toBe(true);
+      expect(body.totalEvents).toBeGreaterThan(3);
+    });
+
+    it("caps a long tool-result text at maxCharsPerField with explicit truncation flags", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "export_evaluation_trace",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, maxCharsPerField: 200 },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        events: Array<{
+          name: string;
+          attributes: {
+            toolUseId?: string;
+            text?: string;
+            textTruncated?: boolean;
+            textFullCharCount?: number;
+          };
+        }>;
+      };
+      // toolu_skill1's result is a 2200-char fixture string — well past the cap.
+      const skillResult = body.events.find(
+        (e) => e.name === "gen_ai.tool.result" && e.attributes.toolUseId === "toolu_skill1",
+      );
+      expect(skillResult?.attributes.textTruncated).toBe(true);
+      expect(skillResult?.attributes.textFullCharCount).toBeGreaterThan(200);
+      expect(skillResult?.attributes.text?.length).toBeLessThanOrEqual(201);
+    });
+
+    it("is rejected for Codex sessions", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "export_evaluation_trace",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+
+    it("returns a clear not-found error for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "export_evaluation_trace",
+        arguments: { source: "claude-code", sessionId: "does-not-exist" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+
+    describe("with OTel and wire capture configured", () => {
+      let otelDir: string | undefined;
+      let previousOtelDir: string | undefined;
+      let capturesDir: string | undefined;
+      let previousCapturesDir: string | undefined;
+
+      function otlpAttr(key: string, value: string | number) {
+        return typeof value === "string"
+          ? { key, value: { stringValue: value } }
+          : { key, value: { doubleValue: value } };
+      }
+
+      function apiRequestLine(sessionId: string, costUsd: number) {
+        return JSON.stringify({
+          resourceLogs: [
+            {
+              resource: { attributes: [otlpAttr("session.id", sessionId)] },
+              scopeLogs: [
+                {
+                  logRecords: [
+                    {
+                      attributes: [
+                        otlpAttr("event.name", "api_request"),
+                        otlpAttr("cost_usd", costUsd),
+                      ],
+                      body: { stringValue: "api_request" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        });
+      }
+
+      beforeAll(async () => {
+        previousOtelDir = process.env.JUNREI_OTEL_DIR;
+        otelDir = await mkdtemp(join(tmpdir(), "junrei-mcp-eval-otel-"));
+        await writeFile(
+          join(otelDir, `${CLAUDE_SESSION_ID}.jsonl`),
+          `${apiRequestLine(CLAUDE_SESSION_ID, 0.42)}\n`,
+        );
+        process.env.JUNREI_OTEL_DIR = otelDir;
+
+        previousCapturesDir = process.env.JUNREI_CAPTURES_DIR;
+        capturesDir = await mkdtemp(join(tmpdir(), "junrei-mcp-eval-captures-"));
+        const captureLines = [
+          {
+            requestId: "req_1",
+            latencyMs: 111,
+            isSubagent: false,
+            requestBytes: 10,
+            responseBytes: 20,
+          },
+          {
+            requestId: "req_hidden_eval",
+            latencyMs: 22,
+            isSubagent: false,
+            requestBody: {},
+            assembledMessage: { model: "claude-haiku" },
+            requestBytes: 5,
+            responseBytes: 6,
+          },
+        ];
+        await writeFile(
+          join(capturesDir, `${CLAUDE_SESSION_ID}.jsonl`),
+          `${captureLines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+        );
+        process.env.JUNREI_CAPTURES_DIR = capturesDir;
+      });
+
+      afterAll(async () => {
+        if (otelDir !== undefined) await rm(otelDir, { recursive: true, force: true });
+        if (previousOtelDir === undefined) delete process.env.JUNREI_OTEL_DIR;
+        else process.env.JUNREI_OTEL_DIR = previousOtelDir;
+        if (capturesDir !== undefined) await rm(capturesDir, { recursive: true, force: true });
+        if (previousCapturesDir === undefined) delete process.env.JUNREI_CAPTURES_DIR;
+        else process.env.JUNREI_CAPTURES_DIR = previousCapturesDir;
+      });
+
+      it("declares both channels available, adds their sourceCompleteness kinds, joins capture latency onto the matching request, emits a hidden-call event, and never fabricates a per-request OTel join", async () => {
+        client = await connect();
+        const result = await client.callTool({
+          name: "export_evaluation_trace",
+          arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+        });
+        expect(result.isError).not.toBe(true);
+        const body = JSON.parse(textOf(result)) as {
+          enrichment: {
+            otel: { consulted: boolean; available: boolean; costUsd?: number };
+            captures: { consulted: boolean; available: boolean; hiddenCallCount?: number };
+          };
+          events: Array<{
+            name: string;
+            provenance: { requestId?: string };
+            attributes: Record<string, unknown>;
+          }>;
+          sourceCompleteness: { sources: Array<{ source: string }> };
+        };
+        expect(body.enrichment.otel).toMatchObject({
+          consulted: true,
+          available: true,
+          costUsd: 0.42,
+        });
+        expect(body.enrichment.captures).toMatchObject({
+          consulted: true,
+          available: true,
+          hiddenCallCount: 1,
+        });
+        expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+          "claude-session-jsonl",
+          "claude-otel",
+          "claude-wire-capture",
+        ]);
+        const req1 = body.events.find(
+          (e) => e.name === "gen_ai.request" && e.provenance.requestId === "req_1",
+        );
+        expect(req1?.attributes.capture).toMatchObject({ latencyMs: 111 });
+        const hidden = body.events.find((e) => e.name === "junrei.hidden_api_call");
+        expect(hidden?.attributes).toMatchObject({
+          requestId: "req_hidden_eval",
+          model: "claude-haiku",
+        });
+        // OTel never attaches a per-request field — see the tool description's join-semantics note.
+        for (const event of body.events) {
+          if (event.name === "gen_ai.request") expect(event.attributes.otel).toBeUndefined();
+        }
+      });
+    });
+  });
 });

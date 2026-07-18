@@ -688,3 +688,84 @@ logs:
 - (b) Document the limitation and do nothing else (chosen for now): the
   lens stays strictly log-derived; injected CLAUDE.md/MEMORY.md rows simply
   don't exist for current-format sessions.
+
+## Goshuin — evidence-grade agent analysis over Junrei MCP (decided + shipped 2026-07-18)
+
+Evidence-grade agent analysis over Junrei MCP: give analyzing agents
+verifiable, provenance-backed access to what actually happened in a session —
+including what the session JSONL alone cannot show (system prompt, tool
+schemas/action space, generation params, injected context, hidden API calls,
+latency). Grounded in the
+[session-log completeness study](./research/claude-code-session-log-completeness.md)
+and new measured verification (API-payload reconstruction from log+disk:
+85–100% byte-exact; per-CLI-version stability of system prompt/tools/params).
+Full insight dump, candidate approaches (A–F), adopted phasing, and the
+decision record: [milestones/goshuin.md](./milestones/goshuin.md).
+
+- ✅ Insight/idea capture: evidence base, six candidate approaches
+  (drill-down tools, blind-spot metadata, reconstruction "virtual wire",
+  wire-capture ingestion, OTel ingestion, eval-trace export), open decisions
+- ✅ Decision stage (2026-07-18): all nine open decisions settled — C-first
+  (reconstruction first-class, capture as opt-in calibrator); labeled
+  confidence classes (`exact`/`template`/`disk-contingent`/`unknown`)
+  admitted; drift = `disk-contingent` label + mtime hint, no watcher;
+  user-local template library (`~/.junrei/templates/`, never in-repo);
+  drill-down tools added to MCP (9 → 11); capture-proxy constraints fixed
+  (local-only, opt-in, redact-at-write, ToS warning), UX deferred to D;
+  OTel receiver on the same Hono server with per-session JSONL;
+  per-response `sourceCompleteness` block (+ `costIsComplete` kept);
+  recon scripts promoted to `experiments/` in phase C. Full record with
+  rationale:
+  [goshuin.md — Decisions](./milestones/goshuin.md#decisions-2026-07-18)
+- ✅ Implementation (phase order B → A → C → D/E → F):
+  - ✅ B: blind-spot metadata — `sourceCompleteness` on every MCP response
+    (fixed status vocabulary + frozen per-source dimension tables in
+    `@junrei/core`; all 9 tool descriptions document the semantics;
+    `list_sessions` payload became `{ sessions, sourceCompleteness }`)
+  - ✅ A: MCP drill-down tools — `get_records` (bulk line-level record
+    detail with `missingLines`) + `get_tool_call` (call + result + linked
+    records as one evidence unit), both harnesses, explicit truncation
+    flags everywhere; Claude tool_result text recovered in full from the
+    raw source line past the parser's 2000-char capture cap (web
+    record-detail badge now driven by the explicit signal)
+  - ✅ C: reconstruction layer ("virtual wire") — `@junrei/core`
+    `claude/reconstruction/` (confidence classes exact/template/
+    disk-contingent/unknown, named normalization rules, template +
+    disk-context provider interfaces), MCP `get_reconstructed_request`
+    (discovery + full payload, explicit truncation), recon scripts
+    promoted into `experiments/claude-code-capture/recon/` driving the
+    production code; calibrated on capture run A: exact+template = 92.95%
+    of wire bytes (bar ≥ 85%), drift detection verified on a real
+    post-session change
+  - ✅ D: wire-capture ingestion — `@junrei/capture-proxy` (localhost-only
+    pass-through bin, redact-at-write with sentinel-scan tests, mandatory
+    ToS banner, `~/.junrei/captures/` per-session JSONL), MCP
+    `get_actual_request` + `get_hidden_calls` (log-requestId join, measured
+    latency, hidden-call detection); `claude-wire-capture`
+    sourceCompleteness entry; byte-for-byte parity tests prove disabled ==
+    unchanged
+  - ✅ E: OTel ingestion — opt-in (`JUNREI_OTEL_DIR`) OTLP http/json
+    receiver on the junrei server, per-session JSONL storage, MCP
+    `get_session_observability` (authoritative `cost_usd` with costBasis
+    cross-check, api-request latency, tool_decision, MCP/hook health);
+    `claude-otel` sourceCompleteness entry; byte-for-byte parity tests
+    prove disabled == unchanged
+  - ✅ F: evaluation-trace export + analysis playbooks — `@junrei/core`
+    `claude/evaluation-trace.ts` (`buildEvaluationTrace`, pure function over
+    server-assembled inputs — no fs in core) normalizes the session log plus
+    opt-in OTel/wire-capture into one `junrei-evaluation-trace/v1` document:
+    OTel-GenAI-semconv event names, per-event `provenance` (line and/or
+    requestId), per-request pricing/capture/reconstruction-summary
+    enrichment (OTel gets a session-level aggregate only — its `api_request`
+    event carries no request-id join key, so no per-request OTel field is
+    invented); MCP `export_evaluation_trace` (18th tool; capped/truncated)
+    + `GET /api/sessions/claude-code/:id/evaluation-trace` (uncapped) HTTP
+    route; `junrei-session-analysis` skill encodes the tool
+    order/provenance-citation/confidence-trust methodology this milestone's
+    acceptance test proved — supersedes the roadmap's earlier "Later"
+    item "Review Skill for agent-driven retrospectives"
+
+PRs: PR 124 (decision record: PROPOSAL → DECIDED), PR 125 (phase B), PR 126
+(phase A), PR 127 (phase C), PR 129 (phase C follow-up fix: per-key params
+confidence overlay), PR 130 (phase E), and PR 133 (phase D), plus the PR
+that shipped phase F (this evaluation-trace export + analysis-skill work).
