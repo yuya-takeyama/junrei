@@ -101,7 +101,13 @@ const INPUT_SUMMARY_KEYS = [
   "description",
 ];
 
-function summarizeToolInput(input: unknown): string {
+/**
+ * Exported (not just used internally by `buildToolCallEntry`) so
+ * `@junrei/server`'s `get_tool_calls` MCP tool can reuse the exact same
+ * "which input field is the meaningful one" heuristic instead of a second,
+ * hand-kept-in-sync copy — see `INPUT_SUMMARY_KEYS`.
+ */
+export function summarizeToolInput(input: unknown): string {
   const obj = asRecord(input);
   if (obj !== undefined) {
     for (const key of INPUT_SUMMARY_KEYS) {

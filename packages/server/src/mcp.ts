@@ -1,10 +1,17 @@
 import {
+  type BashStats,
   buildSourceCompleteness,
   type ClaudeSessionAnalysis,
+  computeBashStats,
+  durationBetween,
   listReconstructableRequests,
+  listSubagentRefs,
   loadReconstructionInput,
+  loadSubagentSessionData,
   localClaudeSessionStore,
   parseOtelSessionLines,
+  parseShellCommand,
+  primaryCommand,
   type ReconstructedMessageBlock,
   type ReconstructedParams,
   type ReconstructedRequest,
@@ -13,7 +20,10 @@ import {
   type ReconstructionProviders,
   type RecordDetail,
   reconstructRequest,
+  type SessionData,
   type SourceKind,
+  summarizeToolInput,
+  type ToolCall,
   type ToolCallDetail,
 } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -32,11 +42,13 @@ import {
   getCodexSessionRecordDetail,
   getCodexSessionToolCallDetail,
   getSession,
+  getSessionData,
   getSessionRecordDetail,
   getSessionToolCallDetail,
   listSessions,
   MAX_LIST_LIMIT,
 } from "./sessions.js";
+import { claudeStoreForFilePath } from "./sources/claude.js";
 import { readOtelLines, resolveOtelDir } from "./sources/otel.js";
 import {
   createFilesystemDiskContextProvider,
@@ -626,6 +638,156 @@ function observabilityUnavailable(
     },
     ["claude-session-jsonl", "claude-otel"],
   );
+}
+
+// ---------------------------------------------------------------------------
+// get_bash_stats / get_tool_calls — Bash-command analytics and a generic
+// paginated tool-call listing (Claude Code only for now — see
+// `notAvailableForCodex`). Built on `@junrei/core`'s `computeBashStats` /
+// `parseShellCommand`/`primaryCommand` ("Bash analysis", PR 1); this file
+// only shapes their output for MCP + adds the `get_tool_calls` discovery
+// primitive that neither `get_records` (line-scoped) nor `get_tool_call`
+// (needs an already-known toolUseId) provide.
+// ---------------------------------------------------------------------------
+
+const BASH_STATS_DEFAULT_TOP_COMMANDS = 20;
+const BASH_STATS_MAX_TOP_COMMANDS = 100;
+/** Fixed (not caller-configurable) — `programFrequency` has no dedicated cap param, unlike `byCommand`'s `topCommands`. */
+const BASH_STATS_PROGRAM_FREQUENCY_LIMIT = 30;
+/** Shared cap for every OTHER list in the response (background tasks, each waste category) — `byCommand`/`programFrequency` have their own caps above. */
+const BASH_STATS_LIST_CAP = 20;
+
+const GET_TOOL_CALLS_DEFAULT_LIMIT = 50;
+const GET_TOOL_CALLS_MAX_LIMIT = 200;
+
+/**
+ * A list capped for the MCP response, alongside the exact pre-cap count and
+ * an explicit `truncated` flag — the same "capped list must never read as
+ * complete" contract `search_sessions`' `matchesTruncated`/`resultsTruncated`
+ * already uses, generalized to every list `get_bash_stats` returns.
+ */
+interface CappedList<T> {
+  items: T[];
+  totalCount: number;
+  truncated: boolean;
+}
+
+function capList<T>(items: readonly T[], cap: number): CappedList<T> {
+  return { items: items.slice(0, cap), totalCount: items.length, truncated: items.length > cap };
+}
+
+/**
+ * Shape one `BashStats` (either the joint main+subagents value already on
+ * `ClaudeSessionAnalysis`, or a main-thread-only recompute) into the MCP
+ * response body — every list capped per `CappedList`'s contract; `totals` and
+ * `heavyHitters` pass through unchanged (`heavyHitters` is already a fixed
+ * top-10 from `computeBashStats` itself, nothing left to cap here).
+ */
+function toBashStatsResponse(stats: BashStats, topCommands: number) {
+  const byStatus = { completed: 0, failed: 0, unresolved: 0 };
+  for (const task of stats.background) byStatus[task.status] += 1;
+  return {
+    totals: stats.totals,
+    byCommand: capList(stats.byCommand, topCommands),
+    programFrequency: capList(stats.programFrequency, BASH_STATS_PROGRAM_FREQUENCY_LIMIT),
+    heavyHitters: stats.heavyHitters,
+    background: { byStatus, tasks: capList(stats.background, BASH_STATS_LIST_CAP) },
+    waste: {
+      nearDuplicates: capList(stats.waste.nearDuplicates, BASH_STATS_LIST_CAP),
+      largeResults: capList(stats.waste.largeResults, BASH_STATS_LIST_CAP),
+      rerunAfterError: capList(stats.waste.rerunAfterError, BASH_STATS_LIST_CAP),
+      bashAsRead: capList(stats.waste.bashAsRead, BASH_STATS_LIST_CAP),
+    },
+  };
+}
+
+/** One `get_tool_calls` result row. `family`/`subcommand` are set only for `toolName === "Bash"` — see `toToolCallItem`. */
+interface ToolCallListItem {
+  toolUseId: string;
+  line: number;
+  timestamp?: string;
+  toolName: string;
+  /** `"main"` or a subagent's `agentId` — same convention `BashStats`' per-entry `thread` field uses. */
+  thread: string;
+  status: "ok" | "error" | "missing-result";
+  inputChars: number;
+  resultChars: number;
+  durationMs?: number;
+  inputSummary: string;
+  family?: string;
+  subcommand?: string;
+}
+
+/** Same "no identifiable executable" label `computeBashStats` uses (`UNPARSED_FAMILY`, private there) — kept in sync by convention, not import, since it's a trivial literal. */
+const UNPARSED_BASH_FAMILY = "(unparsed)";
+
+/** A Bash call's `command` input field, mirroring `bash-stats.ts`'s own (private) `commandOf`. */
+function bashCommandOf(input: unknown): string {
+  if (typeof input !== "object" || input === null) return "";
+  const command = (input as Record<string, unknown>).command;
+  return typeof command === "string" ? command : "";
+}
+
+function inputCharsOf(input: unknown): number {
+  return typeof input === "string" ? input.length : JSON.stringify(input ?? null).length;
+}
+
+function toToolCallStatus(call: ToolCall): "ok" | "error" | "missing-result" {
+  if (call.result === undefined) return "missing-result";
+  return call.result.isError ? "error" : "ok";
+}
+
+function toToolCallItem(thread: string, call: ToolCall): ToolCallListItem {
+  const durationMs = durationBetween(call.timestamp, call.result?.timestamp);
+  const item: ToolCallListItem = {
+    toolUseId: call.toolUseId,
+    line: call.line,
+    ...(call.timestamp !== undefined && { timestamp: call.timestamp }),
+    toolName: call.name,
+    thread,
+    status: toToolCallStatus(call),
+    inputChars: inputCharsOf(call.input),
+    resultChars: call.result?.fullTextLength ?? 0,
+    ...(durationMs !== undefined && { durationMs }),
+    inputSummary: summarizeToolInput(call.input),
+  };
+  if (call.name !== "Bash") return item;
+  const primary = primaryCommand(parseShellCommand(bashCommandOf(call.input)));
+  return {
+    ...item,
+    family: primary?.executable ?? UNPARSED_BASH_FAMILY,
+    ...(primary?.subcommand !== undefined && { subcommand: primary.subcommand }),
+  };
+}
+
+/**
+ * Every thread's `SessionData` `get_tool_calls` needs, per its `thread`
+ * filter — main only, subagents only, or both. Reuses the SAME subagent
+ * discovery/loading `analyze.ts`'s `computeBashStats` input and `get_tool_call`
+ * rely on (`listSubagentRefs`/`loadSubagentSessionData`), resolved through
+ * whichever store actually owns this session's file (`claudeStoreForFilePath`
+ * — local or S3), never a new loader. `undefined` only when the session
+ * itself can't be found.
+ */
+async function collectToolCallThreads(
+  sessionId: string,
+  thread: "main" | "subagents" | "all",
+): Promise<{ thread: string; data: SessionData }[] | undefined> {
+  const mainData = await getSessionData(sessionId);
+  if (mainData === undefined) return undefined;
+
+  const threads: { thread: string; data: SessionData }[] = [];
+  if (thread !== "subagents") threads.push({ thread: "main", data: mainData });
+
+  if (thread !== "main" && mainData.filePath !== undefined) {
+    const store = claudeStoreForFilePath(mainData.filePath);
+    const refs = await listSubagentRefs(mainData.filePath, store);
+    for (const ref of refs) {
+      const subData = await loadSubagentSessionData(mainData.filePath, ref.agentId, store);
+      if (subData !== undefined) threads.push({ thread: ref.agentId, data: subData });
+    }
+  }
+  return threads;
 }
 
 /**
@@ -1422,6 +1584,157 @@ export function createMcpServer(): McpServer {
         },
         ["claude-session-jsonl", "claude-otel"],
       );
+    },
+  );
+
+  server.registerTool(
+    "get_bash_stats",
+    {
+      description:
+        "Bash-command analytics for one session: totals (calls/errors/chars/estimatedTokens), " +
+        "commands grouped by resolved family+subcommand (e.g. `git diff`) ranked by result size " +
+        "with each group's `sharePct` of total result chars, per-executable segment frequency " +
+        "(covers every side of a pipeline, not just the primary command), the top 10 calls by " +
+        "result size, background (run_in_background) task outcomes, and quantitative waste " +
+        "signals — near-duplicate command groups, oversized results, same-command reruns " +
+        "immediately after a failure, and Bash calls that read a file the way the Read tool " +
+        "would (cat/head/tail/sed -n). These are observations, not judgments: interpretation is " +
+        "the caller's job. Every list beyond a small fixed cap reports `totalCount` and " +
+        "`truncated` alongside the (possibly shorter) `items` array — a capped list never reads " +
+        "as complete. Char counts (`inputChars`/`resultChars`/`totalInputChars`/" +
+        "`totalResultChars`) are EXACT, read straight from the session record; `estimatedTokens` " +
+        "is a `Math.ceil(chars / 4)` HEURISTIC (no real tokenizer runs over Bash text) — good for " +
+        "relative comparison, not exact accounting. A background task's `wallClockMs` is " +
+        "wall-clock time from launch to the harness's completion notification (includes real " +
+        "background execution time), NOT context/API cost. `includeSubagents: false` does NOT " +
+        "post-hoc filter the joint result (rankings/sharePct are computed jointly across every " +
+        "thread and can't be un-mixed) — it recomputes stats from the main transcript ALONE. " +
+        "Claude Code sessions only. Every response includes sourceCompleteness — a " +
+        "machine-readable declaration of what the underlying session source cannot show; treat " +
+        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        includeSubagents: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true (main + every subagent thread, jointly). false recomputes " +
+              "main-transcript-only stats instead of filtering the joint result.",
+          ),
+        topCommands: z
+          .number()
+          .int()
+          .min(1)
+          .max(BASH_STATS_MAX_TOP_COMMANDS)
+          .optional()
+          .describe(
+            "Cap on the byCommand list length " +
+              `(default ${BASH_STATS_DEFAULT_TOP_COMMANDS}, max ${BASH_STATS_MAX_TOP_COMMANDS})`,
+          ),
+      },
+    },
+    async ({ source, sessionId, includeSubagents, topCommands }) => {
+      if (source === "codex") return notAvailableForCodex();
+      // zod already enforces topCommands <= BASH_STATS_MAX_TOP_COMMANDS.
+      const cap = topCommands ?? BASH_STATS_DEFAULT_TOP_COMMANDS;
+      const includeSub = includeSubagents ?? true;
+
+      if (includeSub) {
+        const analysis = await getSession(sessionId);
+        if (analysis === undefined) return notFound(sessionId);
+        return jsonResult(
+          {
+            sessionId,
+            includeSubagents: true,
+            ...toBashStatsResponse(analysis.bashStats, cap),
+          },
+          ["claude-session-jsonl"],
+        );
+      }
+
+      const data = await getSessionData(sessionId);
+      if (data === undefined) return notFound(sessionId);
+      const stats = computeBashStats([{ thread: "main", data }]);
+      return jsonResult(
+        { sessionId, includeSubagents: false, ...toBashStatsResponse(stats, cap) },
+        ["claude-session-jsonl"],
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_tool_calls",
+    {
+      description:
+        "Paginated, filterable listing of tool calls in one session — the discovery primitive " +
+        "for finding a `toolUseId` in the first place (get_tool_call resolves ONE already-known " +
+        "toolUseId into full call+result detail; use that next for full drill-down once you have " +
+        "an id from here). Each item is a compact summary: toolUseId, source line, timestamp, " +
+        "tool name, thread (`main` or a subagent's agentId), status (ok/error/missing-result), " +
+        "inputChars/resultChars (exact, from the session record), durationMs when resolvable, " +
+        "and a capped one-line inputSummary. Bash calls additionally carry `family`/`subcommand` " +
+        "(the resolved executable and, for known command families like git/pnpm/gh, its " +
+        "subcommand — see get_bash_stats). `totalCount` is the post-filter, pre-pagination match " +
+        'count, for building a pager. `thread: "subagents"`/`"all"` walks every subagent ' +
+        "sidecar transcript, not just the main one. Claude Code sessions only. Every response " +
+        "includes sourceCompleteness — a machine-readable declaration of what the underlying " +
+        "session source cannot show; treat absent/not-recorded dimensions as unknowable from " +
+        "this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        toolName: z.string().optional().describe('Exact tool name match, e.g. "Bash"'),
+        thread: z.enum(["main", "subagents", "all"]).optional().describe("Default all"),
+        status: z.enum(["ok", "error", "all"]).optional().describe("Default all"),
+        sort: z
+          .enum(["line", "resultChars"])
+          .optional()
+          .describe(
+            "Default line (ascending across threads; ties break by thread id — " +
+              "line numbers from different transcripts interleave); resultChars sorts descending",
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(GET_TOOL_CALLS_MAX_LIMIT)
+          .optional()
+          .describe(`Default ${GET_TOOL_CALLS_DEFAULT_LIMIT}, max ${GET_TOOL_CALLS_MAX_LIMIT}`),
+        offset: z.number().int().min(0).optional().describe("Default 0"),
+      },
+    },
+    async ({ source, sessionId, toolName, thread, status, sort, limit, offset }) => {
+      if (source === "codex") return notAvailableForCodex();
+      const threadFilter = thread ?? "all";
+      const statusFilter = status ?? "all";
+      const sortKey = sort ?? "line";
+      const lim = limit ?? GET_TOOL_CALLS_DEFAULT_LIMIT;
+      const off = offset ?? 0;
+
+      const threads = await collectToolCallThreads(sessionId, threadFilter);
+      if (threads === undefined) return notFound(sessionId);
+
+      const items: ToolCallListItem[] = [];
+      for (const { thread: threadId, data } of threads) {
+        for (const call of data.toolCalls) {
+          if (toolName !== undefined && call.name !== toolName) continue;
+          const item = toToolCallItem(threadId, call);
+          if (statusFilter !== "all" && item.status !== statusFilter) continue;
+          items.push(item);
+        }
+      }
+
+      items.sort((a, b) => {
+        if (sortKey === "resultChars" && b.resultChars !== a.resultChars) {
+          return b.resultChars - a.resultChars;
+        }
+        if (a.line !== b.line) return a.line - b.line;
+        return a.thread.localeCompare(b.thread);
+      });
+
+      const totalCount = items.length;
+      const toolCalls = items.slice(off, off + lim);
+
+      return jsonResult({ sessionId, totalCount, toolCalls }, ["claude-session-jsonl"]);
     },
   );
 
