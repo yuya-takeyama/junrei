@@ -92,7 +92,16 @@ export function hasBashActivity(totals: BashStatsJson["totals"]): boolean {
   return totals.calls > 0;
 }
 
-/** One rendered row of the Command ranking table (panel 1) — everything `CommandRankingTable.tsx` needs, precomputed so the component is a pure map+render over this array. */
+/**
+ * One rendered row of the Command ranking table (panel 1) — everything
+ * `CommandRankingTable.tsx` needs, precomputed so the component is a pure
+ * map+render over this array. Carries both the formatted `*Text` field (what
+ * renders) and, for every numeric column, the raw value it was formatted
+ * from (`totalChars`/`avgChars`/`estTokens`/`share`) — sorting must compare
+ * real numbers, never the display strings (`"9.0k"` < `"45.2k"`
+ * lexicographically would be wrong), so `CommandRankingTable`'s sort columns
+ * read these raw fields instead.
+ */
 export interface CommandRankingRow {
   key: string;
   label: string;
@@ -100,9 +109,13 @@ export interface CommandRankingRow {
   calls: number;
   errors: number;
   hasErrors: boolean;
+  totalChars: number;
   totalCharsText: string;
+  avgChars: number;
   avgCharsText: string;
+  estTokens: number;
   estTokensText: string;
+  share: number;
   shareText: string;
 }
 
@@ -116,9 +129,13 @@ export function buildCommandRankingRows(
     calls: group.calls,
     errors: group.errors,
     hasErrors: group.errors > 0,
+    totalChars: group.totalResultChars,
     totalCharsText: formatTokens(group.totalResultChars),
+    avgChars: group.avgResultChars,
     avgCharsText: formatTokens(group.avgResultChars),
+    estTokens: group.estimatedTokens,
     estTokensText: formatEstimatedTokens(group.estimatedTokens),
+    share: group.sharePct,
     shareText: `${group.sharePct.toFixed(1)}%`,
   }));
 }
@@ -139,6 +156,8 @@ export interface HeavyHitterRow {
    * `recordPath` and `agentRecordPath` (see `SessionShell.tsx`).
    */
   agentId: string | undefined;
+  /** Raw result-chars count `resultCharsText` was formatted from — sorting compares this, never the formatted string (see `CommandRankingRow`'s doc comment for why). */
+  resultChars: number;
   resultCharsText: string;
   line: number;
 }
@@ -152,6 +171,7 @@ export function buildHeavyHitterRows(
     command: hit.command,
     thread: threadLabel(hit.thread),
     agentId: hit.thread === "main" ? undefined : hit.thread,
+    resultChars: hit.resultChars,
     resultCharsText: formatTokens(hit.resultChars),
     line: hit.line,
   }));
@@ -206,6 +226,8 @@ export function buildRerunAfterErrorRows(
 export interface FlatWasteRow {
   key: string;
   command: string;
+  /** Raw result-chars count `resultCharsText` was formatted from — sorting compares this, never the formatted string (see `CommandRankingRow`'s doc comment for why). */
+  resultChars: number;
   resultCharsText: string;
   thread: ThreadLabel;
   line: number;
@@ -217,6 +239,7 @@ export function buildFlatWasteRows(
   return rows.map((row) => ({
     key: `${row.thread}-${row.line}`,
     command: row.command,
+    resultChars: row.resultChars,
     resultCharsText: formatTokens(row.resultChars),
     thread: threadLabel(row.thread),
     line: row.line,

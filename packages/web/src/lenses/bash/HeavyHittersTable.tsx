@@ -1,8 +1,33 @@
 import type { BashStatsJson } from "../../api.js";
-import { buildHeavyHitterRows } from "./bashLensFormat.js";
+import { defaultDirFor, type SortColumnDef, type SortSpec, sortRows } from "../../tableSort.js";
+import { buildHeavyHitterRows, type HeavyHitterRow } from "./bashLensFormat.js";
+import { SortableHeaderCell } from "./SortableHeaderCell.js";
+
+export type HeavyHitterSortKey = "rank" | "command" | "thread" | "resultChars" | "line";
+
+/** Column defs for `sortRows` — `thread` compares the row's already-shortened display text (`thread.text`), the same string every row actually shows, rather than the raw untruncated `agentId`. */
+const COLUMNS: readonly SortColumnDef<HeavyHitterRow, HeavyHitterSortKey>[] = [
+  { key: "rank", type: "numeric", value: (r) => r.rank },
+  { key: "command", type: "string", value: (r) => r.command },
+  { key: "thread", type: "string", value: (r) => r.thread.text },
+  { key: "resultChars", type: "numeric", value: (r) => r.resultChars },
+  { key: "line", type: "numeric", value: (r) => r.line },
+];
+
+function columnType(key: HeavyHitterSortKey): "numeric" | "string" {
+  return COLUMNS.find((c) => c.key === key)?.type ?? "numeric";
+}
+
+/** `computeHeavyHitters`'s own order (`@junrei/core`'s `bash-stats.ts`) — result chars desc — made explicit as this table's default `sortSpec`, so with no interaction yet it renders exactly as it did before sorting existed. */
+export const DEFAULT_HEAVY_HITTER_SORT: SortSpec<HeavyHitterSortKey> = {
+  key: "resultChars",
+  dir: "desc",
+};
 
 interface Props {
   heavyHitters: BashStatsJson["heavyHitters"];
+  sortSpec: SortSpec<HeavyHitterSortKey>;
+  onSortChange: (spec: SortSpec<HeavyHitterSortKey>) => void;
   /**
    * Opens the record slide-over (L3) at a heavy hitter's own line — same
    * `onOpenRecord` wiring `FileAccessTree`'s clickable rows use, threaded
@@ -18,34 +43,67 @@ interface Props {
 /**
  * Heavy hitters table (Bash lens panel 2, bottom) — top 10 Bash calls by
  * result chars, across every thread (already ranked/capped by
- * `computeHeavyHitters` in `@junrei/core`'s `bash-stats.ts`, so no further
- * client-side limiting here). When `onOpenRecord` is wired, the command
- * label becomes a `.lnbtn` button opening the record slide-over at that
- * call's own line — the same click-to-drill-down pattern
- * `FileAccessTree.tsx` already uses for its injected-content rows, not a new
- * navigation mechanism. Row data is precomputed by `buildHeavyHitterRows`
- * (`bashLensFormat.ts`).
+ * `computeHeavyHitters` in `@junrei/core`'s `bash-stats.ts`). Sortable by
+ * every column via `sortRows` (`tableSort.ts`); defaults to
+ * `DEFAULT_HEAVY_HITTER_SORT`, matching the engine's own order. When
+ * `onOpenRecord` is wired, the command label becomes a `.lnbtn` button
+ * opening the record slide-over at that call's own line — the same
+ * click-to-drill-down pattern `FileAccessTree.tsx` already uses for its
+ * injected-content rows, not a new navigation mechanism.
+ *
+ * Stays a pure function component — `sortSpec`/`onSortChange` are owned by
+ * `Bash.tsx`, not a local `useState` here (see `CommandRankingTable.tsx`'s
+ * doc comment for why: this repo's component tests call components
+ * directly as functions, which only works hook-free). Row data is
+ * precomputed by `buildHeavyHitterRows` (`bashLensFormat.ts`).
  */
-export function HeavyHittersTable({ heavyHitters, onOpenRecord }: Props) {
-  const rows = buildHeavyHitterRows(heavyHitters);
+export function HeavyHittersTable({ heavyHitters, sortSpec, onSortChange, onOpenRecord }: Props) {
+  const rows = sortRows(buildHeavyHitterRows(heavyHitters), sortSpec, COLUMNS);
+
+  const header = (key: HeavyHitterSortKey, label: string, align?: "right") => (
+    <SortableHeaderCell
+      label={label}
+      columnKey={key}
+      defaultDir={defaultDirFor(columnType(key))}
+      sortSpec={sortSpec}
+      onSortChange={onSortChange}
+      {...(align !== undefined && { align })}
+    />
+  );
 
   return (
-    <div className="pan f1 mt16" style={{ minWidth: 0, padding: "6px 0" }}>
-      <div className="bhh hdr">
-        <span className="lbl" />
-        <span className="lbl">Command</span>
-        <span className="lbl cellr">Thread</span>
-        <span className="lbl cellr">Result chars</span>
-        <span className="lbl cellr">Line</span>
+    // `role="table"`/`role="row"` restore the ancestry a `<th aria-sort>` needs to
+    // keep its implicit columnheader role (and thus expose `aria-sort` to AT) — see
+    // `SortableHeaderCell.tsx`'s doc comment. `.bhh` isn't one shared grid but a
+    // per-row `display:grid` repeated on every row `<div>` (header + data alike), so
+    // "table"/"row" land on this outer wrapper and each `.bhh` row rather than on
+    // `.bhh` itself. No `<table>`/`<tr>` fits this CSS-grid-of-`<div>`s layout, so
+    // Biome's semantic-elements preference is deliberately overridden below — a
+    // narrowly-scoped exception, not a rule to relax repo-wide.
+    // biome-ignore lint/a11y/useSemanticElements: no <table> fits this CSS-grid-of-divs layout; role="table" is the closest available semantics
+    <div className="pan f1 mt16" style={{ minWidth: 0, padding: "6px 0" }} role="table">
+      {/* biome-ignore lint/a11y/useSemanticElements: no <tr> fits this CSS-grid-of-divs row; role="row" is the closest available semantics (see role="table" comment above) */}
+      {/* biome-ignore lint/a11y/useFocusableInteractive: a static (non-interactive) row, not an ARIA grid/treegrid row — doesn't belong in the tab sequence */}
+      <div className="bhh hdr" role="row">
+        {header("rank", "#")}
+        {header("command", "Command")}
+        {header("thread", "Thread", "right")}
+        {header("resultChars", "Result chars", "right")}
+        {header("line", "Line", "right")}
       </div>
       {rows.length === 0 ? (
-        <div className="bhh" style={{ borderBottom: 0, gridTemplateColumns: "1fr" }}>
+        // biome-ignore lint/a11y/useSemanticElements: same as the header row above
+        // biome-ignore lint/a11y/useFocusableInteractive: same as the header row above
+        <div className="bhh" role="row" style={{ borderBottom: 0, gridTemplateColumns: "1fr" }}>
           <span className="fs12 mut">no Bash calls recorded</span>
         </div>
       ) : (
         rows.map((row, i) => (
+          // biome-ignore lint/a11y/useSemanticElements: same as the header row above
+          // biome-ignore lint/a11y/useFocusableInteractive: same as the header row above
           <div
             className="bhh"
+            role="row"
             key={row.key}
             style={i === rows.length - 1 ? { borderBottom: 0 } : undefined}
           >
