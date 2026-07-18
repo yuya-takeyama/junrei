@@ -7,14 +7,15 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/start.mjs",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "pnpm -r test && node --test scripts/junrei-launcher.test.mjs && ruby scripts/validate-skills.rb"
+    "test": "turbo run test && node --test scripts/junrei-launcher.test.mjs && ruby scripts/validate-skills.rb"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
+    "turbo": "2.10.5",
     "typescript": "^6.0.3"
   }
 }

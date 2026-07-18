@@ -176,8 +176,12 @@ pnpm install
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-Linting/formatting is via Biome; tests run each package's vitest suite plus a
-launcher `node --test` suite and skill validation. CI runs the same gates.
+`build`, `typecheck`, and `test` are orchestrated by
+[Turborepo](https://turborepo.dev) (`turbo.json`) for task ordering and local
+caching across the workspace; `pnpm dev`/`pnpm start` are unaffected and keep
+using the launcher scripts above. Linting/formatting is via Biome; tests run
+each package's vitest suite plus a launcher `node --test` suite and skill
+validation. CI runs the same gates.
 
 See [docs/design.md](docs/design.md) (v1 technical design),
 [docs/concept.md](docs/concept.md) (v2 concept & signal model), and
