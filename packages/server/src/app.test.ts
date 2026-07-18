@@ -578,6 +578,118 @@ describe("GET /api/overview", () => {
   });
 });
 
+describe("GET /api/trends", () => {
+  let previousConfigDir: string | undefined;
+  let previousCodexHome: string | undefined;
+
+  beforeAll(() => {
+    previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    previousCodexHome = process.env.CODEX_HOME;
+    process.env.CLAUDE_CONFIG_DIR = FIXTURES_DIR;
+    process.env.CODEX_HOME = CODEX_HOME;
+  });
+
+  afterAll(() => {
+    if (previousConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+  });
+
+  it("defaults days to 14 and tz to UTC when both are omitted", async () => {
+    const app = createApp();
+    const res = await app.request("/api/trends");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      window: { days: number; timeZone: string; bucket: string };
+    };
+    expect(body.window.days).toBe(14);
+    expect(body.window.timeZone).toBe("UTC");
+    expect(body.window.bucket).toBe("day");
+  });
+
+  it("coerces an out-of-whitelist `days` value to the default instead of 400ing (same convention as /api/sessions' limit/offset)", async () => {
+    const app = createApp();
+    const res = await app.request("/api/trends?days=5");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { window: { days: number } };
+    expect(body.window.days).toBe(14);
+  });
+
+  it("accepts each whitelisted `days` value", async () => {
+    const app = createApp();
+    for (const days of [7, 14, 30]) {
+      const res = await app.request(`/api/trends?days=${String(days)}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { window: { days: number }; buckets: unknown[] };
+      expect(body.window.days).toBe(days);
+      expect(body.buckets).toHaveLength(days);
+    }
+  });
+
+  it("400s for an invalid IANA `tz`", async () => {
+    const app = createApp();
+    const res = await app.request("/api/trends?tz=Not%2FAZone");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "tz query param must be a valid IANA time zone" });
+  });
+
+  it("accepts a valid non-UTC IANA `tz`", async () => {
+    const app = createApp();
+    const res = await app.request("/api/trends?tz=Asia%2FTokyo");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { window: { timeZone: string } };
+    expect(body.window.timeZone).toBe("Asia/Tokyo");
+  });
+
+  it("200s with a full trend report over the fixtures — zero-filled buckets, internally consistent totals", async () => {
+    const app = createApp();
+    // 30 days comfortably covers the fixtures' 2026-07-01..09 session dates
+    // from whenever this suite actually runs (see FIXTURES_DIR/CODEX_HOME).
+    const res = await app.request("/api/trends?days=30");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      buckets: Array<{ date: string; sessionCount: number; totalCostUsd: number }>;
+      summary: { current: { sessionCount: number; totalCostUsd: number } };
+    };
+    expect(body.buckets).toHaveLength(30);
+    const bucketSessionSum = body.buckets.reduce((sum, b) => sum + b.sessionCount, 0);
+    expect(bucketSessionSum).toBe(body.summary.current.sessionCount);
+    expect(body.summary.current.sessionCount).toBeGreaterThan(0);
+    const bucketCostSum = body.buckets.reduce((sum, b) => sum + b.totalCostUsd, 0);
+    expect(bucketCostSum).toBeCloseTo(body.summary.current.totalCostUsd);
+  });
+
+  it("`repo` narrows the report to one repo's sessions, same key semantics as /api/overview", async () => {
+    const app = createApp();
+    const all = await app.request("/api/trends?days=30");
+    const allBody = (await all.json()) as { summary: { current: { sessionCount: number } } };
+
+    // Fixture session 11111111 has cwd "/Users/test/proj" with no worktree
+    // marker, so its repoRoot is that same path (see deriveRepoIdentity) —
+    // same fixture /api/overview's own repo-filter test above uses.
+    const scoped = await app.request("/api/trends?days=30&repo=%2FUsers%2Ftest%2Fproj");
+    expect(scoped.status).toBe(200);
+    const scopedBody = (await scoped.json()) as {
+      summary: { current: { sessionCount: number } };
+      anomalies: { topSessions: Array<{ repoKey: string }> };
+    };
+    expect(scopedBody.summary.current.sessionCount).toBeGreaterThan(0);
+    expect(scopedBody.summary.current.sessionCount).toBeLessThanOrEqual(
+      allBody.summary.current.sessionCount,
+    );
+    for (const session of scopedBody.anomalies.topSessions) {
+      expect(session.repoKey).toBe("/Users/test/proj");
+    }
+  });
+});
+
 // `createApp`'s `webDistDir` override (see app.ts) lets these exercise the
 // production static-serving + SPA-fallback path against a fixture directory
 // standing in for a real `vite build` output, without actually running one.

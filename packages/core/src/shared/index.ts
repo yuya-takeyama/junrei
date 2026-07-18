@@ -47,6 +47,7 @@ export type {
 export { computeDelegationSummary } from "./delegation.js";
 export { parseJsonlLine } from "./jsonl.js";
 export type {
+  CacheableTokenTotals,
   ContextPoint,
   FileAccessAgg,
   FileAccessEntry,
@@ -57,7 +58,7 @@ export type {
   TokenTotals,
   UsageSummary,
 } from "./metrics.js";
-export { foldFileAccess, mergeFileAccess, mergeUsageByModel } from "./metrics.js";
+export { cacheHitRate, foldFileAccess, mergeFileAccess, mergeUsageByModel } from "./metrics.js";
 export type { CostComponents } from "./pricing/pricing.js";
 export {
   estimateCostComponents,
@@ -105,4 +106,22 @@ export type {
   UserRecordDetail,
 } from "./timeline.js";
 export { durationBetween } from "./timeline.js";
+export type {
+  TrendBucket,
+  TrendDelegationCostSplit,
+  TrendDelegationSlice,
+  TrendDelta,
+  TrendModelCost,
+  TrendModelUsageEntry,
+  TrendSessionItem,
+  TrendSpikeDay,
+  TrendSubagentReturn,
+  TrendsOptions,
+  TrendsReport,
+  TrendTokenTotals,
+  TrendTopSession,
+  TrendWindow,
+  TrendWindowTotals,
+} from "./trends.js";
+export { computeTrends } from "./trends.js";
 export type { ParseWarning, TokenUsage } from "./types.js";

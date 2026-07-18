@@ -140,6 +140,16 @@ export interface SessionListItemBase {
   usageByModel: UsageByModelEntry[];
   /** Slim main-vs-subagents cost/token split — see `DelegationLite`. */
   delegation: DelegationLite;
+  /**
+   * Sum of subagent `returnedChars` for this session, plus how many
+   * subagents contributed one — see `sumSubagentReturns`. Feeds the trends
+   * aggregate's per-day `subagentReturn` bucket (`@junrei/core`'s
+   * `computeTrends`). Claude only: Codex's own `SubagentNode`s never
+   * populate `returnedChars` (no parent-side tool_result to measure — see
+   * `codex/orchestration.ts`), so `codexAdapter`'s list items simply never
+   * set this rather than reporting a fake all-zero count.
+   */
+  subagentReturn?: { count: number; totalChars: number };
 }
 
 /**
@@ -203,4 +213,35 @@ export function mixFromUsageTree(
   };
   visit(forest);
   return [...totals].map(([model, outputTokens]) => ({ model, outputTokens }));
+}
+
+/**
+ * Sum of `SubagentNode.returnedChars` across every node in a subagent forest
+ * that resolved one (recursively, via `children`), paired with how many
+ * nodes contributed — feeds `SessionListItemBase.subagentReturn`, which in
+ * turn feeds the trends aggregate's per-day `subagentReturn` bucket
+ * (`@junrei/core`'s `computeTrends`). Returns `undefined` (not an all-zero
+ * object) when nothing in the forest resolved a `returnedChars` — same "no
+ * data" convention `DelegationSummary`'s optional `costUsd` fields use, and
+ * the reason `codexAdapter`'s list items simply never call this: Codex's own
+ * `SubagentNode`s never populate `returnedChars` (see
+ * `codex/orchestration.ts`), so every call here would return `undefined`
+ * anyway.
+ */
+export function sumSubagentReturns(
+  forest: readonly SubagentNode[],
+): { count: number; totalChars: number } | undefined {
+  let count = 0;
+  let totalChars = 0;
+  const visit = (nodes: readonly SubagentNode[]) => {
+    for (const node of nodes) {
+      if (node.returnedChars !== undefined) {
+        count += 1;
+        totalChars += node.returnedChars;
+      }
+      visit(node.children);
+    }
+  };
+  visit(forest);
+  return count > 0 ? { count, totalChars } : undefined;
 }
