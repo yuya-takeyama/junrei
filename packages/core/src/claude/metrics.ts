@@ -515,7 +515,12 @@ function parseServerId(resultText: string | undefined): string | undefined {
   return match?.[1];
 }
 
-function spanMs(start: string | undefined, end: string | undefined): number | undefined {
+/**
+ * Exported (not just a `computeTaskExecutions` internal) so `bash-stats.ts`
+ * can compute the SAME wall-clock duration for a background Bash launch's
+ * `wallClockMs` without re-deriving the date-diff logic.
+ */
+export function spanMs(start: string | undefined, end: string | undefined): number | undefined {
   if (start === undefined || end === undefined) return undefined;
   const delta = Date.parse(end) - Date.parse(start);
   return Number.isFinite(delta) && delta >= 0 ? delta : undefined;

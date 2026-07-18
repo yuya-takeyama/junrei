@@ -5,6 +5,8 @@ import { foldFileAccess, mergeFileAccess, mergeUsageByModel } from "../shared/me
 import { deriveRepoIdentity } from "../shared/repo.js";
 import type { SessionAnalysisCore } from "../shared/session-analysis.js";
 import type { SubagentNode, SubagentStatus } from "../shared/subagent-node.js";
+import type { BashStats, BashStatsThread } from "./bash-stats.js";
+import { computeBashStats } from "./bash-stats.js";
 import type {
   ClaudeTurnUsage,
   ExplorationProfile,
@@ -97,6 +99,8 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
   taskExecutions: TaskExecutionInfo[];
+  /** Bash-command analytics, main transcript + every subagent — see `BashStats`. Claude-only: Codex sessions never get this field. */
+  bashStats: BashStats;
   subagents: SubagentNode[];
   subagentCount: number;
   /** Every Workflow-tool run recorded for this session — see `ClaudeWorkflowRunSummary`. */
@@ -118,12 +122,19 @@ export async function analyzeClaudeSession(
   const sessionId = basename(filePath, ".jsonl");
   const projectDirName = basename(dirname(filePath));
 
-  const { subagents, subagentCount, subagentTotals, subagentFileAccess, workflowRuns } =
-    await analyzeSubagents(filePath, data, store);
+  const {
+    subagents,
+    subagentCount,
+    subagentTotals,
+    subagentFileAccess,
+    workflowRuns,
+    subagentBashThreads,
+  } = await analyzeSubagents(filePath, data, store);
   const { fileAccess, fileAccessTruncated, fileAccessOmittedCount } = mergeFileAccess(
     computeFileAccess(data),
     subagentFileAccess,
   );
+  const bashStats = computeBashStats([{ thread: MAIN_OWNER, data }, ...subagentBashThreads]);
 
   const usage = computeUsage(data);
   const totalUsage = {
@@ -172,6 +183,7 @@ export async function analyzeClaudeSession(
     repetitions: computeRepetitions(data),
     exploration: computeExploration(data),
     taskExecutions: computeTaskExecutions(data),
+    bashStats,
     fileAccess,
     fileAccessTruncated,
     ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
@@ -205,6 +217,8 @@ async function analyzeSubagents(
   /** Every subagent's file-access tallies, folded into one combined map. */
   subagentFileAccess: Map<string, FileAccessAgg>;
   workflowRuns: ClaudeWorkflowRunSummary[];
+  /** Every subagent's own `SessionData`, tagged by `agentId` — `computeBashStats`'s per-thread input (see `bashThreads` in `analyzeClaudeSession`). */
+  subagentBashThreads: BashStatsThread[];
 }> {
   const subagentTotals = {
     inputTokens: 0,
@@ -215,6 +229,7 @@ async function analyzeSubagents(
     costIsComplete: true,
   };
   const subagentFileAccess = new Map<string, FileAccessAgg>();
+  const subagentBashThreads: BashStatsThread[] = [];
 
   const [refs, workflowRuns] = await Promise.all([
     listSubagentRefs(filePath, store),
@@ -230,6 +245,7 @@ async function analyzeSubagents(
       subagentTotals,
       subagentFileAccess,
       workflowRuns: workflowRunSummaries,
+      subagentBashThreads,
     };
   }
 
@@ -277,6 +293,7 @@ async function analyzeSubagents(
     registerOwner(agentId, data);
     endsAtRestByAgentId.set(agentId, transcriptEndsAtRest(data));
     foldFileAccess(subagentFileAccess, computeFileAccess(data));
+    subagentBashThreads.push({ thread: agentId, data });
 
     subagentTotals.inputTokens += usage.total.inputTokens;
     subagentTotals.outputTokens += usage.total.outputTokens;
@@ -373,6 +390,7 @@ async function analyzeSubagents(
     subagentTotals,
     subagentFileAccess,
     workflowRuns: workflowRunSummaries,
+    subagentBashThreads,
   };
 }
 
