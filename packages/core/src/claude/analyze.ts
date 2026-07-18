@@ -5,7 +5,7 @@ import { foldFileAccess, mergeFileAccess, mergeUsageByModel } from "../shared/me
 import { deriveRepoIdentity } from "../shared/repo.js";
 import type { SessionAnalysisCore } from "../shared/session-analysis.js";
 import type { SubagentNode, SubagentStatus } from "../shared/subagent-node.js";
-import type { BashStats, BashStatsThread } from "./bash-stats.js";
+import type { BashStatsThread } from "./bash-stats.js";
 import { computeBashStats } from "./bash-stats.js";
 import type {
   ClaudeTurnUsage,
@@ -82,8 +82,9 @@ export interface ClaudeWorkflowRunSummary {
  * Claude Code session analysis — `SessionAnalysisCore` plus everything that
  * only makes sense for a Claude Code transcript (subagent trees, per-tool
  * breakdowns, task executions, ...). See `../shared/session-analysis.ts` for
- * the shared-core rationale (incl. why `fileAccess`/`skillInvocations` live
- * there rather than here) and `CodexSessionAnalysis` for the other variant.
+ * the shared-core rationale (incl. why `fileAccess`/`skillInvocations`/
+ * `bashStats` live there rather than here) and `CodexSessionAnalysis` for the
+ * other variant.
  */
 export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   source: "claude-code";
@@ -99,8 +100,6 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   repetitions: RepetitionFinding[];
   exploration: ExplorationProfile;
   taskExecutions: TaskExecutionInfo[];
-  /** Bash-command analytics, main transcript + every subagent — see `BashStats`. Claude-only: Codex sessions never get this field. */
-  bashStats: BashStats;
   subagents: SubagentNode[];
   subagentCount: number;
   /** Every Workflow-tool run recorded for this session — see `ClaudeWorkflowRunSummary`. */

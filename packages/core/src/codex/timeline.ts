@@ -66,7 +66,7 @@ const CODEX_INPUT_SUMMARY_KEYS = [
  * `command` is commonly a string array (e.g. `["pytest", "foo.spec.ts"]`)
  * rather than a single string — joined with spaces when found.
  */
-function summarizeCodexArgs(raw: string | undefined): string {
+export function summarizeCodexArgs(raw: string | undefined): string {
   if (raw === undefined || raw === "") return "";
   let parsed: unknown;
   try {
@@ -108,13 +108,15 @@ interface OutputInfo {
   timestamp?: string;
 }
 
-interface ExecEndInfo {
+export interface ExecEndInfo {
   exitCode?: number;
   line: number;
   timestamp?: string;
+  /** The exec's command argv, when the wire recorded one — see `CodexEventMsgInner`'s `execCommandEnd` variant (parser.ts). */
+  command?: string[];
 }
 
-interface CodexLinkMaps {
+export interface CodexLinkMaps {
   outputByCallId: Map<string, OutputInfo>;
   execEndByCallId: Map<string, ExecEndInfo>;
 }
@@ -123,9 +125,12 @@ interface CodexLinkMaps {
  * One forward pass linking `function_call_output` / `custom_tool_call_output`
  * response items and `exec_command_end` events back to the `call_id` that
  * opened them — mirrors `analyze.ts`'s `linkToolCalls`, but keyed for
- * per-entry result lookup rather than a session-wide count.
+ * per-entry result lookup rather than a session-wide count. Exported (not
+ * just used internally by this file) so `codex/tool-calls.ts` /
+ * `codex/bash-stats.ts` reuse the exact same linkage instead of re-deriving
+ * it — same call/output/exec-end pairing rules, one place.
  */
-function buildCodexLinkMaps(records: readonly CodexRecord[]): CodexLinkMaps {
+export function buildCodexLinkMaps(records: readonly CodexRecord[]): CodexLinkMaps {
   const outputByCallId = new Map<string, OutputInfo>();
   const execEndByCallId = new Map<string, ExecEndInfo>();
 
@@ -145,6 +150,7 @@ function buildCodexLinkMaps(records: readonly CodexRecord[]): CodexLinkMaps {
         ...(record.event.exitCode !== undefined && { exitCode: record.event.exitCode }),
         line: record.line,
         ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+        ...(record.event.command !== undefined && { command: record.event.command }),
       });
     }
   }
@@ -152,7 +158,7 @@ function buildCodexLinkMaps(records: readonly CodexRecord[]): CodexLinkMaps {
   return { outputByCallId, execEndByCallId };
 }
 
-interface CodexToolOutcome {
+export interface CodexToolOutcome {
   status: ToolCallStatus;
   /** Full result text, when a `*_output` or `exec_command_end` signal exists. */
   text?: string;
@@ -166,8 +172,11 @@ interface CodexToolOutcome {
  * (richer, real tool-output text); otherwise a matching `exec_command_end`
  * (local shell calls report completion this way, not via `*_output`); a call
  * with neither is `missing-result`, same as Claude's `toolCallStatus`.
+ * Exported so `codex/tool-calls.ts` reuses the exact same status/result
+ * resolution rather than re-deriving it — see `buildCodexLinkMaps`'s doc
+ * comment.
  */
-function resolveCodexToolOutcome(
+export function resolveCodexToolOutcome(
   callId: string | undefined,
   { outputByCallId, execEndByCallId }: CodexLinkMaps,
 ): CodexToolOutcome {

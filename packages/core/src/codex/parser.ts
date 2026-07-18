@@ -165,7 +165,24 @@ export type CodexEventMsgInner =
       durationMs?: number;
       aborted?: boolean;
     }
-  | { kind: "execCommandEnd"; callId: string; turnId?: string; exitCode?: number }
+  | {
+      kind: "execCommandEnd";
+      callId: string;
+      turnId?: string;
+      exitCode?: number;
+      /**
+       * The exact command argv the wire recorded for this exec — the ONLY
+       * place a `local_shell_call` response item's command text is
+       * recoverable from (the item itself carries no argv; `action` is
+       * deliberately left unparsed, see `codexResponseLocalShellCallSchema`'s
+       * doc comment). `duration` is deliberately NOT surfaced here: the raw
+       * schema declares it `z.unknown()` and no fixture or real-world capture
+       * available while building this seen its actual shape/units, so
+       * mapping it to a duration figure would be inventing a value rather
+       * than reading one — see `codex/bash-stats.ts`'s module doc comment.
+       */
+      command?: string[];
+    }
   | { kind: "threadNameUpdated"; threadId?: string; threadName: string }
   | {
       kind: "collabSpawnEnd";
@@ -605,6 +622,7 @@ function parseEventMsgInner(payload: unknown, rawType: string): CodexEventMsgInn
         callId: parsed.data.call_id,
         ...(parsed.data.turn_id !== undefined && { turnId: parsed.data.turn_id }),
         ...(parsed.data.exit_code !== undefined && { exitCode: parsed.data.exit_code }),
+        ...(parsed.data.command !== undefined && { command: parsed.data.command }),
       };
     }
     case "thread_name_updated": {

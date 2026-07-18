@@ -164,14 +164,13 @@ interface Props {
  * redirects the old `"turns"` URL segment to `"timeline"` so bookmarks keep
  * working.
  *
- * "bash" is the one lens that ISN'T source-uniform: Claude-only (see
- * `router.ts`'s `Lens` doc comment), so its render branch below additionally
- * narrows on `session.source === "claude-code"` — for a Codex session, "bash"
- * is absent from `CODEX_LENSES`, so `lensAvailable` is already false and the
- * "isn't available for this session" fallback above renders instead; the
- * extra narrow here is just what lets `Bash` take a Claude-only `SessionJson`
- * prop instead of the `AnySessionJson` union, matching every other
- * Claude-only panel in this app.
+ * "bash" renders the same way for both sources now — `SessionAnalysisCore.
+ * bashStats` (see `@junrei/core`'s `shared/session-analysis.ts`) is populated
+ * by both `analyzeClaudeSession` and `analyzeCodexSession`/`getCodexSession`
+ * (the latter overriding it with a forest-joint recompute once a session's
+ * sub-agent forest is known, mirroring how `fileAccess` is already handled —
+ * see `sources/codex.ts`), so `Bash` takes the `AnySessionJson` union like
+ * every other source-uniform lens here.
  */
 export function SessionShell({ source }: Props) {
   const { id: idParam, lens: lensParam } = useParams<"id" | "lens">();
@@ -296,32 +295,29 @@ export function SessionShell({ source }: Props) {
             }}
           />
         )}
-        {error === null &&
-          session !== null &&
-          lens === "bash" &&
-          session.source === "claude-code" && (
-            <Bash
-              session={session}
-              onOpenRecord={(line, agentId) => {
-                // Heavy hitters rank Bash calls across every thread (see
-                // `HeavyHittersTable`'s doc comment), so most rows belong to
-                // a subagent — routing every click through the main-session
-                // `recordPath` 404s for those (the server's `/record/:line`
-                // route resolves lines within ONE transcript, scoped by its
-                // `?agent=` query param — see `app.ts`). `agentRecordPath`
-                // targets the agent shell at this same "bash" lens value;
-                // that shell has no bash content of its own yet (shows a
-                // placeholder), but the record slide-over itself renders
-                // unconditionally there regardless of which lens is active
-                // (see `AgentShell.tsx`), so it still opens correctly on top.
-                navigate(
-                  agentId !== undefined
-                    ? agentRecordPath(ref, agentId, lens, line)
-                    : recordPath(ref, lens, line),
-                );
-              }}
-            />
-          )}
+        {error === null && session !== null && lens === "bash" && (
+          <Bash
+            session={session}
+            onOpenRecord={(line, agentId) => {
+              // Heavy hitters rank Bash calls across every thread (see
+              // `HeavyHittersTable`'s doc comment), so most rows belong to
+              // a subagent — routing every click through the main-session
+              // `recordPath` 404s for those (the server's `/record/:line`
+              // route resolves lines within ONE transcript, scoped by its
+              // `?agent=` query param — see `app.ts`). `agentRecordPath`
+              // targets the agent shell at this same "bash" lens value;
+              // that shell has no bash content of its own yet (shows a
+              // placeholder), but the record slide-over itself renders
+              // unconditionally there regardless of which lens is active
+              // (see `AgentShell.tsx`), so it still opens correctly on top.
+              navigate(
+                agentId !== undefined
+                  ? agentRecordPath(ref, agentId, lens, line)
+                  : recordPath(ref, lens, line),
+              );
+            }}
+          />
+        )}
       </div>
       {record !== undefined && (
         <RecordDetail sessionRef={ref} line={record} closeHref={closeRecordHref} />

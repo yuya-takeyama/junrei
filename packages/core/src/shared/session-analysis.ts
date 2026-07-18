@@ -1,3 +1,4 @@
+import type { BashStats } from "./bash-stats.js";
 import type { DelegationSummary } from "./delegation.js";
 import type {
   ContextPoint,
@@ -34,14 +35,19 @@ export interface CompactionEvent {
  * `analyze.ts` and `codex/analyze.ts`) instead of being faked here with
  * empty placeholders.
  *
- * `fileAccess`/`skillInvocations` are promoted here (rather than kept as
- * Claude-only fields, the way `subagents`/`toolStats` are) because both
- * harnesses can honestly populate the exact same shape — a path with
- * read/edit tallies, a named skill invocation — and doing so lets the Files
- * & skills lens (web) render either source through one code path instead of
- * branching on `session.source`. See `codex/files-skills.ts` for how Codex
- * derives them (deterministic `apply_patch` parsing for edits, a heuristic
- * for shell-command reads, markdown-link parsing for skill invocations).
+ * `fileAccess`/`skillInvocations`/`bashStats` are promoted here (rather than
+ * kept as Claude-only fields, the way `subagents`/`toolStats` are) because
+ * both harnesses can honestly populate the exact same shape — a path with
+ * read/edit tallies, a named skill invocation, a Bash/shell-call ranking —
+ * and doing so lets the Files & skills / Bash lenses (web) render either
+ * source through one code path instead of branching on `session.source`.
+ * See `codex/files-skills.ts` for how Codex derives file access/skill
+ * invocations (deterministic `apply_patch` parsing for edits, a heuristic for
+ * shell-command reads, markdown-link parsing for skill invocations) and
+ * `codex/bash-stats.ts` for its shell-call extraction (function_call
+ * `shell`/`exec_command`, `local_shell_call`+`exec_command_end`, and the
+ * 0.144+ "unified exec" `custom_tool_call` — see that file's doc comment for
+ * exactly what each wire surface can and can't supply).
  */
 export interface SessionAnalysisCore {
   sessionId: string;
@@ -137,4 +143,15 @@ export interface SessionAnalysisCore {
   fileAccessOmittedCount?: number;
   /** Skill/slash-command invocations, main transcript only — see `SkillInvocation`. */
   skillInvocations: SkillInvocation[];
+  /**
+   * Bash/shell-command analytics — see `BashStats`. Claude: main + every
+   * subagent, one joint pass computed at analysis time (`claude/analyze.ts`).
+   * Codex: this session's own transcript at analysis time, OVERRIDDEN at
+   * serve time (`getCodexSession` on the server) with a joint recompute over
+   * every reachable descendant sub-agent thread too — same main/override
+   * pattern as `fileAccess` above, needed here because ranking fields
+   * (`heavyHitters`, `byCommand.sharePct`) can't be additively folded after
+   * the fact (see `../shared/bash-stats.ts`'s module doc comment).
+   */
+  bashStats: BashStats;
 }

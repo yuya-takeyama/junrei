@@ -11,6 +11,20 @@ export type {
   CodexTurnUsage,
 } from "./analyze.js";
 export { analyzeCodexSession } from "./analyze.js";
+export type { NeutralBashCall, NeutralBashThread } from "./bash-stats.js";
+// `computeCodexBashStats`'s return type (`BashStats`) is the harness-neutral
+// shape exported from `shared/index.ts` — not re-declared here, same
+// convention `claude/index.ts` follows (see its own doc comment).
+// `NeutralBashCall`/`NeutralBashThread` (the shared engine's INPUT shape) and
+// `computeCodexForestBashStats` (a thin re-export of the shared engine, under
+// a Codex-specific name — see `bash-stats.ts`'s own doc comment) ARE
+// exported here: unlike `BashStats`, there is no competing Claude-side export
+// of these names, so no barrel-level collision risk.
+export {
+  computeCodexBashEntries,
+  computeCodexBashStats,
+  computeCodexForestBashStats,
+} from "./bash-stats.js";
 export type { CodexSessionFileRef } from "./discovery.js";
 export { listCodexSessionFiles, resolveCodexHome } from "./discovery.js";
 export {
@@ -25,3 +39,5 @@ export type { CodexDeferredSearchField, CodexSearchExtraction } from "./search.j
 export { extractCodexSearchFields } from "./search.js";
 export { loadCodexSessionIndexTitles } from "./session-index.js";
 export { buildCodexTimeline, getCodexRecordDetail, getCodexToolCallDetail } from "./timeline.js";
+export type { CodexToolCallRecord } from "./tool-calls.js";
+export { listCodexToolCalls } from "./tool-calls.js";

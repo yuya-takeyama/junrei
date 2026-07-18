@@ -1389,14 +1389,68 @@ describe("MCP tools", () => {
       expect(textOf(tooLarge)).toContain("topCommands");
     });
 
-    it("rejects Codex sessions clearly", async () => {
+    // CODEX_SESSION_ID's fixture (11111111...) carries no sub-agent forest,
+    // so `includeSubagents: true` (default) and `false` return the SAME
+    // main-thread-only value — this session's 2 genuine shell calls: call-1
+    // (function_call "shell", `["pytest","foo.spec.ts"]`, errors via a
+    // structured `{success:false}` output) and call-3 (`local_shell_call` +
+    // `exec_command_end`, same command recovered from the event, errors via
+    // `exit_code: 2`, a synthesized "exited with code 2" result text since
+    // Codex records no real output for that wire surface). call-2
+    // (`apply_patch`) is excluded — not a shell call.
+    it("works for a Codex session: 2 shell calls, both errors, family/subcommand resolved, apply_patch excluded", async () => {
       client = await connect();
       const result = await client.callTool({
         name: "get_bash_stats",
         arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
       });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        includeSubagents: boolean;
+        totals: { calls: number; errors: number; inputChars: number; resultChars: number };
+        byCommand: { items: Array<{ family: string; subcommand?: string; calls: number }> };
+        heavyHitters: Array<{ command: string; resultChars: number; thread: string }>;
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      const PYTEST_CMD_CHARS = "pytest foo.spec.ts".length;
+      const REAL_OUTPUT_CHARS = "process exited with code 1".length;
+      const SYNTHETIC_OUTPUT_CHARS = "exited with code 2".length;
+
+      expect(body.includeSubagents).toBe(true);
+      expect(body.totals).toEqual({
+        calls: 2,
+        errors: 2,
+        inputChars: PYTEST_CMD_CHARS * 2,
+        resultChars: REAL_OUTPUT_CHARS + SYNTHETIC_OUTPUT_CHARS,
+        estimatedTokens: Math.ceil(
+          (PYTEST_CMD_CHARS * 2 + REAL_OUTPUT_CHARS + SYNTHETIC_OUTPUT_CHARS) / 4,
+        ),
+      });
+      expect(body.byCommand.items).toEqual([
+        expect.objectContaining({ family: "pytest", calls: 2, errors: 2 }),
+      ]);
+      expect(body.heavyHitters.every((h) => h.thread === "main")).toBe(true);
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "codex-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+
+      const mainOnly = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, includeSubagents: false },
+      });
+      expect(mainOnly.isError).not.toBe(true);
+      const mainOnlyBody = JSON.parse(textOf(mainOnly)) as { totals: { calls: number } };
+      expect(mainOnlyBody.totals.calls).toBe(2);
+    });
+
+    it("404s clearly for an unknown Codex session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "codex", sessionId: "does-not-exist" },
+      });
       expect(result.isError).toBe(true);
-      expect(textOf(result)).toContain("not available for Codex sessions");
+      expect(textOf(result)).toContain("Session not found");
     });
 
     it("404s clearly for an unknown session id", async () => {
@@ -1613,14 +1667,65 @@ describe("MCP tools", () => {
       expect(negativeOffset.isError).toBe(true);
     });
 
-    it("rejects Codex sessions clearly", async () => {
+    // CODEX_SESSION_ID's fixture (11111111...) carries 4 tool calls total:
+    // call-1 (function_call "shell", errors), call-2 (custom_tool_call
+    // "apply_patch", no shell family), call-3 (local_shell_call, listed as
+    // toolName "shell", errors via exec_command_end's exit_code).
+    it("lists every Codex tool call generically, with family/subcommand set only for shell calls", async () => {
       client = await connect();
       const result = await client.callTool({
         name: "get_tool_calls",
-        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, sort: "line" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        totalCount: number;
+        toolCalls: Array<{
+          toolUseId: string;
+          toolName: string;
+          thread: string;
+          status: string;
+          family?: string;
+          subcommand?: string;
+        }>;
+      };
+      expect(body.totalCount).toBe(3);
+      const byId = new Map(body.toolCalls.map((c) => [c.toolUseId, c]));
+      expect(byId.get("call-1")).toMatchObject({
+        toolName: "shell",
+        thread: "main",
+        status: "error",
+        family: "pytest",
+      });
+      expect(byId.get("call-2")).toMatchObject({ toolName: "apply_patch", status: "ok" });
+      expect(byId.get("call-2")?.family).toBeUndefined();
+      expect(byId.get("call-3")).toMatchObject({
+        toolName: "shell",
+        thread: "main",
+        status: "error",
+        family: "pytest",
+      });
+    });
+
+    it("filters Codex tool calls by toolName, matching Codex's own wire name", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, toolName: "apply_patch" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { totalCount: number };
+      expect(body.totalCount).toBe(1);
+    });
+
+    it("404s clearly for an unknown Codex session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_calls",
+        arguments: { source: "codex", sessionId: "does-not-exist" },
       });
       expect(result.isError).toBe(true);
-      expect(textOf(result)).toContain("not available for Codex sessions");
+      expect(textOf(result)).toContain("Session not found");
     });
 
     it("404s clearly for an unknown session id", async () => {

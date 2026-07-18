@@ -135,6 +135,27 @@ describe("parseCodexTranscriptFile", () => {
     });
   });
 
+  it("surfaces exec_command_end's command argv (needed since local_shell_call itself carries no command text)", async () => {
+    const transcript = await parseCodexTranscriptFile(MAIN_FIXTURE);
+
+    const localShellCall = transcript.records.find((r) => r.line === 12);
+    expect(localShellCall).toMatchObject({
+      type: "responseItem",
+      item: { kind: "localShellCall", callId: "call-3", status: "completed" },
+    });
+
+    const execEnd = transcript.records.find((r) => r.line === 13);
+    expect(execEnd).toMatchObject({
+      type: "eventMsg",
+      event: {
+        kind: "execCommandEnd",
+        callId: "call-3",
+        exitCode: 2,
+        command: ["pytest", "foo.spec.ts"],
+      },
+    });
+  });
+
   it("parses a null token_count info without crashing, and a real one with usage", async () => {
     const transcript = await parseCodexTranscriptFile(MAIN_FIXTURE);
 

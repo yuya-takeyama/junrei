@@ -5,25 +5,14 @@
 
 export type { ClaudeSessionAnalysis, ClaudeWorkflowRunSummary } from "./analyze.js";
 export { analyzeClaudeSession } from "./analyze.js";
-export type {
-  BashAsReadCall,
-  BashBackgroundCall,
-  BashCommandGroup,
-  BashHeavyHitter,
-  BashLargeResult,
-  BashNearDuplicateGroup,
-  BashProgramFrequency,
-  BashRerunAfterError,
-  BashStats,
-  BashStatsThread,
-  BashTotals,
-  BashWaste,
-} from "./bash-stats.js";
-export {
-  computeBashStats,
-  LARGE_RESULT_CHARS_THRESHOLD,
-  normalizeCommandForDedup,
-} from "./bash-stats.js";
+// The `Bash*`/`BashStats`/`BashWaste` DATA TYPES are now harness-neutral
+// (`../shared/bash-stats.ts`) and exported from `shared/index.ts` only — see
+// that file's doc comment. `BashStatsThread` (the Claude-adapter's own INPUT
+// contract) and `computeBashStats` (the Claude adapter FUNCTION, a distinct
+// signature from the shared engine of the same name — see `bash-stats.ts`)
+// stay here, genuinely Claude-only.
+export type { BashStatsThread } from "./bash-stats.js";
+export { computeBashStats } from "./bash-stats.js";
 export { loadClaudeDesktopTitles, resolveClaudeDesktopSessionsDirs } from "./desktop.js";
 export type { ClaudeSessionFileRef } from "./discovery.js";
 export {

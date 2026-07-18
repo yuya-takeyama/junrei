@@ -1,10 +1,11 @@
 /**
  * Lens tabs shown inside a session shell (the persistent "band" + tab bar).
  * Codex gets the same tab order as Claude
- * (overview/timeline/orchestration/context/files — see
- * `codex/orchestration.ts` / `codex/files-skills.ts` in `@junrei/core` for
- * how a Codex sub-agent forest and file access/skill invocations are
- * derived) — see `CLAUDE_LENSES`/`CODEX_LENSES` below.
+ * (overview/timeline/orchestration/context/files/bash — see
+ * `codex/orchestration.ts` / `codex/files-skills.ts` / `codex/bash-stats.ts`
+ * in `@junrei/core` for how a Codex sub-agent forest, file access/skill
+ * invocations, and shell-call analytics are derived) — see
+ * `CLAUDE_LENSES`/`CODEX_LENSES` below.
  *
  * A former Codex-only "turns" lens (per-turn model/duration/token table)
  * existed here through Phase 1 of docs/roadmap.md's "Unified Timeline"; it's
@@ -16,14 +17,13 @@
  * itself rather than kept as a dead tab value.
  *
  * "bash" (command ranking / context consumption / waste detection, backed by
- * `ClaudeSessionAnalysis.bashStats` — see `Bash.tsx`) is the first lens with
- * ASYMMETRIC availability: Claude-only, no Codex shell-call equivalent yet
- * (see docs/roadmap.md's Bash analysis entry), so it's in `CLAUDE_LENSES`
- * only, not `CODEX_LENSES`. `SessionShell`/`AgentShell` already gate each
- * tab's content on `(lensTabs as readonly string[]).includes(lens)` before
- * rendering — a Codex session that browses straight to `.../bash` gets the
- * existing "This lens isn't available" fallback for free, no new guard
- * needed at the router layer.
+ * `SessionAnalysisCore.bashStats` — see `Bash.tsx`) used to be Claude-only
+ * (no Codex shell-call source fed it) — that gap closed once
+ * `codex/bash-stats.ts` (`@junrei/core`) started extracting shell calls from
+ * `function_call`/`local_shell_call`/the 0.144+ unified-exec
+ * `custom_tool_call`, so `CLAUDE_LENSES`/`CODEX_LENSES` are now identical
+ * again (kept as separate exports anyway — see `CODEX_LENSES`'s own doc
+ * comment).
  */
 export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "bash";
 
@@ -57,12 +57,12 @@ export const CLAUDE_LENSES: readonly Lens[] = [
 ];
 
 /**
- * Tab bar for a Codex session shell — same as `CLAUDE_LENSES` minus "bash"
- * (see `Lens`'s doc comment above for why that one lens diverges). Kept as
- * its own export, rather than collapsed into a single constant, since the
- * two lineups are independent facts that happen to mostly overlap — a future
- * Codex-only lens should be free to diverge further without an unrelated
- * rename.
+ * Tab bar for a Codex session shell — identical to `CLAUDE_LENSES` (see
+ * `Lens`'s doc comment on "bash" for why it's included now). Kept as its own
+ * export, rather than collapsed into a single constant, since the two
+ * lineups are independent facts that happen to fully overlap today — a
+ * future Codex-only (or Claude-only) lens should be free to diverge without
+ * an unrelated rename.
  */
 export const CODEX_LENSES: readonly Lens[] = [
   "overview",
@@ -70,6 +70,7 @@ export const CODEX_LENSES: readonly Lens[] = [
   "orchestration",
   "context",
   "files",
+  "bash",
 ];
 
 /**

@@ -2,6 +2,7 @@ import {
   type BashStats,
   buildSourceCompleteness,
   type ClaudeSessionAnalysis,
+  type CodexToolCallRecord,
   computeBashStats,
   durationBetween,
   type EvaluationTraceEvent,
@@ -40,7 +41,9 @@ import {
 } from "./search.js";
 import {
   type CodexSessionAnalysisWithSubagents,
+  collectCodexToolCallThreads,
   getCodexSession,
+  getCodexSessionBashStatsMainOnly,
   getCodexSessionRecordDetail,
   getCodexSessionToolCallDetail,
   getSession,
@@ -768,10 +771,13 @@ function cappedEvaluationTraceEvent(
 
 // ---------------------------------------------------------------------------
 // get_bash_stats / get_tool_calls — Bash-command analytics and a generic
-// paginated tool-call listing (Claude Code only for now — see
-// `notAvailableForCodex`). Built on `@junrei/core`'s `computeBashStats` /
-// `parseShellCommand`/`primaryCommand` ("Bash analysis", PR 1); this file
-// only shapes their output for MCP + adds the `get_tool_calls` discovery
+// paginated tool-call listing, for both Claude Code and Codex sessions (Bash
+// analysis PR 1 shipped Claude-only; PR 4 added the Codex adapter —
+// `@junrei/core`'s `codex/bash-stats.ts`/`codex/tool-calls.ts`). Built on
+// `@junrei/core`'s `computeBashStats`/`parseShellCommand`/`primaryCommand`
+// (Claude) and `getCodexSession`'s forest-joint `bashStats` override /
+// `collectCodexToolCallThreads` (Codex, `sources/codex.ts`); this file only
+// shapes their output for MCP + adds the `get_tool_calls` discovery
 // primitive that neither `get_records` (line-scoped) nor `get_tool_call`
 // (needs an already-known toolUseId) provide.
 // ---------------------------------------------------------------------------
@@ -879,6 +885,36 @@ function toToolCallItem(thread: string, call: ToolCall): ToolCallListItem {
   };
   if (call.name !== "Bash") return item;
   const primary = primaryCommand(parseShellCommand(bashCommandOf(call.input)));
+  return {
+    ...item,
+    family: primary?.executable ?? UNPARSED_BASH_FAMILY,
+    ...(primary?.subcommand !== undefined && { subcommand: primary.subcommand }),
+  };
+}
+
+/**
+ * Codex analog of `toToolCallItem` — `CodexToolCallRecord` (`@junrei/core`'s
+ * `codex/tool-calls.ts`) already carries everything generically (status,
+ * inputChars/resultChars, inputSummary) via the SAME linkage the Timeline
+ * lens uses; `family`/`subcommand` are set only when `shellCommand` resolved
+ * (a genuine shell execution), same "Bash calls only" gate `toToolCallItem`
+ * applies for Claude.
+ */
+function toCodexToolCallItem(thread: string, record: CodexToolCallRecord): ToolCallListItem {
+  const item: ToolCallListItem = {
+    toolUseId: record.callId,
+    line: record.line,
+    ...(record.timestamp !== undefined && { timestamp: record.timestamp }),
+    toolName: record.toolName,
+    thread,
+    status: record.status,
+    inputChars: record.inputChars,
+    resultChars: record.resultChars,
+    ...(record.durationMs !== undefined && { durationMs: record.durationMs }),
+    inputSummary: record.inputSummary,
+  };
+  if (record.shellCommand === undefined) return item;
+  const primary = primaryCommand(parseShellCommand(record.shellCommand));
   return {
     ...item,
     family: primary?.executable ?? UNPARSED_BASH_FAMILY,
@@ -1735,9 +1771,17 @@ export function createMcpServer(): McpServer {
         "background execution time), NOT context/API cost. `includeSubagents: false` does NOT " +
         "post-hoc filter the joint result (rankings/sharePct are computed jointly across every " +
         "thread and can't be un-mixed) — it recomputes stats from the main transcript ALONE. " +
-        "Claude Code sessions only. Every response includes sourceCompleteness — a " +
-        "machine-readable declaration of what the underlying session source cannot show; treat " +
-        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
+        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex"), covering ' +
+        "shell calls across function_call (shell/exec_command, including a bash/sh/zsh -lc " +
+        "wrapper unwrapped to its inner command), local_shell_call, and the 0.144+ unified-exec " +
+        "custom_tool_call form. Codex specifics: `background` is always empty (no " +
+        "run_in_background concept exists in Codex's data model yet); a `local_shell_call`-sourced " +
+        'entry\'s `resultChars` reflects only a synthesized "exited with code N" placeholder ' +
+        "(Codex records no real stdout/stderr for that wire surface, unlike function_call/" +
+        "custom_tool_call entries, which do carry real output text). Every response includes " +
+        "sourceCompleteness — a machine-readable declaration of what the underlying session " +
+        "source cannot show; treat absent/not-recorded dimensions as unknowable from this data, " +
+        "not as evidence of absence.",
       inputSchema: {
         ...sessionRef,
         includeSubagents: z
@@ -1760,10 +1804,20 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ source, sessionId, includeSubagents, topCommands }) => {
-      if (source === "codex") return notAvailableForCodex();
       // zod already enforces topCommands <= BASH_STATS_MAX_TOP_COMMANDS.
       const cap = topCommands ?? BASH_STATS_DEFAULT_TOP_COMMANDS;
       const includeSub = includeSubagents ?? true;
+
+      if (source === "codex") {
+        const stats = includeSub
+          ? (await getCodexSession(sessionId))?.bashStats
+          : await getCodexSessionBashStatsMainOnly(sessionId);
+        if (stats === undefined) return notFound(sessionId);
+        return jsonResult(
+          { sessionId, includeSubagents: includeSub, ...toBashStatsResponse(stats, cap) },
+          ["codex-session-jsonl"],
+        );
+      }
 
       if (includeSub) {
         const analysis = await getSession(sessionId);
@@ -1802,10 +1856,16 @@ export function createMcpServer(): McpServer {
         "(the resolved executable and, for known command families like git/pnpm/gh, its " +
         "subcommand — see get_bash_stats). `totalCount` is the post-filter, pre-pagination match " +
         'count, for building a pager. `thread: "subagents"`/`"all"` walks every subagent ' +
-        "sidecar transcript, not just the main one. Claude Code sessions only. Every response " +
-        "includes sourceCompleteness — a machine-readable declaration of what the underlying " +
-        "session source cannot show; treat absent/not-recorded dimensions as unknowable from " +
-        "this data, not as evidence of absence.",
+        "sidecar transcript, not just the main one. Works for both Claude Code sessions and Codex " +
+        'CLI sessions (source: "codex") — `toolName` matches Codex\'s own wire names ' +
+        '("shell"/"exec_command"/"exec"/"apply_patch"/"web_search"/...; a `local_shell_call` ' +
+        'lists as `toolName: "shell"`, same convention the Timeline lens uses), and a shell-call ' +
+        "row's family/subcommand come from the same neutral extraction get_bash_stats uses " +
+        '(including bash/sh/zsh -lc wrapper unwrapping); `thread: "subagents"`/`"all"` walks a ' +
+        "Codex session's sub-agent forest (sibling rollout files) rather than sidecar transcripts. " +
+        "Every response includes sourceCompleteness — a machine-readable declaration of what the " +
+        "underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
       inputSchema: {
         ...sessionRef,
         toolName: z.string().optional().describe('Exact tool name match, e.g. "Bash"'),
@@ -1829,23 +1889,34 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ source, sessionId, toolName, thread, status, sort, limit, offset }) => {
-      if (source === "codex") return notAvailableForCodex();
       const threadFilter = thread ?? "all";
       const statusFilter = status ?? "all";
       const sortKey = sort ?? "line";
       const lim = limit ?? GET_TOOL_CALLS_DEFAULT_LIMIT;
       const off = offset ?? 0;
 
-      const threads = await collectToolCallThreads(sessionId, threadFilter);
-      if (threads === undefined) return notFound(sessionId);
-
       const items: ToolCallListItem[] = [];
-      for (const { thread: threadId, data } of threads) {
-        for (const call of data.toolCalls) {
-          if (toolName !== undefined && call.name !== toolName) continue;
-          const item = toToolCallItem(threadId, call);
-          if (statusFilter !== "all" && item.status !== statusFilter) continue;
-          items.push(item);
+      if (source === "codex") {
+        const codexThreads = await collectCodexToolCallThreads(sessionId, threadFilter);
+        if (codexThreads === undefined) return notFound(sessionId);
+        for (const { thread: threadId, records } of codexThreads) {
+          for (const record of records) {
+            if (toolName !== undefined && record.toolName !== toolName) continue;
+            const item = toCodexToolCallItem(threadId, record);
+            if (statusFilter !== "all" && item.status !== statusFilter) continue;
+            items.push(item);
+          }
+        }
+      } else {
+        const threads = await collectToolCallThreads(sessionId, threadFilter);
+        if (threads === undefined) return notFound(sessionId);
+        for (const { thread: threadId, data } of threads) {
+          for (const call of data.toolCalls) {
+            if (toolName !== undefined && call.name !== toolName) continue;
+            const item = toToolCallItem(threadId, call);
+            if (statusFilter !== "all" && item.status !== statusFilter) continue;
+            items.push(item);
+          }
         }
       }
 
@@ -1860,7 +1931,7 @@ export function createMcpServer(): McpServer {
       const totalCount = items.length;
       const toolCalls = items.slice(off, off + lim);
 
-      return jsonResult({ sessionId, totalCount, toolCalls }, ["claude-session-jsonl"]);
+      return jsonResult({ sessionId, totalCount, toolCalls }, [sourceKindFor(source)]);
     },
   );
 

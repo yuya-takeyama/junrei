@@ -65,7 +65,7 @@ export type SubagentNodeJson = SessionJson["subagents"][number];
 export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
 /** One Workflow-tool run's session-level summary — Claude-only, see `ClaudeWorkflowRunSummary` in `@junrei/core`. */
 export type WorkflowRunSummaryJson = SessionJson["workflowRuns"][number];
-/** Bash-command analytics (Claude only) — see `BashStats` in `@junrei/core`'s `claude/bash-stats.ts`. */
+/** Bash-command analytics, both harnesses — see `BashStats` in `@junrei/core`'s `shared/bash-stats.ts` (`SessionAnalysisCore.bashStats`). */
 export type BashStatsJson = SessionJson["bashStats"];
 
 /**
