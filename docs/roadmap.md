@@ -77,7 +77,9 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   `preview-verifier`
 - ✅ Turborepo-based task running for `build`/`typecheck`/`test` with local
   caching (`turbo.json`, root scripts now `turbo run <task>`); `dev`/`start`
-  stay on the pnpm launcher, out of turbo's scope (2026-07-18)
+  stay on the pnpm launcher, out of turbo's scope (2026-07-18); CI now
+  restores/saves the `.turbo` cache (`actions/cache`, keyed on `github.sha`)
+  so task results are reused across runs
 
 ## v2 — Concept & IA redesign
 
