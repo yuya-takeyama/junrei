@@ -1,8 +1,11 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeClaudeSession } from "./analyze.js";
 import { listClaudeSessionFiles } from "./discovery.js";
+import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 
 const FIXTURE_PROJECTS = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -134,6 +137,8 @@ describe("analyzeClaudeSession", () => {
   it("analyzes the subagent sidecar and merges totals", async () => {
     const analysis = await analyzeClaudeSession(SESSION_FILE);
     expect(analysis.subagentCount).toBe(1);
+    // Fully healthy session — nothing failed to parse.
+    expect(analysis.skippedSubagentCount).toBe(0);
     const agent = analysis.subagents[0];
     expect(agent?.agentId).toBe("aaaa111122223333f");
     expect(agent?.agentType).toBe("Explore");
@@ -516,6 +521,252 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
     expect(agent?.spawnedBy).toBe("dddd000011112222c");
     expect(agent?.returnedChars).toBeUndefined();
     expect(agent?.status).toBe("completed");
+  });
+});
+
+describe("analyzeClaudeSession with a corrupt subagent transcript", () => {
+  // Regression coverage for the "one unreadable subagent sidecar shouldn't
+  // fail the whole session" bug: a session with two subagent sidecars, one
+  // healthy and one that fails to parse, must still resolve — with the
+  // failing one excluded from `subagents`/`subagentCount` and counted in
+  // `skippedSubagentCount` instead. Built in a temp dir (not the shared
+  // checked-in fixtures under test/fixtures/projects, which other tests
+  // assert exact values against).
+  const SESSION_ID = "77777777-7777-7777-7777-777777777777";
+  const VALID_AGENT_ID = "validaaaa1111111111";
+  const CORRUPT_AGENT_ID = "corruptbbbb22222222";
+
+  let tempDir: string;
+  let mainFile: string;
+  let faultInjectingStore: ClaudeSessionStore;
+
+  beforeAll(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "junrei-analyze-corrupt-subagent-"));
+    const projectDir = join(tempDir, "-tmp-corrupt-fixture-proj");
+    const subagentsDir = join(projectDir, SESSION_ID, "subagents");
+    await mkdir(subagentsDir, { recursive: true });
+
+    mainFile = join(projectDir, `${SESSION_ID}.jsonl`);
+    const mainLines = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        sessionId: SESSION_ID,
+        timestamp: "2026-07-19T00:00:00.000Z",
+        isSidechain: false,
+        cwd: "/tmp/corrupt-fixture",
+        version: "2.1.202",
+        message: { role: "user", content: "Spawn two subagents" },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        sessionId: SESSION_ID,
+        timestamp: "2026-07-19T00:00:01.000Z",
+        isSidechain: false,
+        requestId: "req_1",
+        message: {
+          id: "msg_1",
+          role: "assistant",
+          model: "claude-fable-5",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_agent_valid",
+              name: "Agent",
+              input: {
+                description: "Valid subagent",
+                subagent_type: "general-purpose",
+                prompt: "do valid work",
+              },
+            },
+          ],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "user",
+        uuid: "u2",
+        parentUuid: "a1",
+        sessionId: SESSION_ID,
+        timestamp: "2026-07-19T00:00:30.000Z",
+        isSidechain: false,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_agent_valid",
+              is_error: null,
+              content: "Valid agent finished.",
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "a2",
+        parentUuid: "u2",
+        sessionId: SESSION_ID,
+        timestamp: "2026-07-19T00:00:31.000Z",
+        isSidechain: false,
+        requestId: "req_2",
+        message: {
+          id: "msg_2",
+          role: "assistant",
+          model: "claude-fable-5",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_agent_corrupt",
+              name: "Agent",
+              input: {
+                description: "Corrupt subagent",
+                subagent_type: "general-purpose",
+                prompt: "do corrupt work",
+              },
+            },
+          ],
+          usage: {
+            input_tokens: 110,
+            output_tokens: 25,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "user",
+        uuid: "u3",
+        parentUuid: "a2",
+        sessionId: SESSION_ID,
+        timestamp: "2026-07-19T00:01:00.000Z",
+        isSidechain: false,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_agent_corrupt",
+              is_error: null,
+              content: "Corrupt agent finished.",
+            },
+          ],
+        },
+      },
+    ];
+    await writeFile(mainFile, `${mainLines.map((l) => JSON.stringify(l)).join("\n")}\n`);
+
+    const validLines = [
+      {
+        type: "user",
+        uuid: "sv-u1",
+        parentUuid: null,
+        sessionId: SESSION_ID,
+        agentId: VALID_AGENT_ID,
+        timestamp: "2026-07-19T00:00:05.000Z",
+        isSidechain: true,
+        message: { role: "user", content: "do valid work" },
+      },
+      {
+        type: "assistant",
+        uuid: "sv-a1",
+        parentUuid: "sv-u1",
+        sessionId: SESSION_ID,
+        agentId: VALID_AGENT_ID,
+        timestamp: "2026-07-19T00:00:20.000Z",
+        isSidechain: true,
+        requestId: "req_sv1",
+        message: {
+          id: "msg_sv1",
+          role: "assistant",
+          model: "claude-haiku-4-5-20251001",
+          content: [{ type: "text", text: "Valid agent finished." }],
+          usage: {
+            input_tokens: 50,
+            output_tokens: 15,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+    ];
+    await writeFile(
+      join(subagentsDir, `agent-${VALID_AGENT_ID}.jsonl`),
+      `${validLines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+    );
+    await writeFile(
+      join(subagentsDir, `agent-${VALID_AGENT_ID}.meta.json`),
+      JSON.stringify({
+        agentType: "general-purpose",
+        description: "Valid subagent",
+        toolUseId: "toolu_agent_valid",
+        spawnDepth: 1,
+      }),
+    );
+
+    // The sidecar file still exists on disk (so the real store's directory
+    // scan discovers it as a ref, same as production), but its content is
+    // garbage — and the store below refuses to read it at all, simulating
+    // the "unreadable/corrupt transcript" failure this test guards against.
+    await writeFile(
+      join(subagentsDir, `agent-${CORRUPT_AGENT_ID}.jsonl`),
+      "this is not valid json at all {{{\n",
+    );
+    await writeFile(
+      join(subagentsDir, `agent-${CORRUPT_AGENT_ID}.meta.json`),
+      JSON.stringify({
+        agentType: "general-purpose",
+        description: "Corrupt subagent",
+        toolUseId: "toolu_agent_corrupt",
+        spawnDepth: 1,
+      }),
+    );
+
+    // Fault-inject at the store level so the failure is deterministic and
+    // platform-independent (no reliance on chmod/EACCES/symlink quirks) —
+    // reads for every other path still go through the real local store.
+    faultInjectingStore = {
+      ...localClaudeSessionStore,
+      openLines(filePath: string) {
+        if (filePath.includes(CORRUPT_AGENT_ID)) {
+          throw new Error("simulated unreadable subagent transcript");
+        }
+        return localClaudeSessionStore.openLines(filePath);
+      },
+    };
+  });
+
+  afterAll(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("resolves the session, skipping the corrupt sidecar rather than throwing", async () => {
+    await expect(analyzeClaudeSession(mainFile, faultInjectingStore)).resolves.toBeDefined();
+  });
+
+  it("excludes the corrupt sidecar from subagents/subagentCount and counts it as skipped", async () => {
+    const analysis = await analyzeClaudeSession(mainFile, faultInjectingStore);
+    expect(analysis.subagents).toHaveLength(1);
+    expect(analysis.subagents[0]?.agentId).toBe(VALID_AGENT_ID);
+    expect(analysis.subagentCount).toBe(1);
+    expect(analysis.skippedSubagentCount).toBe(1);
+  });
+
+  it("only folds the valid sidecar's usage into the subagent totals", async () => {
+    const analysis = await analyzeClaudeSession(mainFile, faultInjectingStore);
+    // The valid sidecar's own usage is 50 input tokens; the corrupt one never
+    // parses, so it can't contribute (and doesn't inflate totalUsage).
+    const valid = analysis.subagents[0];
+    expect(valid?.usage.total.inputTokens).toBe(50);
+    expect(analysis.totalUsage.inputTokens).toBe(analysis.usage.total.inputTokens + 50);
   });
 });
 

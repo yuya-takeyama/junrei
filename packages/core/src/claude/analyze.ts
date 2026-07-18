@@ -102,6 +102,14 @@ export interface ClaudeSessionAnalysis extends SessionAnalysisCore {
   taskExecutions: TaskExecutionInfo[];
   subagents: SubagentNode[];
   subagentCount: number;
+  /**
+   * Count of subagent sidecar transcripts that failed to parse (unreadable
+   * or corrupt) and were therefore skipped — excluded from `subagents`,
+   * `subagentCount`, and the subagent usage/file-access/bash totals folded
+   * into this analysis. A nonzero value means the session's true subagent
+   * count/totals are a lower bound, not that no subagents ran.
+   */
+  skippedSubagentCount: number;
   /** Every Workflow-tool run recorded for this session — see `ClaudeWorkflowRunSummary`. */
   workflowRuns: ClaudeWorkflowRunSummary[];
 }
@@ -124,6 +132,7 @@ export async function analyzeClaudeSession(
   const {
     subagents,
     subagentCount,
+    skippedSubagentCount,
     subagentTotals,
     subagentFileAccess,
     workflowRuns,
@@ -189,6 +198,7 @@ export async function analyzeClaudeSession(
     skillInvocations: computeSkillInvocations(data),
     subagents,
     subagentCount,
+    skippedSubagentCount,
     workflowRuns,
     parseWarningCount: data.warningCount,
     ...(data.cwd !== undefined && { cwd: data.cwd }),
@@ -212,6 +222,8 @@ async function analyzeSubagents(
 ): Promise<{
   subagents: SubagentNode[];
   subagentCount: number;
+  /** See `ClaudeSessionAnalysis.skippedSubagentCount`. */
+  skippedSubagentCount: number;
   subagentTotals: TokenTotals & { costUsd: number; costIsComplete: boolean };
   /** Every subagent's file-access tallies, folded into one combined map. */
   subagentFileAccess: Map<string, FileAccessAgg>;
@@ -229,6 +241,8 @@ async function analyzeSubagents(
   };
   const subagentFileAccess = new Map<string, FileAccessAgg>();
   const subagentBashThreads: BashStatsThread[] = [];
+  /** Subagent sidecar transcripts that failed to parse — see `ClaudeSessionAnalysis.skippedSubagentCount`. */
+  let skippedSubagentCount = 0;
 
   const [refs, workflowRuns] = await Promise.all([
     listSubagentRefs(filePath, store),
@@ -241,6 +255,7 @@ async function analyzeSubagents(
     return {
       subagents: [],
       subagentCount: 0,
+      skippedSubagentCount: 0,
       subagentTotals,
       subagentFileAccess,
       workflowRuns: workflowRunSummaries,
@@ -286,8 +301,18 @@ async function analyzeSubagents(
   registerOwner(MAIN_OWNER, mainData);
 
   for (const { agentId, jsonlPath, meta, workflowRunId } of refs) {
-    const transcript = await parseClaudeTranscriptFile(jsonlPath, store);
-    const data = buildSessionData(transcript);
+    // Mirrors `loadSubagentSessionData` (subagents.ts): a single unreadable
+    // or corrupt sidecar must not derail the whole session's analysis — skip
+    // it and keep going. Scoped to ONLY the input-dependent parsing steps, so
+    // a bug in the aggregation code below still surfaces as a real failure.
+    let data: SessionData;
+    try {
+      const transcript = await parseClaudeTranscriptFile(jsonlPath, store);
+      data = buildSessionData(transcript);
+    } catch {
+      skippedSubagentCount += 1;
+      continue;
+    }
     const usage = computeUsage(data);
     registerOwner(agentId, data);
     endsAtRestByAgentId.set(agentId, transcriptEndsAtRest(data));
@@ -386,6 +411,7 @@ async function analyzeSubagents(
   return {
     subagents: roots,
     subagentCount: nodes.size,
+    skippedSubagentCount,
     subagentTotals,
     subagentFileAccess,
     workflowRuns: workflowRunSummaries,
