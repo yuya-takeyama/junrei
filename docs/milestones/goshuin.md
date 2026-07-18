@@ -72,6 +72,15 @@ Reconstructing the actual per-request API payloads from the session log
   disk (`~/.claude/CLAUDE.md` + `~/.claude.json` `oauthAccount.emailAddress`
   + the request timestamp) — but only because disk hadn't drifted since the
   session. This path is inherently **disk-contingent**, not log-derived.
+- **Production calibration (2026-07-18, phase C ship)**: the shipped
+  `@junrei/core` reconstruction, driven by
+  `experiments/claude-code-capture/recon/compare.mjs` against capture run A
+  with a template extracted from the same run — exact-class bytes 98.55%
+  matched (sole mismatch: the documented task-notification safety-preamble
+  anomaly, declared per-block), template 100%, disk-contingent 100% (a real
+  post-session `~/.claude.json` change correctly flagged `driftDetected`),
+  unknown 0% (billing headers, declared unrecoverable). Headline
+  exact+template coverage: **92.95% of wire bytes** (acceptance bar ≥ 85%).
 
 ### Cross-run stability of the non-logged parts (measured)
 

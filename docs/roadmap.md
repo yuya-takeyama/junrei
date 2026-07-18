@@ -95,9 +95,15 @@ decision record: [milestones/goshuin.md](./milestones/goshuin.md).
     flags everywhere; Claude tool_result text recovered in full from the
     raw source line past the parser's 2000-char capture cap (web
     record-detail badge now driven by the explicit signal)
-  - ⬜ C: reconstruction layer ("virtual wire",
-    `get_reconstructed_request`) + promote recon scripts into
-    `experiments/` with fixture-based tests
+  - ✅ C: reconstruction layer ("virtual wire") — `@junrei/core`
+    `claude/reconstruction/` (confidence classes exact/template/
+    disk-contingent/unknown, named normalization rules, template +
+    disk-context provider interfaces), MCP `get_reconstructed_request`
+    (discovery + full payload, explicit truncation), recon scripts
+    promoted into `experiments/claude-code-capture/recon/` driving the
+    production code; calibrated on capture run A: exact+template = 92.95%
+    of wire bytes (bar ≥ 85%), drift detection verified on a real
+    post-session change
   - ⬜ D: wire-capture ingestion (opt-in, local-only)
   - ⬜ E: OTel ingestion (OTLP endpoint on the junrei server)
   - ⬜ F: evaluation-trace export + analysis playbooks

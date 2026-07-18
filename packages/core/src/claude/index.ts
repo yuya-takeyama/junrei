@@ -36,6 +36,7 @@ export {
 } from "./metrics.js";
 export { parseClaudeTranscriptFile, parseClaudeTranscriptLines } from "./parser.js";
 export { joinPath } from "./paths.js";
+export * from "./reconstruction/index.js";
 export { extractClaudeSearchFields } from "./search.js";
 export type {
   ApiErrorLogEntry,
