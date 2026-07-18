@@ -116,6 +116,7 @@ claude mcp add --transport http junrei http://localhost:7867/mcp
 | `get_task_executions` | Every Bash command and Agent run, with duration and outcome. | Claude Code only |
 | `get_first_prompt` | The first user prompt of a session. | Claude Code + Codex |
 | `get_repo_overview` | Repo-level rollup across every session in a repo: cost timeline, per-model breakdown, top sessions. | Claude Code + Codex |
+| `get_session_observability` | Claude Code's own OTel export for a session, parsed: authoritative cost, api-request latency, tool-decision/health events. Opt-in — see [OTel ingestion](#otel-ingestion-opt-in). | Claude Code only |
 
 ## How it works
 
@@ -143,6 +144,41 @@ This is opt-in and off by default:
   credentials are resolved via the AWS SDK's default chain.
 - `JUNREI_S3_LIST_TTL_MS` — how long the S3 object listing is cached before
   a fresh `ListObjectsV2` sweep, in milliseconds (default `10000`).
+
+### OTel ingestion (opt-in)
+
+Junrei can also ingest Claude Code's own OpenTelemetry export — an
+authoritative side channel Claude Code sends for observability, separate
+from (and carrying different information than) the session JSONL. This is
+opt-in and off by default; with it unset, Junrei's behavior is completely
+unchanged:
+
+- `JUNREI_OTEL_DIR` — an absolute directory path. When set, the junrei
+  server accepts OTLP/HTTP JSON POSTs at `/otlp/v1/logs` and
+  `/otlp/v1/metrics` and stores them as one JSONL file per Claude Code
+  `session.id` under this directory (`_unassigned.jsonl` for any record
+  whose session id couldn't be resolved). Unset, those routes don't exist —
+  a request to them 404s exactly like any other unknown route.
+
+On the Claude Code side, point its OTel exporters at the junrei server:
+
+```sh
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:7867/otlp
+```
+
+Once both sides are configured, the `get_session_observability` MCP tool
+returns authoritative billing-computed cost (`costBasis: "otel"`) alongside
+the usual pricing-table estimate (`costBasis: "pricing-table-estimate"`) and
+their delta, per-`api_request` latency stats, `tool_decision`
+(permission accept/reject) events, and MCP/hook health events — none of
+which the session JSONL carries. OTel carries no prompt or tool content at
+all (no user/assistant text, no tool arguments/results, no system prompt or
+schemas) — it's a pure ops/billing channel, never a content source.
+Retention of `JUNREI_OTEL_DIR`'s contents is user-managed; Junrei never
+deletes what it wrote there.
 
 Architecture (pnpm workspace):
 

@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 
 // resolveClaudeProjectsDirs() joins `${CLAUDE_CONFIG_DIR}/projects`, so pointing it
@@ -610,5 +610,137 @@ describe("SPA fallback — no build present (dev/test default)", () => {
     const res = await app.request("/api/nonexistent");
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not found" });
+  });
+});
+
+describe("OTel receiver — POST /otlp/v1/logs and /otlp/v1/metrics (opt-in, Decision 7)", () => {
+  let previousOtelDir: string | undefined;
+
+  beforeAll(() => {
+    previousOtelDir = process.env.JUNREI_OTEL_DIR;
+  });
+
+  afterAll(() => {
+    if (previousOtelDir === undefined) {
+      delete process.env.JUNREI_OTEL_DIR;
+    } else {
+      process.env.JUNREI_OTEL_DIR = previousOtelDir;
+    }
+  });
+
+  describe("disabled (JUNREI_OTEL_DIR unset)", () => {
+    beforeAll(() => {
+      delete process.env.JUNREI_OTEL_DIR;
+    });
+
+    it("POST /otlp/v1/logs 404s byte-for-byte identically to a genuinely unregistered route", async () => {
+      const app = createApp();
+      const otlpRes = await app.request("/otlp/v1/logs", {
+        method: "POST",
+        body: JSON.stringify({ resourceLogs: [] }),
+        headers: { "content-type": "application/json" },
+      });
+      const unknownRes = await app.request("/some/totally/unregistered/route", { method: "POST" });
+      expect(otlpRes.status).toBe(404);
+      expect(otlpRes.status).toBe(unknownRes.status);
+      expect(await otlpRes.text()).toBe(await unknownRes.text());
+      expect(otlpRes.headers.get("content-type")).toBe(unknownRes.headers.get("content-type"));
+    });
+
+    it("POST /otlp/v1/metrics 404s the same way", async () => {
+      const app = createApp();
+      const otlpRes = await app.request("/otlp/v1/metrics", {
+        method: "POST",
+        body: JSON.stringify({ resourceMetrics: [] }),
+        headers: { "content-type": "application/json" },
+      });
+      const unknownRes = await app.request("/some/totally/unregistered/route", { method: "POST" });
+      expect(otlpRes.status).toBe(404);
+      expect(await otlpRes.text()).toBe(await unknownRes.text());
+    });
+  });
+
+  describe("enabled (JUNREI_OTEL_DIR set)", () => {
+    let otelDir: string;
+
+    beforeEach(async () => {
+      otelDir = await mkdtemp(join(tmpdir(), "junrei-otel-http-"));
+      process.env.JUNREI_OTEL_DIR = otelDir;
+    });
+
+    afterEach(async () => {
+      await rm(otelDir, { recursive: true, force: true });
+    });
+
+    it("POST /otlp/v1/logs stores the body under <session.id>.jsonl and acks with the OTLP success shape", async () => {
+      const app = createApp();
+      const body = {
+        resourceLogs: [
+          {
+            resource: {
+              attributes: [{ key: "session.id", value: { stringValue: "http-sess-1" } }],
+            },
+            scopeLogs: [],
+          },
+        ],
+      };
+      const res = await app.request("/otlp/v1/logs", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({});
+
+      const stored = await readFile(join(otelDir, "http-sess-1.jsonl"), "utf8");
+      expect(stored).toBe(`${JSON.stringify(body)}\n`);
+    });
+
+    it("POST /otlp/v1/metrics stores the body and acks the same way", async () => {
+      const app = createApp();
+      const body = {
+        resourceMetrics: [
+          {
+            resource: {
+              attributes: [{ key: "session.id", value: { stringValue: "http-sess-2" } }],
+            },
+            scopeMetrics: [],
+          },
+        ],
+      };
+      const res = await app.request("/otlp/v1/metrics", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({});
+      const stored = await readFile(join(otelDir, "http-sess-2.jsonl"), "utf8");
+      expect(stored).toBe(`${JSON.stringify(body)}\n`);
+    });
+
+    it("a body with no resolvable session.id lands in _unassigned.jsonl, not dropped", async () => {
+      const app = createApp();
+      const body = { resourceLogs: [{ resource: { attributes: [] }, scopeLogs: [] }] };
+      const res = await app.request("/otlp/v1/logs", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+      const stored = await readFile(join(otelDir, "_unassigned.jsonl"), "utf8");
+      expect(stored).toBe(`${JSON.stringify(body)}\n`);
+    });
+
+    it("still acks with the OTLP success shape for an unparseable body, storing nothing", async () => {
+      const app = createApp();
+      const res = await app.request("/otlp/v1/logs", {
+        method: "POST",
+        body: "not valid json",
+        headers: { "content-type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({});
+    });
   });
 });

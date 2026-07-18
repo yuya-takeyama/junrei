@@ -17,16 +17,25 @@
  *  - `partial` — recorded, but not the full picture (e.g. thinking blocks
  *    recorded per-turn but not re-sent in later requests).
  *  - `estimate` — derived (e.g. cost = token counts x a pricing table).
+ *  - `authoritative` — recorded directly by the source of truth, not
+ *    derived/estimated (e.g. OTel's billing-computed `cost_usd`, vs. the
+ *    session log's pricing-table `estimate`).
  *  - `absent` — never recorded by this source at all.
  *  - `not-recorded` — happens outside what this source observes (e.g.
  *    auxiliary API calls the session log has no channel to log).
  *  - `unknown` — completeness for this dimension/source pair hasn't been
  *    audited yet.
  */
-export type CompletenessStatus = "partial" | "estimate" | "absent" | "not-recorded" | "unknown";
+export type CompletenessStatus =
+  | "partial"
+  | "estimate"
+  | "authoritative"
+  | "absent"
+  | "not-recorded"
+  | "unknown";
 
-/** Session-log formats `sourceCompleteness` can describe. */
-export type SourceKind = "claude-session-jsonl" | "codex-session-jsonl";
+/** Session-log formats (and OTel, a Claude-Code-only side channel) `sourceCompleteness` can describe. */
+export type SourceKind = "claude-session-jsonl" | "claude-otel" | "codex-session-jsonl";
 
 export interface SourceCompletenessEntry {
   source: SourceKind;
@@ -73,15 +82,47 @@ const CODEX_DIMENSIONS: SourceCompletenessEntry["dimensions"] = Object.freeze({
   latency: { status: "unknown", note: "completeness not yet audited for Codex rollouts" },
 });
 
+/**
+ * Claude Code OTel (OTLP logs/metrics) blind spots — Goshuin Phase E (see
+ * docs/milestones/goshuin.md, Decision 7) and the completeness study's "What
+ * OTel adds — and doesn't" section, values taken verbatim from there. OTel is
+ * an opt-in side channel (`JUNREI_OTEL_DIR`) carrying no prompt/tool content
+ * at all — its value is authoritative billing/permission/health data the
+ * session log can only estimate or not see.
+ */
+const CLAUDE_OTEL_DIMENSIONS: SourceCompletenessEntry["dimensions"] = Object.freeze({
+  promptContent: {
+    status: "absent",
+    note: "no prompt/message text exported (unless OTEL_LOG_USER_PROMPTS=1)",
+  },
+  toolContent: {
+    status: "absent",
+    note: "tool arguments/results are not exported, only byte sizes",
+  },
+  systemPrompt: { status: "absent", note: "system prompt is not exported over OTel" },
+  toolSchemas: { status: "absent", note: "tool definitions (action space) are not exported" },
+  cost: {
+    status: "authoritative",
+    note: "billing-computed cost_usd, not a pricing-table estimate",
+  },
+  latency: { status: "partial", note: "api_request duration_ms, only when Claude Code exports it" },
+  hiddenApiCalls: {
+    status: "not-recorded",
+    note: "the background task-state classifier is invisible in OTel too",
+  },
+});
+
 const SOURCE_TABLES: Readonly<Record<SourceKind, SourceCompletenessEntry["dimensions"]>> =
   Object.freeze({
     "claude-session-jsonl": CLAUDE_DIMENSIONS,
+    "claude-otel": CLAUDE_OTEL_DIMENSIONS,
     "codex-session-jsonl": CODEX_DIMENSIONS,
   });
 
-/** Stable declaration order regardless of input order — claude entry before codex. */
+/** Stable declaration order regardless of input order — both claude entries before codex. */
 const SOURCE_ORDER: readonly SourceKind[] = Object.freeze([
   "claude-session-jsonl",
+  "claude-otel",
   "codex-session-jsonl",
 ]);
 

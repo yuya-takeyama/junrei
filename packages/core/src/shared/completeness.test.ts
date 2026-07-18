@@ -8,6 +8,7 @@ import {
 const VALID_STATUSES: readonly CompletenessStatus[] = [
   "partial",
   "estimate",
+  "authoritative",
   "absent",
   "not-recorded",
   "unknown",
@@ -46,6 +47,42 @@ describe("buildSourceCompleteness", () => {
             note: "recorded per turn but not re-sent in later requests",
           },
           latency: { status: "absent", note: "per-request latency is not recorded" },
+        },
+      },
+    ]);
+  });
+
+  it("returns the claude-otel table verbatim, per the completeness study's OTel section", () => {
+    const result = buildSourceCompleteness(["claude-otel"]);
+    expect(result.sources).toEqual([
+      {
+        source: "claude-otel",
+        dimensions: {
+          promptContent: {
+            status: "absent",
+            note: "no prompt/message text exported (unless OTEL_LOG_USER_PROMPTS=1)",
+          },
+          toolContent: {
+            status: "absent",
+            note: "tool arguments/results are not exported, only byte sizes",
+          },
+          systemPrompt: { status: "absent", note: "system prompt is not exported over OTel" },
+          toolSchemas: {
+            status: "absent",
+            note: "tool definitions (action space) are not exported",
+          },
+          cost: {
+            status: "authoritative",
+            note: "billing-computed cost_usd, not a pricing-table estimate",
+          },
+          latency: {
+            status: "partial",
+            note: "api_request duration_ms, only when Claude Code exports it",
+          },
+          hiddenApiCalls: {
+            status: "not-recorded",
+            note: "the background task-state classifier is invisible in OTel too",
+          },
         },
       },
     ]);
@@ -102,6 +139,19 @@ describe("buildSourceCompleteness", () => {
     const result = buildSourceCompleteness(["codex-session-jsonl", "claude-session-jsonl"]);
     expect(result.sources.map((s) => s.source)).toEqual([
       "claude-session-jsonl",
+      "codex-session-jsonl",
+    ]);
+  });
+
+  it("orders both claude entries (session-jsonl, otel) before codex, regardless of input order", () => {
+    const result = buildSourceCompleteness([
+      "codex-session-jsonl",
+      "claude-otel",
+      "claude-session-jsonl",
+    ]);
+    expect(result.sources.map((s) => s.source)).toEqual([
+      "claude-session-jsonl",
+      "claude-otel",
       "codex-session-jsonl",
     ]);
   });
