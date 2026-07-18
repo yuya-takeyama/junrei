@@ -7,12 +7,27 @@ file tracks only what is in progress or ahead.
 
 ## In progress
 
-- 🚧 Cross-session aggregates & trends — repo-level overview shipped
-  (#42, #43); multi-day trend aggregation (`computeTrends` in `@junrei/core`,
-  `GET /api/trends`, #138) and its `/trends` web screen (KPI deltas vs the
-  prior window, daily cost-by-model + delegation-split charts, efficiency
-  small multiples, cadence panel, anomalies panel) have both shipped; MCP
-  tool exposure of the same aggregation is still open
+### Cross-session aggregates & trends (2026-07-19)
+
+Repo-level and multi-day cost/usage retrospectives across every session
+(both harnesses), so a user or an agent can see beyond one session at a time.
+
+- ✅ Repo-level overview: `computeRepoOverview`, `GET /api/overview`,
+  `get_repo_overview` MCP tool (#42, #43)
+- ✅ Core: `computeTrends` in `@junrei/core` (`shared/trends.ts`) — LOCAL
+  calendar-day buckets over a `days`-day window ending today, a
+  current-vs-previous-window summary with null-safe deltas, and simple
+  spike-day detection (#138)
+- ✅ Server: `GET /api/trends` — `days` whitelist (7/14/30, default 14) and
+  IANA `tz` validation shared with the MCP tool below (`trends-params.ts`),
+  optional `repo` scope (#138)
+- ✅ Web: `/trends` screen — KPI deltas vs the prior window, daily
+  cost-by-model + delegation-split charts, efficiency small multiples (incl.
+  subagent return size vs. the 1–2k token benchmark), a cadence panel, and an
+  anomalies panel (spike days, top sessions) (#139)
+- ✅ MCP: `get_trends` tool exposes the same aggregation to agents, sharing
+  `GET /api/trends`'s `days`/`tz` parsing (`trends-params.ts`) so the two
+  surfaces can't drift
 
 ### S3 as an additional Claude session source (2026-07-17)
 
@@ -112,6 +127,13 @@ subagent), estimated-token figures always marked as estimates
   #40)
 - ⬜ Codex fork lineage (`forked_from_id`) — parsed, no fork-tree UI yet
 - ⬜ Codex legacy-format rollout support (pre-2026-02-25 transcripts)
+- ⬜ Trends: per-day subagent-return-size distribution (p90/max per call) —
+  today's `subagentReturn` is mean/max only, which hides a call-level outlier
+  a per-session mean can average away
+- ⬜ Trends: cost→outcome hooks — connect an expensive day back to what it
+  actually produced (top sessions / commits / PRs), not just how much it cost
+- ⬜ Trends: unify/dedupe `get_repo_overview`'s per-day cost timeline with the
+  `/trends` per-repo view — two separate per-day cost rollups exist today
 
 ## Later (post-v1)
 

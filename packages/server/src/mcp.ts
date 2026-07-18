@@ -4,6 +4,7 @@ import {
   type ClaudeSessionAnalysis,
   type CodexToolCallRecord,
   computeBashStats,
+  computeTrends,
   durationBetween,
   type EvaluationTraceEvent,
   listReconstructableRequests,
@@ -50,6 +51,7 @@ import {
   getSessionData,
   getSessionRecordDetail,
   getSessionToolCallDetail,
+  listAllSessionsInBounds,
   listSessions,
   MAX_LIST_LIMIT,
 } from "./sessions.js";
@@ -65,6 +67,13 @@ import {
   createFilesystemDiskContextProvider,
   createFilesystemTemplateProvider,
 } from "./sources/reconstruction.js";
+import {
+  DEFAULT_TRENDS_DAYS,
+  DEFAULT_TRENDS_TIMEZONE,
+  isValidTimeZone,
+  parseTrendsDays,
+  TRENDS_DAY_MS,
+} from "./trends-params.js";
 
 const sessionRef = {
   source: z.enum(["claude-code", "codex"]).describe("Which harness the session came from"),
@@ -131,6 +140,27 @@ function missingRepo() {
           "repo is required — pass a repoRoot path or fallback bucket key " +
           "(claude-project:<projectDirName> / codex-repo:<repoUrl> / codex-cwd:<cwd>) " +
           "from list_sessions items.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * `get_trends`'s `timeZone` failed `isValidTimeZone` — mirrors `GET
+ * /api/trends`'s 400 (`app.ts`) for the same condition: there's no sane
+ * default to fall back to for "the caller asked for a time zone that
+ * doesn't exist", unlike `days` (see `parseTrendsDays`), which silently
+ * coerces out-of-whitelist values instead of erroring.
+ */
+function invalidTimeZone(tz: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `timeZone is not a valid IANA time zone: "${tz}". Examples: "UTC" (default), ` +
+          '"America/New_York", "Asia/Tokyo".',
       },
     ],
     isError: true,
@@ -1316,6 +1346,81 @@ export function createMcpServer(): McpServer {
     async ({ repo }) => {
       if (repo.trim() === "") return missingRepo();
       return jsonResult(await getRepoOverview(repo), BOTH_SOURCES);
+    },
+  );
+
+  server.registerTool(
+    "get_trends",
+    {
+      description:
+        "Multi-day trend report across every session (both harnesses), globally or scoped to " +
+        "one repo: cost/tokens bucketed by LOCAL calendar day (zero-filled) over `days` days " +
+        "ending today, each day's per-model breakdown and main-vs-subagents delegation cost " +
+        "split, cache hit rate, and merged subagent-return-size stats (count/total/max chars — " +
+        'check the mean, totalChars/count, against the ~1-2k token "typical worker summary" ' +
+        "benchmark); a current-vs-previous-window summary with null-safe deltas (cost %, " +
+        "session-count %, cache-hit-rate points, subagent-cost-share points); simple spike-day " +
+        "detection (days whose cost is a population-stddev outlier); and the top 5 sessions by " +
+        "cost in the current window. Use this — not get_repo_overview's all-time single-repo " +
+        "rollup — for cross-session, multi-day questions: is cost/token usage by model trending " +
+        "up, is delegation share or cache hit rate drifting, are subagent returns creeping past " +
+        "the efficiency benchmark, which day spiked and what session drove it. `days` accepts " +
+        `7, 14, or 30 (default ${DEFAULT_TRENDS_DAYS}) — any other value falls back to the ` +
+        "default, same whitelist GET /api/trends uses (never an error). `timeZone` is an IANA " +
+        `name (default "${DEFAULT_TRENDS_TIMEZONE}") controlling which local calendar day each ` +
+        "session's cost lands in — an invalid one IS rejected outright, since there's no sane " +
+        "default for a time zone that doesn't exist. `repo` takes the same repoRoot path or " +
+        "fallback bucket key (claude-project:<dir> / codex-repo:<repoUrl> / codex-cwd:<cwd>) " +
+        "get_repo_overview accepts; omit it for a global report across every repo. Every " +
+        "response includes sourceCompleteness — a machine-readable declaration of what the " +
+        "underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        days: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            `Calendar-day buckets in the current window: 7, 14, or 30 (default ${DEFAULT_TRENDS_DAYS}) ` +
+              "— any other value falls back to the default, same whitelist as GET /api/trends",
+          ),
+        timeZone: z
+          .string()
+          .optional()
+          .describe(
+            `IANA time zone name for local-day bucketing (default "${DEFAULT_TRENDS_TIMEZONE}"), ` +
+              'e.g. "Asia/Tokyo" — an invalid name is rejected, not defaulted',
+          ),
+        repo: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict to one repo: a repoRoot path or fallback bucket key " +
+              "(claude-project:<dir> / codex-repo:<repoUrl> / codex-cwd:<cwd>) — same " +
+              "semantics as get_repo_overview. Omit for a global report across every repo.",
+          ),
+      },
+    },
+    async ({ days, timeZone, repo }) => {
+      const resolvedDays = parseTrendsDays(days === undefined ? undefined : String(days));
+      const resolvedTimeZone = timeZone ?? DEFAULT_TRENDS_TIMEZONE;
+      if (!isValidTimeZone(resolvedTimeZone)) return invalidTimeZone(resolvedTimeZone);
+      const resolvedRepo = repo === undefined || repo === "" ? undefined : repo;
+
+      const nowMs = Date.now();
+      const untilMs = nowMs;
+      const sinceMs = nowMs - (2 * resolvedDays + 2) * TRENDS_DAY_MS;
+
+      const items = await listAllSessionsInBounds({ sinceMs, untilMs });
+      return jsonResult(
+        computeTrends(items, {
+          nowMs,
+          days: resolvedDays,
+          timeZone: resolvedTimeZone,
+          ...(resolvedRepo !== undefined && { repo: resolvedRepo }),
+        }),
+        BOTH_SOURCES,
+      );
     },
   );
 
