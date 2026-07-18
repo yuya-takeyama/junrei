@@ -4,6 +4,7 @@ import {
   listReconstructableRequests,
   loadReconstructionInput,
   localClaudeSessionStore,
+  parseOtelSessionLines,
   type ReconstructedMessageBlock,
   type ReconstructedParams,
   type ReconstructedRequest,
@@ -36,6 +37,7 @@ import {
   listSessions,
   MAX_LIST_LIMIT,
 } from "./sessions.js";
+import { readOtelLines, resolveOtelDir } from "./sources/otel.js";
 import {
   createFilesystemDiskContextProvider,
   createFilesystemTemplateProvider,
@@ -148,6 +150,27 @@ function notAvailableForReconstruction() {
           "Claude-Code-specific capability (session-log shape, harness reminder injections, " +
           "and per-CLI-version templates all assume the Claude Code harness); Codex CLI has no " +
           "equivalent in Junrei today.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * `get_session_observability` is Claude-Code-only: OTel is Claude Code's own
+ * sanctioned telemetry channel (`OTEL_LOGS_EXPORTER`/`OTEL_METRICS_EXPORTER`)
+ * — Codex CLI has no equivalent export junrei's receiver understands.
+ */
+function notAvailableForObservability() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "not available for Codex sessions (source: codex) — OTel observability is a " +
+          "Claude-Code-specific capability (Claude Code's own OTEL_LOGS_EXPORTER/" +
+          "OTEL_METRICS_EXPORTER telemetry, ingested by junrei's OTLP receiver); Codex CLI has " +
+          "no equivalent export in Junrei today.",
       },
     ],
     isError: true,
@@ -552,6 +575,57 @@ function reconstructionRequestNotFound(sessionId: string, target: string | numbe
     ],
     isError: true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// get_session_observability — output shaping. `costBasis` distinguishes the
+// TWO cost figures this tool can return: `"otel"` (Claude Code's own
+// billing-computed `cost_usd`, `@junrei/core`'s `parseOtelSessionLines`
+// aggregate) vs. `"pricing-table-estimate"` (the SAME estimate every other
+// cost-bearing tool reports, `getSession(...).totalUsage`) — never conflated,
+// always both present when OTel data exists, so a caller can see the delta.
+// ---------------------------------------------------------------------------
+
+const GET_SESSION_OBSERVABILITY_DEFAULT_MAX_TOOL_DECISIONS = 200;
+const GET_SESSION_OBSERVABILITY_MAX_MAX_TOOL_DECISIONS = 2000;
+const GET_SESSION_OBSERVABILITY_MAX_HEALTH_EVENTS = 200;
+
+const JUNREI_OTEL_DIR_SETUP_NOTE =
+  "set JUNREI_OTEL_DIR (an absolute directory path) on the junrei server, and configure Claude " +
+  "Code with OTEL_LOGS_EXPORTER=otlp / OTEL_METRICS_EXPORTER=otlp / " +
+  "OTEL_EXPORTER_OTLP_PROTOCOL=http/json pointed at this server's /otlp/v1/logs and " +
+  "/otlp/v1/metrics endpoints.";
+
+/** `sessionLog` cost figure — always available (no OTel dependency), computed once and reused by every branch below. */
+function sessionLogCostOf(analysis: ClaudeSessionAnalysis) {
+  return {
+    costUsd: analysis.totalUsage.costUsd,
+    costBasis: "pricing-table-estimate" as const,
+    costIsComplete: analysis.totalUsage.costIsComplete,
+  };
+}
+
+/** The "OTel unavailable" response shape — NEVER a silent empty: `otelAvailable: false` plus a note naming JUNREI_OTEL_DIR, per Decision 7. */
+function observabilityUnavailable(
+  sessionId: string,
+  analysis: ClaudeSessionAnalysis,
+  reason: "disabled" | "no-data",
+) {
+  return jsonResult(
+    {
+      sessionId,
+      source: "claude-code" as const,
+      otelAvailable: false,
+      note:
+        reason === "disabled"
+          ? `OTel ingestion is disabled — ${JUNREI_OTEL_DIR_SETUP_NOTE}`
+          : "OTel ingestion is enabled (JUNREI_OTEL_DIR is set) but no OTel data has been " +
+            "recorded for this session — it likely ran before OTel was configured, or Claude " +
+            `Code's own OTEL_* env vars weren't set for it. Setup: ${JUNREI_OTEL_DIR_SETUP_NOTE}`,
+      cost: { sessionLog: sessionLogCostOf(analysis) },
+    },
+    ["claude-session-jsonl", "claude-otel"],
+  );
 }
 
 /**
@@ -1234,6 +1308,119 @@ export function createMcpServer(): McpServer {
           ...cappedReconstructedRequest(reconstructed, maxChars),
         },
         ["claude-session-jsonl"],
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_session_observability",
+    {
+      description:
+        "Claude Code's own OpenTelemetry export for one session, parsed into aggregates — the " +
+        "OTel side channel is OPT-IN and OFF by default. Setup requires BOTH sides: the junrei " +
+        "server needs JUNREI_OTEL_DIR set (an absolute directory path it stores per-session " +
+        "OTLP-JSON under), and Claude Code itself needs OTEL_LOGS_EXPORTER=otlp, " +
+        "OTEL_METRICS_EXPORTER=otlp, and OTEL_EXPORTER_OTLP_PROTOCOL=http/json pointed at this " +
+        "server's /otlp/v1/logs and /otlp/v1/metrics endpoints. When either side is missing, or " +
+        "OTel is configured but this particular session has no recorded data, the response is " +
+        "NEVER a silent empty — `otelAvailable: false` plus an explanatory `note` naming " +
+        "JUNREI_OTEL_DIR make that explicit, and `cost.sessionLog` (which needs no OTel data) is " +
+        "still returned. When data IS available, `cost` carries TWO figures, each tagged with " +
+        'its own `costBasis`, never conflated: `cost.otel.costBasis: "otel"` is Claude Code\'s ' +
+        "own billing-computed cost_usd (authoritative — not derived from token counts) summed " +
+        "across `api_request` events (or, if Claude Code exported metrics only, summed from the " +
+        "cost.usage metric instead — see `cost.otel.source`); `cost.sessionLog.costBasis: " +
+        '"pricing-table-estimate"` is the SAME token-count x pricing-table estimate every other ' +
+        "cost-bearing tool reports (get_session_summary's totalUsage); `cost.deltaUsd` (otel " +
+        "minus sessionLog) is only present when an OTel cost figure exists — a persistently " +
+        "large delta usually means hidden/background API calls the session log structurally " +
+        "undercounts (see hiddenApiCalls in sourceCompleteness). `apiRequests.duration` is " +
+        "latency stats (count/sum/min/max/avg ms) over whichever api_request events carried a " +
+        "duration_ms attribute — undefined when none did; latency is otherwise absent from every " +
+        "other tool. `toolDecisions` are permission accept/reject events (tool name, decision, " +
+        "source, timestamp), capped at `maxToolDecisions` (default " +
+        `${GET_SESSION_OBSERVABILITY_DEFAULT_MAX_TOOL_DECISIONS}) with an explicit ` +
+        "`truncated` flag — `total` stays exact past the cap. `health` carries MCP-connection " +
+        "and hook-execution events (capped at " +
+        `${GET_SESSION_OBSERVABILITY_MAX_HEALTH_EVENTS} with the same truncation contract). ` +
+        "`unrecognized` declares every OTHER event/metric type this parser doesn't specifically " +
+        "model, by name and count — NEVER silently dropped, even though not individually " +
+        "parsed. OTel carries NO prompt or tool content whatsoever (no user/assistant text, no " +
+        "tool arguments/results, no system prompt, no tool schemas) — it is a pure ops/billing " +
+        "channel, never a substitute for get_records/get_tool_call. Claude Code sessions only " +
+        "(source: codex is rejected — Codex CLI has no equivalent telemetry). Every response " +
+        "includes sourceCompleteness for BOTH claude-session-jsonl and claude-otel — a " +
+        "machine-readable declaration of what each underlying source cannot show; treat " +
+        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        maxToolDecisions: z
+          .number()
+          .int()
+          .min(1)
+          .max(GET_SESSION_OBSERVABILITY_MAX_MAX_TOOL_DECISIONS)
+          .optional()
+          .describe(
+            "Cap on toolDecisions.entries " +
+              `(default ${GET_SESSION_OBSERVABILITY_DEFAULT_MAX_TOOL_DECISIONS}, ` +
+              `max ${GET_SESSION_OBSERVABILITY_MAX_MAX_TOOL_DECISIONS}); toolDecisions.total ` +
+              "stays exact past the cap",
+          ),
+      },
+    },
+    async ({ source, sessionId, maxToolDecisions }) => {
+      if (source === "codex") return notAvailableForObservability();
+      const analysis = await getSession(sessionId);
+      if (analysis === undefined) return notFound(sessionId);
+
+      const otelDir = resolveOtelDir();
+      if (otelDir === undefined) return observabilityUnavailable(sessionId, analysis, "disabled");
+
+      const lines = await readOtelLines(otelDir, sessionId);
+      if (lines.length === 0) return observabilityUnavailable(sessionId, analysis, "no-data");
+
+      const cap = maxToolDecisions ?? GET_SESSION_OBSERVABILITY_DEFAULT_MAX_TOOL_DECISIONS;
+      const otel = parseOtelSessionLines(lines, { maxToolDecisions: cap });
+      const sessionLogCost = sessionLogCostOf(analysis);
+      const cappedHealth = otel.health.slice(0, GET_SESSION_OBSERVABILITY_MAX_HEALTH_EVENTS);
+
+      return jsonResult(
+        {
+          sessionId,
+          source: "claude-code" as const,
+          otelAvailable: true,
+          cost: {
+            sessionLog: sessionLogCost,
+            ...(otel.apiRequests.costSource !== "none" && {
+              otel: {
+                costUsd: otel.apiRequests.costUsdSum,
+                costBasis: "otel" as const,
+                source: otel.apiRequests.costSource,
+              },
+              deltaUsd: otel.apiRequests.costUsdSum - sessionLogCost.costUsd,
+            }),
+          },
+          apiRequests: {
+            count: otel.apiRequests.count,
+            ...(otel.apiRequests.duration !== undefined && { duration: otel.apiRequests.duration }),
+          },
+          toolDecisions: otel.toolDecisions,
+          health: {
+            total: otel.health.length,
+            entries: cappedHealth,
+            truncated: otel.health.length > cappedHealth.length,
+          },
+          unrecognized: {
+            events: otel.unrecognizedEventCounts,
+            metrics: otel.unrecognizedMetricCounts,
+          },
+          raw: {
+            logPayloads: otel.logPayloads,
+            metricPayloads: otel.metricPayloads,
+            malformedLines: otel.malformedLines,
+          },
+        },
+        ["claude-session-jsonl", "claude-otel"],
       );
     },
   );

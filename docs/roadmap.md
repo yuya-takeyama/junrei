@@ -105,7 +105,12 @@ decision record: [milestones/goshuin.md](./milestones/goshuin.md).
     of wire bytes (bar ≥ 85%), drift detection verified on a real
     post-session change
   - ⬜ D: wire-capture ingestion (opt-in, local-only)
-  - ⬜ E: OTel ingestion (OTLP endpoint on the junrei server)
+  - ✅ E: OTel ingestion — opt-in (`JUNREI_OTEL_DIR`) OTLP http/json
+    receiver on the junrei server, per-session JSONL storage, MCP
+    `get_session_observability` (authoritative `cost_usd` with costBasis
+    cross-check, api-request latency, tool_decision, MCP/hook health);
+    `claude-otel` sourceCompleteness entry; byte-for-byte parity tests
+    prove disabled == unchanged
   - ⬜ F: evaluation-trace export + analysis playbooks
 
 ## Open items

@@ -962,4 +962,277 @@ describe("MCP tools", () => {
       expect(textOf(result)).toContain("No reconstructable request found");
     });
   });
+
+  describe("get_session_observability", () => {
+    let otelDir: string | undefined;
+    let previousOtelDir: string | undefined;
+
+    beforeAll(() => {
+      previousOtelDir = process.env.JUNREI_OTEL_DIR;
+    });
+
+    afterEach(async () => {
+      if (otelDir !== undefined) {
+        await rm(otelDir, { recursive: true, force: true });
+        otelDir = undefined;
+      }
+      if (previousOtelDir === undefined) {
+        delete process.env.JUNREI_OTEL_DIR;
+      } else {
+        process.env.JUNREI_OTEL_DIR = previousOtelDir;
+      }
+    });
+
+    function otlpAttr(key: string, value: string | number) {
+      return typeof value === "string"
+        ? { key, value: { stringValue: value } }
+        : { key, value: { doubleValue: value } };
+    }
+
+    function apiRequestLine(sessionId: string, costUsd: number, durationMs?: number) {
+      const attributes = [
+        otlpAttr("event.name", "api_request"),
+        otlpAttr("cost_usd", costUsd),
+        ...(durationMs !== undefined ? [otlpAttr("duration_ms", durationMs)] : []),
+      ];
+      return JSON.stringify({
+        resourceLogs: [
+          {
+            resource: { attributes: [otlpAttr("session.id", sessionId)] },
+            scopeLogs: [{ logRecords: [{ attributes, body: { stringValue: "api_request" } }] }],
+          },
+        ],
+      });
+    }
+
+    function toolDecisionLine(sessionId: string, toolName: string, decision: string) {
+      return JSON.stringify({
+        resourceLogs: [
+          {
+            resource: { attributes: [otlpAttr("session.id", sessionId)] },
+            scopeLogs: [
+              {
+                logRecords: [
+                  {
+                    attributes: [
+                      otlpAttr("event.name", "tool_decision"),
+                      otlpAttr("tool_name", toolName),
+                      otlpAttr("decision", decision),
+                      otlpAttr("source", "config"),
+                    ],
+                    body: { stringValue: "tool_decision" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    function mcpHealthLine(sessionId: string) {
+      return JSON.stringify({
+        resourceLogs: [
+          {
+            resource: { attributes: [otlpAttr("session.id", sessionId)] },
+            scopeLogs: [
+              {
+                logRecords: [
+                  {
+                    attributes: [
+                      otlpAttr("event.name", "mcp_server_connection"),
+                      otlpAttr("status", "failed"),
+                    ],
+                    body: { stringValue: "mcp_server_connection" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    function unrecognizedEventLine(sessionId: string) {
+      return JSON.stringify({
+        resourceLogs: [
+          {
+            resource: { attributes: [otlpAttr("session.id", sessionId)] },
+            scopeLogs: [
+              {
+                logRecords: [
+                  {
+                    attributes: [otlpAttr("event.name", "user_prompt")],
+                    body: { stringValue: "user_prompt" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    async function writeOtelFixture(sessionId: string, lines: string[]): Promise<void> {
+      otelDir = await mkdtemp(join(tmpdir(), "junrei-mcp-otel-"));
+      process.env.JUNREI_OTEL_DIR = otelDir;
+      await writeFile(join(otelDir, `${sessionId}.jsonl`), `${lines.join("\n")}\n`);
+    }
+
+    it("declares otelAvailable: false with a JUNREI_OTEL_DIR note when the feature is disabled entirely", async () => {
+      delete process.env.JUNREI_OTEL_DIR;
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_session_observability",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        otelAvailable: boolean;
+        note?: string;
+        cost: { sessionLog: { costUsd: number; costBasis: string } };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.otelAvailable).toBe(false);
+      expect(body.note).toContain("JUNREI_OTEL_DIR");
+      expect(body.note).toContain("disabled");
+      // The session-log pricing-table estimate is still returned — never a silent empty.
+      expect(body.cost.sessionLog.costBasis).toBe("pricing-table-estimate");
+      expect(typeof body.cost.sessionLog.costUsd).toBe("number");
+      expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+        "claude-session-jsonl",
+        "claude-otel",
+      ]);
+    });
+
+    it("declares otelAvailable: false with a note when OTel is enabled but this session has no recorded data", async () => {
+      otelDir = await mkdtemp(join(tmpdir(), "junrei-mcp-otel-empty-"));
+      process.env.JUNREI_OTEL_DIR = otelDir;
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_session_observability",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        otelAvailable: boolean;
+        note?: string;
+        cost: { sessionLog: { costUsd: number } };
+      };
+      expect(body.otelAvailable).toBe(false);
+      expect(body.note).toContain("JUNREI_OTEL_DIR");
+      expect(body.note).toContain("no OTel data");
+      expect(typeof body.cost.sessionLog.costUsd).toBe("number");
+    });
+
+    it("returns parsed OTel aggregates alongside the sessionLog estimate when data exists", async () => {
+      await writeOtelFixture(CLAUDE_SESSION_ID, [
+        apiRequestLine(CLAUDE_SESSION_ID, 0.01, 100),
+        apiRequestLine(CLAUDE_SESSION_ID, 0.02, 300),
+        toolDecisionLine(CLAUDE_SESSION_ID, "Bash", "accept"),
+        mcpHealthLine(CLAUDE_SESSION_ID),
+        unrecognizedEventLine(CLAUDE_SESSION_ID),
+      ]);
+
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_session_observability",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        otelAvailable: boolean;
+        cost: {
+          sessionLog: { costUsd: number; costBasis: string };
+          otel?: { costUsd: number; costBasis: string; source: string };
+          deltaUsd?: number;
+        };
+        apiRequests: { count: number; duration?: { count: number; sumMs: number } };
+        toolDecisions: { total: number; entries: unknown[]; truncated: boolean };
+        health: {
+          total: number;
+          entries: Array<{ kind: string; eventName: string }>;
+          truncated: boolean;
+        };
+        unrecognized: { events: Record<string, number>; metrics: Record<string, number> };
+        raw: { logPayloads: number; metricPayloads: number; malformedLines: number };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+
+      expect(body.otelAvailable).toBe(true);
+      expect(body.cost.sessionLog.costBasis).toBe("pricing-table-estimate");
+      expect(body.cost.otel?.costBasis).toBe("otel");
+      expect(body.cost.otel?.costUsd).toBeCloseTo(0.03, 6);
+      expect(body.cost.otel?.source).toBe("api_request_events");
+      expect(body.cost.deltaUsd).toBeCloseTo(0.03 - body.cost.sessionLog.costUsd, 6);
+
+      expect(body.apiRequests.count).toBe(2);
+      expect(body.apiRequests.duration).toEqual({
+        count: 2,
+        sumMs: 400,
+        minMs: 100,
+        maxMs: 300,
+        avgMs: 200,
+      });
+
+      expect(body.toolDecisions.total).toBe(1);
+      expect(body.toolDecisions.truncated).toBe(false);
+
+      expect(body.health.total).toBe(1);
+      expect(body.health.entries[0]).toMatchObject({
+        kind: "mcp",
+        eventName: "mcp_server_connection",
+      });
+      expect(body.health.truncated).toBe(false);
+
+      expect(body.unrecognized.events).toEqual({ user_prompt: 1 });
+
+      expect(body.raw.logPayloads).toBe(5);
+
+      expect(body.sourceCompleteness.sources.map((s) => s.source)).toEqual([
+        "claude-session-jsonl",
+        "claude-otel",
+      ]);
+    });
+
+    it("caps toolDecisions.entries at maxToolDecisions while total stays exact", async () => {
+      await writeOtelFixture(CLAUDE_SESSION_ID, [
+        toolDecisionLine(CLAUDE_SESSION_ID, "A", "accept"),
+        toolDecisionLine(CLAUDE_SESSION_ID, "B", "accept"),
+        toolDecisionLine(CLAUDE_SESSION_ID, "C", "accept"),
+      ]);
+
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_session_observability",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, maxToolDecisions: 2 },
+      });
+      const body = JSON.parse(textOf(result)) as {
+        toolDecisions: { total: number; entries: unknown[]; truncated: boolean };
+      };
+      expect(body.toolDecisions.total).toBe(3);
+      expect(body.toolDecisions.entries).toHaveLength(2);
+      expect(body.toolDecisions.truncated).toBe(true);
+    });
+
+    it("is rejected for Codex sessions with a clear, explicit error", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_session_observability",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+
+    it("returns a clear not-found error for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_session_observability",
+        arguments: { source: "claude-code", sessionId: "does-not-exist" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+  });
 });

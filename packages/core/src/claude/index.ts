@@ -34,6 +34,16 @@ export {
   computeTurnUsage,
   computeUsage,
 } from "./metrics.js";
+export type {
+  OtelApiRequestStats,
+  OtelCostSource,
+  OtelDurationStats,
+  OtelHealthEvent,
+  OtelSessionAnalysis,
+  OtelToolDecision,
+  ParseOtelSessionOptions,
+} from "./otel.js";
+export { extractSessionId, parseOtelSessionLines } from "./otel.js";
 export { parseClaudeTranscriptFile, parseClaudeTranscriptLines } from "./parser.js";
 export { joinPath } from "./paths.js";
 export * from "./reconstruction/index.js";

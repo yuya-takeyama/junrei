@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
+import { extractSessionId } from "@junrei/core";
+import { type Context, Hono } from "hono";
 import { createMcpServer } from "./mcp.js";
 import { getRepoOverview } from "./overview.js";
 import {
@@ -16,6 +17,7 @@ import {
   MAX_LIST_LIMIT,
   type SessionSourceFilter,
 } from "./sessions.js";
+import { appendOtelLine, resolveOtelDir } from "./sources/otel.js";
 
 export type { AnySessionListItem } from "./sessions.js";
 
@@ -39,6 +41,49 @@ export type CreateAppOptions = {
 
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
+}
+
+/**
+ * The opt-in OTLP http/json receiver (Goshuin Decision 7 — see
+ * docs/milestones/goshuin.md, "E. OTel ingestion"): `POST /otlp/v1/logs` and
+ * `POST /otlp/v1/metrics` both route here, sharing one handler since neither
+ * behaves differently by signal — session-id extraction and storage both
+ * operate on the raw parsed body regardless of whether it's a
+ * ExportLogsServiceRequest or ExportMetricsServiceRequest (see
+ * `@junrei/core`'s `extractSessionId`).
+ *
+ * `resolveOtelDir()` is re-read on every request (not cached at `createApp`
+ * time) — the same "read env at call time" convention
+ * `sources/reconstruction.ts`'s filesystem providers already use for
+ * `JUNREI_TEMPLATES_DIR`, and what lets tests toggle `JUNREI_OTEL_DIR`
+ * per-test around a single `createApp()` call. With no dir configured, this
+ * calls `c.notFound()` — verified byte-for-byte identical to Hono's own
+ * response for a route that was never registered at all (see
+ * app.test.ts's parity tests), so keeping these two routes permanently in
+ * the chain (rather than conditionally registering them) never changes
+ * observable behavior when the feature is off, and keeps `AppType` (the
+ * `hc<AppType>` RPC type the web package would use) stable regardless of
+ * env.
+ *
+ * A body that isn't valid JSON is silently accepted (nothing is stored) —
+ * Claude Code's own OTLP exporter must never see ingestion trouble as a
+ * reason to stop exporting, so the response always mirrors the OTLP/HTTP
+ * JSON success shape (`{}`, no `partial_success`) regardless of what could
+ * be parsed/extracted. A record whose session id is missing or fails path
+ * sanitization (see `sources/otel.ts`'s `sanitizeSessionId`) is still
+ * stored, under `_unassigned.jsonl` — declared, never dropped.
+ */
+async function handleOtlpExport(c: Context): Promise<Response> {
+  const otelDir = resolveOtelDir();
+  if (otelDir === undefined) return c.notFound();
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({});
+  }
+  await appendOtelLine(otelDir, extractSessionId(body), body);
+  return c.json({});
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -73,6 +118,11 @@ export function createApp(options: CreateAppOptions = {}) {
         await createMcpServer().connect(transport);
         return transport.handleRequest(c);
       })
+      // Opt-in OTel receiver (Decision 7) — see `handleOtlpExport`'s doc
+      // comment for why these two routes stay registered (404-internally)
+      // rather than being added/omitted from the chain based on env.
+      .post("/otlp/v1/logs", handleOtlpExport)
+      .post("/otlp/v1/metrics", handleOtlpExport)
       .get("/api/health", (c) => c.json({ status: "ok", name: "junrei" } as const))
       .get("/api/sessions", async (c) => {
         const rawLimit = Number.parseInt(c.req.query("limit") ?? "", 10);
