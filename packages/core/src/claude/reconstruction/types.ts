@@ -111,7 +111,12 @@ export interface ReconstructedParamEntry {
  * `exact`, provenance the log line) and OVERRIDES the template's captured
  * default — so a session that ran on a different model than the template
  * capture reports its real model, not a stale default; every other key stays
- * `template`. The section-level `confidence`/`provenance`/`note` describe the
+ * `template`. EXCEPTION: when the template default is a model ALIAS (e.g.
+ * `claude-haiku-4-5`) and the log value is exactly that alias's resolved form
+ * (`<alias>-<8-digit-date>`, e.g. `claude-haiku-4-5-20251001`), the wire
+ * literal really was the alias — the template entry is kept (confidence
+ * `template`) with a log-consistency note instead of being overridden. The
+ * section-level `confidence`/`provenance`/`note` describe the
  * WHOLE section only in the "no template params" case (mirroring an unknown
  * `ReconstructedSection`): non-model params are unrecoverable without a
  * template even though a log-derived `model` may still be present. When a

@@ -267,26 +267,31 @@ export function buildTurns(records: ReconstructionRecord[]): ReplayResult {
         continue;
       }
       // A user record's block-array content is EITHER a loop-continuation
-      // (top-level `tool_result` blocks, grouped below by owner assistant
-      // message) OR a genuine user prompt sent as blocks (text/image/...). A
-      // genuine prompt has no `tool_result` blocks — it must still become a
-      // user turn (the wire sends its blocks verbatim); the pre-fix code only
-      // ever handled the string and tool_result forms, so an array-form first
-      // prompt produced NO turn at all.
-      if (!content.some((block) => block.type === "tool_result")) {
-        if (content.length > 0) {
-          const turnIndex = turns.length;
-          turns.push({
-            role: "user",
-            blocks: content.map((block) => ({
-              source: "user-block" as const,
-              block,
-              line: rec.line,
-            })),
-          });
-          lastUserTurnIndex = turnIndex;
-          openToolResultTurn = null;
-        }
+      // (top-level `tool_result` blocks ONLY, grouped below by owner
+      // assistant message) OR a user turn sent as blocks that carries at
+      // least one non-`tool_result` block — a genuine prompt (text/image/...,
+      // no `tool_result` at all) or a MIXED array (a `tool_result` alongside
+      // other blocks; unobserved in real logs so far, but the wire would send
+      // it verbatim just the same). Either way it must become ONE user turn
+      // holding every block in record order — the pre-fix code only ever
+      // handled the string and pure-tool_result forms, so an array-form first
+      // prompt produced NO turn at all, and a mixed array would have silently
+      // dropped its non-tool_result blocks.
+      if (content.length === 0) continue;
+      const allToolResults = content.every((block) => block.type === "tool_result");
+      if (!allToolResults) {
+        const turnIndex = turns.length;
+        turns.push({
+          role: "user",
+          blocks: content.map(
+            (block): ReplayBlock =>
+              block.type === "tool_result"
+                ? { source: "tool-result", block, line: rec.line }
+                : { source: "user-block", block, line: rec.line },
+          ),
+        });
+        lastUserTurnIndex = turnIndex;
+        openToolResultTurn = null;
         continue;
       }
       for (const block of content) {

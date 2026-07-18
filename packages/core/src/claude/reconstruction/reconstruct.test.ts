@@ -203,7 +203,9 @@ describe("reconstructRequest labelling", () => {
 describe("reconstructRequest params model overlay (Defect 1)", () => {
   // A session whose assistant record ran on a DIFFERENT model than the template
   // captured — the log is the source of truth for which model the turn used.
-  function recordsWithModel(): ReconstructionRecord[] {
+  // `model` defaults to a true-mismatch value so existing call sites keep
+  // exercising the override path; alias/equal-value tests pass an explicit one.
+  function recordsWithModel(model = "claude-fable-5"): ReconstructionRecord[] {
     return [
       { type: "user", line: 1, content: "hi", version: "9.9.9", timestamp: TS0 },
       {
@@ -211,23 +213,26 @@ describe("reconstructRequest params model overlay (Defect 1)", () => {
         line: 2,
         requestId: "req_1",
         messageId: "m1",
-        model: "claude-fable-5",
+        model,
         blocks: [{ type: "text", text: "reply" }],
         timestamp: TS0,
       },
     ];
   }
-  const templateWithModel: ReconstructionTemplateProvider = {
-    getTemplate: async (cliVersion) =>
-      cliVersion === "9.9.9"
-        ? {
-            cliVersion: "9.9.9",
-            capturedValues: { cwd: "/captured/proj", sessionId: "captured-sess" },
-            system: [{ text: "sys" }],
-            params: { model: "claude-haiku-4-5", max_tokens: 1000 },
-          }
-        : undefined,
-  };
+  function templateProviderWithParamsModel(model: string): ReconstructionTemplateProvider {
+    return {
+      getTemplate: async (cliVersion) =>
+        cliVersion === "9.9.9"
+          ? {
+              cliVersion: "9.9.9",
+              capturedValues: { cwd: "/captured/proj", sessionId: "captured-sess" },
+              system: [{ text: "sys" }],
+              params: { model, max_tokens: 1000 },
+            }
+          : undefined,
+    };
+  }
+  const templateWithModel = templateProviderWithParamsModel("claude-haiku-4-5");
 
   it("overlays the log-recorded model as `exact`, overriding the template default", async () => {
     const records = recordsWithModel();
@@ -240,6 +245,10 @@ describe("reconstructRequest params model overlay (Defect 1)", () => {
     expect(req?.params.entries.model?.value).toBe("claude-fable-5");
     expect(req?.params.entries.model?.confidence).toBe("exact");
     expect(req?.params.entries.model?.provenance).toEqual({ kind: "log", lines: [2] });
+    // A true mismatch (not an alias/resolved-id pair) — the note says so and
+    // flags that the wire literal may itself have been an alias.
+    expect(req?.params.entries.model?.note).toContain("overriding");
+    expect(req?.params.entries.model?.note).toContain("alias");
     // Non-model template keys stay `template`.
     expect(req?.params.entries.max_tokens).toEqual({
       value: 1000,
@@ -275,6 +284,58 @@ describe("reconstructRequest params model overlay (Defect 1)", () => {
     expect(req?.params.entries.model?.confidence).toBe("unknown");
     expect(req?.params.entries.model?.provenance).toMatchObject({ kind: "declared-absent" });
     expect(req?.params.entries.model?.value).toBeUndefined();
+  });
+
+  it("keeps the template's exact value with `exact` confidence when it already agrees with the log", async () => {
+    const records = recordsWithModel("claude-haiku-4-5");
+    const session = deriveReconstructionSessionMeta("sess-1", records);
+    const req = await reconstructRequest({ records, session }, "req_1", {
+      template: templateProviderWithParamsModel("claude-haiku-4-5"),
+    });
+    expect(req?.params.entries.model?.value).toBe("claude-haiku-4-5");
+    expect(req?.params.entries.model?.confidence).toBe("exact");
+    expect(req?.params.entries.model?.note).toContain("agrees");
+    expect(req?.params.entries.model?.note).not.toContain("overriding");
+  });
+
+  it("keeps the template's ALIAS default (confidence `template`) when the log records its resolved form", async () => {
+    // Claude Code launched with the alias `claude-haiku-4-5`: the wire body
+    // carried that alias, but the log's assistant record carries the CLI's
+    // resolved id — overriding the template with the resolved id would be
+    // byte-wrong versus the real wire literal, so the template entry is kept.
+    const records = recordsWithModel("claude-haiku-4-5-20251001");
+    const session = deriveReconstructionSessionMeta("sess-1", records);
+    const req = await reconstructRequest({ records, session }, "req_1", {
+      template: templateProviderWithParamsModel("claude-haiku-4-5"),
+    });
+    expect(req?.params.entries.model?.value).toBe("claude-haiku-4-5");
+    expect(req?.params.entries.model?.confidence).toBe("template");
+    expect(req?.params.entries.model?.note).toContain("log-consistent");
+    expect(req?.params.entries.model?.note).toContain("claude-haiku-4-5-20251001");
+  });
+
+  it("still overrides for lookalikes that are NOT actually the alias's resolved form", async () => {
+    // Only 4 digits after the dash — not an 8-digit date suffix.
+    const shortDateRecords = recordsWithModel("claude-haiku-4-5-2025");
+    const shortDateSession = deriveReconstructionSessionMeta("sess-1", shortDateRecords);
+    const shortDateReq = await reconstructRequest(
+      { records: shortDateRecords, session: shortDateSession },
+      "req_1",
+      { template: templateProviderWithParamsModel("claude-haiku-4-5") },
+    );
+    expect(shortDateReq?.params.entries.model?.value).toBe("claude-haiku-4-5-2025");
+    expect(shortDateReq?.params.entries.model?.confidence).toBe("exact");
+
+    // An extra character before the dash — not the alias itself.
+    const extraCharRecords = recordsWithModel("claude-haiku-4-5x-20251001");
+    const extraCharSession = deriveReconstructionSessionMeta("sess-1", extraCharRecords);
+    const extraCharReq = await reconstructRequest(
+      { records: extraCharRecords, session: extraCharSession },
+      "req_1",
+      { template: templateProviderWithParamsModel("claude-haiku-4-5") },
+    );
+    expect(extraCharReq?.params.entries.model?.value).toBe("claude-haiku-4-5x-20251001");
+    expect(extraCharReq?.params.entries.model?.confidence).toBe("exact");
   });
 });
 

@@ -153,6 +153,57 @@ describe("buildTurns", () => {
     expect(turns[1]?.role).toBe("assistant");
   });
 
+  it("produces no turn for an empty content array", () => {
+    const records: ReconstructionRecord[] = [
+      { type: "user", line: 1, content: [] },
+      { type: "assistant", line: 2, messageId: "mA", blocks: [{ type: "text", text: "ok" }] },
+    ];
+    const { turns } = buildTurns(records);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.role).toBe("assistant");
+  });
+
+  it("keeps a MIXED array (tool_result + other blocks) as its own user turn, without merging into a neighbouring tool_result turn or dropping the other block", () => {
+    // Unobserved in real logs so far, but the same silent-drop failure class
+    // Defect 2 had for pure-prompt arrays: a `tool_result` alongside another
+    // block type must not lose the non-tool_result block, and must not get
+    // folded into an adjacent pure-tool_result turn sharing the same owner.
+    const records: ReconstructionRecord[] = [
+      {
+        type: "assistant",
+        line: 1,
+        messageId: "mA",
+        blocks: [
+          { type: "tool_use", id: "t0", name: "Read", input: {} },
+          { type: "tool_use", id: "t1", name: "Read", input: {} },
+        ],
+      },
+      {
+        type: "user",
+        line: 2,
+        content: [{ type: "tool_result", tool_use_id: "t0", content: "zero" }],
+      },
+      {
+        type: "user",
+        line: 3,
+        content: [
+          { type: "tool_result", tool_use_id: "t1", content: "one" },
+          { type: "text", text: "and this" },
+        ],
+      },
+    ];
+    const { turns } = buildTurns(records);
+    // assistant turn, the pure tool_result turn (t0), and the mixed turn — the
+    // mixed record must NOT get folded into the t0 turn even though both
+    // share the same owner assistant message.
+    expect(turns).toHaveLength(3);
+    expect(sources(turns[1]?.blocks ?? [])).toEqual(["tool-result"]);
+    expect(turns[2]?.role).toBe("user");
+    expect(sources(turns[2]?.blocks ?? [])).toEqual(["tool-result", "user-block"]);
+    const textBlock = turns[2]?.blocks[1];
+    expect(textBlock?.source === "user-block" && textBlock.block.text).toBe("and this");
+  });
+
   it("flags task-notification user turns", () => {
     const records: ReconstructionRecord[] = [
       {
