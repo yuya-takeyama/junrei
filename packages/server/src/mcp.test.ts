@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -703,6 +705,239 @@ describe("MCP tools", () => {
       });
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain("Session not found");
+    });
+  });
+
+  describe("get_reconstructed_request", () => {
+    // CLAUDE_SESSION_ID's fixture records carry cwd "/Users/test/proj" and
+    // version "2.1.202" (see packages/core/test/fixtures) — a synthetic
+    // template for that exact cliVersion, written to a per-test temp dir and
+    // injected via `JUNREI_TEMPLATES_DIR` (the SAME override-by-env seam
+    // `beforeAll` above already uses for `CLAUDE_CONFIG_DIR`/`CODEX_HOME`),
+    // drives the "full reconstruction" tests. The captured `cwd`/`sessionId`
+    // literals are DELIBERATELY different from the fixture's own, so a
+    // successful substitution is actually exercised, not a same-value no-op.
+    const CAPTURED_CWD = "/synthetic/captured/cwd";
+    const CAPTURED_SESSION_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    const LONG_INSTRUCTIONS = `${"A".repeat(500)} session ${CAPTURED_SESSION_ID} synthetic instructions.`;
+    const SYNTHETIC_TEMPLATE = {
+      cliVersion: "2.1.202",
+      capturedValues: { cwd: CAPTURED_CWD, sessionId: CAPTURED_SESSION_ID },
+      system: [
+        { text: `You are a synthetic identity block for cwd ${CAPTURED_CWD}.` },
+        { text: LONG_INSTRUCTIONS },
+      ],
+      tools: [
+        { name: "SyntheticTool", description: "synthetic", input_schema: { type: "object" } },
+      ],
+      params: { max_tokens: 999, stream: true },
+    };
+
+    let templatesDir: string | undefined;
+    let previousTemplatesDir: string | undefined;
+
+    beforeAll(() => {
+      previousTemplatesDir = process.env.JUNREI_TEMPLATES_DIR;
+    });
+
+    afterEach(async () => {
+      if (templatesDir !== undefined) {
+        await rm(templatesDir, { recursive: true, force: true });
+        templatesDir = undefined;
+      }
+      if (previousTemplatesDir === undefined) {
+        delete process.env.JUNREI_TEMPLATES_DIR;
+      } else {
+        process.env.JUNREI_TEMPLATES_DIR = previousTemplatesDir;
+      }
+    });
+
+    async function withSyntheticTemplate(): Promise<void> {
+      templatesDir = await mkdtemp(join(tmpdir(), "junrei-mcp-recon-template-"));
+      await mkdir(join(templatesDir, "2.1.202"), { recursive: true });
+      await writeFile(
+        join(templatesDir, "2.1.202", "template.json"),
+        JSON.stringify(SYNTHETIC_TEMPLATE),
+      );
+      process.env.JUNREI_TEMPLATES_DIR = templatesDir;
+    }
+
+    it("with neither requestId nor line, returns the discovery listing instead of a reconstruction", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sessionId: string;
+        source: string;
+        requests: Array<{ requestId?: string; ordinal: number; targetLine: number }>;
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(body.sessionId).toBe(CLAUDE_SESSION_ID);
+      expect(body.source).toBe("claude-code");
+      expect(body.requests.length).toBeGreaterThan(0);
+      expect(body.requests.some((r) => r.requestId === "req_1")).toBe(true);
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("is rejected for Codex sessions with a clear, explicit error", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("not available for Codex sessions");
+    });
+
+    it("returns a clear not-found error for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: { source: "claude-code", sessionId: "does-not-exist" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+
+    it("with no template for the session's CLI version, declares system/tools/params unknown rather than inventing them", async () => {
+      // No `withSyntheticTemplate()` call — JUNREI_TEMPLATES_DIR points
+      // nowhere (or wherever the ambient env has it, which never contains a
+      // 2.1.202 template), so the filesystem provider finds nothing.
+      process.env.JUNREI_TEMPLATES_DIR = await mkdtemp(join(tmpdir(), "junrei-mcp-recon-empty-"));
+      templatesDir = process.env.JUNREI_TEMPLATES_DIR;
+
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, requestId: "req_1" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        system: Array<{ text?: string; confidence: string }>;
+        tools: { value?: unknown; confidence: string };
+        params: { value?: unknown; confidence: string };
+        limitations: string[];
+      };
+      expect(body.system).toHaveLength(1);
+      expect(body.system[0]?.confidence).toBe("unknown");
+      expect(body.system[0]?.text).toBeUndefined();
+      expect(body.tools.confidence).toBe("unknown");
+      expect(body.tools.value).toBeUndefined();
+      expect(body.params.confidence).toBe("unknown");
+      expect(body.limitations.some((l) => l.includes("no reconstruction template"))).toBe(true);
+    });
+
+    it("full reconstruction with a synthetic template provider: template-confidence system/tools/params (substituted), exact-confidence messages", async () => {
+      await withSyntheticTemplate();
+
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, requestId: "req_1" },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sessionId: string;
+        source: string;
+        requestId?: string;
+        targetLine: number;
+        system: Array<{ text?: string; confidence: string; provenance: { kind: string } }>;
+        tools: { value?: unknown[]; confidence: string };
+        params: { value?: Record<string, unknown>; confidence: string };
+        messages: Array<{
+          role: string;
+          content: Array<{ wireType: string; value?: unknown; confidence: string }>;
+        }>;
+        appliedRules: string[];
+        limitations: string[];
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+
+      expect(body.requestId).toBe("req_1");
+
+      // Two template-confidence system blocks, substituted to the TARGET
+      // session's own cwd/sessionId (not the captured literals), plus the
+      // trailing declared-unknown billing-header block.
+      expect(body.system).toHaveLength(3);
+      expect(body.system[0]?.confidence).toBe("template");
+      expect(body.system[0]?.text).toContain("/Users/test/proj");
+      expect(body.system[0]?.text).not.toContain(CAPTURED_CWD);
+      expect(body.system[1]?.confidence).toBe("template");
+      expect(body.system[1]?.text).toContain(CLAUDE_SESSION_ID);
+      expect(body.system[1]?.text).not.toContain(CAPTURED_SESSION_ID);
+      expect(body.system[2]?.confidence).toBe("unknown");
+      expect(body.system[2]?.text).toBeUndefined();
+
+      expect(body.tools.confidence).toBe("template");
+      expect(body.tools.value).toEqual(SYNTHETIC_TEMPLATE.tools);
+      expect(body.params.confidence).toBe("template");
+      expect(body.params.value).toEqual(SYNTHETIC_TEMPLATE.params);
+
+      // The one prior turn (line 1) replays byte-exact from the log.
+      expect(body.messages.length).toBeGreaterThan(0);
+      const firstBlock = body.messages[0]?.content[0];
+      expect(firstBlock?.confidence).toBe("exact");
+      expect(firstBlock?.value).toMatchObject({ type: "text", text: "Fix the bug in foo.ts" });
+
+      expect(body.limitations.some((l) => l.toLowerCase().includes("subagent"))).toBe(true);
+      expect(body.appliedRules.length).toBeGreaterThan(0);
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("caps a block's text/value at maxCharsPerBlock and flags the truncation explicitly with the full char count", async () => {
+      await withSyntheticTemplate();
+
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          requestId: "req_1",
+          maxCharsPerBlock: 200,
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        system: Array<{
+          text?: string;
+          textTruncated: boolean;
+          textFullCharCount?: number;
+          confidence: string;
+        }>;
+      };
+      // system[1] is the LONG_INSTRUCTIONS block (>500 chars) — cut at 200.
+      const longBlock = body.system[1];
+      expect(longBlock?.textTruncated).toBe(true);
+      expect(longBlock?.text?.length).toBeLessThanOrEqual(201); // 200 chars + the "…" marker
+      expect(longBlock?.textFullCharCount).toBeGreaterThan(200);
+
+      // The short identity block (well under 200 chars) is untouched.
+      const shortBlock = body.system[0];
+      expect(shortBlock?.textTruncated).toBe(false);
+      expect(shortBlock?.textFullCharCount).toBeUndefined();
+    });
+
+    it("returns a clear not-found error for a requestId that doesn't exist in this session", async () => {
+      await withSyntheticTemplate();
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_reconstructed_request",
+        arguments: {
+          source: "claude-code",
+          sessionId: CLAUDE_SESSION_ID,
+          requestId: "does-not-exist",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("No reconstructable request found");
     });
   });
 });

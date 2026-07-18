@@ -1,7 +1,16 @@
 import {
   buildSourceCompleteness,
   type ClaudeSessionAnalysis,
+  listReconstructableRequests,
+  loadReconstructionInput,
+  localClaudeSessionStore,
+  type ReconstructedMessageBlock,
+  type ReconstructedRequest,
+  type ReconstructedSection,
+  type ReconstructedSystemBlock,
+  type ReconstructionProviders,
   type RecordDetail,
+  reconstructRequest,
   type SourceKind,
   type ToolCallDetail,
 } from "@junrei/core";
@@ -26,6 +35,10 @@ import {
   listSessions,
   MAX_LIST_LIMIT,
 } from "./sessions.js";
+import {
+  createFilesystemDiskContextProvider,
+  createFilesystemTemplateProvider,
+} from "./sources/reconstruction.js";
 
 const sessionRef = {
   source: z.enum(["claude-code", "codex"]).describe("Which harness the session came from"),
@@ -112,6 +125,28 @@ function notAvailableForCodex() {
         text:
           "not available for Codex sessions (source: codex) — Codex CLI has no repetition " +
           "detection or task-execution log in Junrei today.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * `get_reconstructed_request` is Claude-Code-only: the "virtual wire"
+ * reconstruction rules (`@junrei/core`'s `claude/reconstruction/`) are
+ * calibrated specifically against Claude Code's session-log shape and
+ * harness-injected reminders — Codex CLI has no equivalent module.
+ */
+function notAvailableForReconstruction() {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          "not available for Codex sessions (source: codex) — request reconstruction is a " +
+          "Claude-Code-specific capability (session-log shape, harness reminder injections, " +
+          "and per-CLI-version templates all assume the Claude Code harness); Codex CLI has no " +
+          "equivalent in Junrei today.",
       },
     ],
     isError: true,
@@ -394,6 +429,96 @@ function toolCallNotFound(toolUseId: string) {
           'tool\'s own "toolUseId" field (get_records, get_context_timeline, find_repetitions, ' +
           "get_subagent_tree) and must belong to THIS session's own transcript (source/sessionId) " +
           "— a subagent's tool calls aren't reachable through this lookup.",
+      },
+    ],
+    isError: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// get_reconstructed_request — output shaping. Reuses the SAME
+// `capTextField`/`capInputField` primitives `get_tool_call` uses above, so a
+// reconstructed block's text/value is capped with exactly the same explicit
+// truncation contract: a `*Truncated` flag plus the untruncated char count,
+// never a silently shorter payload. `confidence`/`provenance`/`note` are
+// carried through UNCAPPED — they're small, structured, and are the whole
+// point of this tool (never worth truncating).
+// ---------------------------------------------------------------------------
+
+const GET_RECONSTRUCTED_REQUEST_DEFAULT_MAX_CHARS = 20000;
+const GET_RECONSTRUCTED_REQUEST_MIN_MAX_CHARS = 200;
+
+function cappedSystemBlock(block: ReconstructedSystemBlock, maxChars: number) {
+  const capped = block.text !== undefined ? capTextField(block.text, maxChars) : undefined;
+  return {
+    ...(capped !== undefined && { text: capped.text }),
+    textTruncated: capped?.truncated ?? false,
+    ...(capped?.fullCharCount !== undefined && { textFullCharCount: capped.fullCharCount }),
+    confidence: block.confidence,
+    provenance: block.provenance,
+    ...(block.note !== undefined && { note: block.note }),
+  };
+}
+
+function cappedMessageBlock(block: ReconstructedMessageBlock, maxChars: number) {
+  const capped = block.value !== undefined ? capInputField(block.value, maxChars) : undefined;
+  return {
+    wireType: block.wireType,
+    ...(capped !== undefined && { value: capped.input }),
+    valueTruncated: capped?.truncated ?? false,
+    ...(capped?.fullCharCount !== undefined && { valueFullCharCount: capped.fullCharCount }),
+    confidence: block.confidence,
+    provenance: block.provenance,
+    ...(block.note !== undefined && { note: block.note }),
+    ...(block.appliedRules !== undefined && { appliedRules: block.appliedRules }),
+  };
+}
+
+function cappedSection(section: ReconstructedSection<unknown>, maxChars: number) {
+  const capped = section.value !== undefined ? capInputField(section.value, maxChars) : undefined;
+  return {
+    ...(capped !== undefined && { value: capped.input }),
+    valueTruncated: capped?.truncated ?? false,
+    ...(capped?.fullCharCount !== undefined && { valueFullCharCount: capped.fullCharCount }),
+    confidence: section.confidence,
+    provenance: section.provenance,
+    ...(section.note !== undefined && { note: section.note }),
+  };
+}
+
+function cappedReconstructedRequest(request: ReconstructedRequest, maxChars: number) {
+  return {
+    ...(request.requestId !== undefined && { requestId: request.requestId }),
+    ordinal: request.ordinal,
+    targetLine: request.targetLine,
+    system: request.system.map((block) => cappedSystemBlock(block, maxChars)),
+    tools: cappedSection(request.tools, maxChars),
+    params: cappedSection(request.params, maxChars),
+    messages: request.messages.map((message) => ({
+      role: message.role,
+      content: message.content.map((block) => cappedMessageBlock(block, maxChars)),
+    })),
+    appliedRules: request.appliedRules,
+    limitations: request.limitations,
+  };
+}
+
+/**
+ * `get_reconstructed_request`'s not-found message for a `requestId`/`line`
+ * that doesn't resolve to any request in this session — mirrors `notFound`'s
+ * "how to discover a valid one" pattern, pointed at this tool's OWN discovery
+ * path (call it again with neither arg).
+ */
+function reconstructionRequestNotFound(sessionId: string, target: string | number) {
+  const targetDesc = typeof target === "string" ? `requestId "${target}"` : `line ${target}`;
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `No reconstructable request found for ${targetDesc} in session ${sessionId}. Call ` +
+          "get_reconstructed_request with neither requestId nor line to list this session's " +
+          "reconstructable requests (requestId/ordinal/targetLine).",
       },
     ],
     isError: true,
@@ -956,6 +1081,121 @@ export function createMcpServer(): McpServer {
           relatedRecords: detail.relatedRecords,
         },
         [sourceKindFor(resolved.source)],
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_reconstructed_request",
+    {
+      description:
+        "Reconstructs the actual Anthropic /v1/messages request payload — system blocks, " +
+        "tools, generation params, and the wire-shaped messages array — that produced one " +
+        "Claude Code main-loop turn (the 'virtual wire' layer; none of this is stored verbatim " +
+        "in the session log). Every block/section carries an explicit CONFIDENCE CLASS: `exact` " +
+        "— derived from the session log/attachments alone (replayed turns, byte-rebuilt " +
+        "agent-listing/skill-listing injections); `template` — from a per-CLI-version captured " +
+        "template plus log-recorded substitutions (the system prompt's instruction block, the " +
+        "tools array, generation params) — this REQUIRES a user-local template captured under " +
+        "~/.junrei/templates/<cliVersion>/template.json; with no template for this session's CLI " +
+        "version the affected blocks are `unknown`, NEVER invented; `disk-contingent` — rebuilt " +
+        "from CURRENT disk state (global/project CLAUDE.md, auto-memory, account email), which " +
+        "may have drifted since the session actually ran — check such a block's `driftDetected` " +
+        "flag (in `provenance`, backed by per-file mtimes in `provenance.files`) before treating " +
+        "it as what the session really saw; `unknown` — not recoverable from any available " +
+        "input (e.g. the per-launch billing-header system block, a missing template). Called " +
+        "with neither `requestId` nor `line`, this returns the DISCOVERY listing instead of a " +
+        "full reconstruction: every reconstructable request in the session as " +
+        "`{requestId?, ordinal, targetLine}` — call again with one of those to fetch the actual " +
+        "payload. Claude Code sessions only, LOCALLY-STORED sessions only (an S3-merged " +
+        "session's disk context and templates live on another machine, so reconstruction is not " +
+        "offered there — such a session resolves as not-found here), and MAIN-LOOP requests " +
+        "only: subagent (sidechain) " +
+        "requests are an explicitly declared limitation, never silently reconstructed — see the " +
+        "top-level `limitations` array, which always includes that scope note plus any " +
+        "per-request gaps (missing template, no disk-context provider, the ~494-byte fixed " +
+        "safety preamble task-notification turns carry on the wire but not in the log, dropped " +
+        "thinking blocks). Top-level `appliedRules` lists every deterministic normalization rule " +
+        "id that shaped this reconstruction (e.g. cache_control stripping, string/array " +
+        "content-form normalization) — these are baked into `exact` confidence, not a separate " +
+        "class. Every system block's `text` and every message-block/tools/params section's " +
+        "`value` is capped to `maxCharsPerBlock` (default 20000, min 200) with an EXPLICIT " +
+        "`textTruncated`/`valueTruncated` flag plus the untruncated char count " +
+        "(`textFullCharCount`/`valueFullCharCount`) whenever cut — raise it to see more; never " +
+        "silently truncated. Every response includes sourceCompleteness — a machine-readable " +
+        "declaration of what the underlying session source cannot show; treat absent/not-recorded " +
+        "dimensions as unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        requestId: z
+          .string()
+          .optional()
+          .describe(
+            "The log's own requestId for the target request (from this tool's own discovery " +
+              "listing, or another tool's `requestId` field). Takes precedence over `line` when " +
+              "both are given.",
+          ),
+        line: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            "1-based source line of the target assistant record (this tool's own discovery " +
+              "listing's `targetLine`, or another tool's `line`/`targetLine` field) — an " +
+              "alternative to `requestId` when the log carries none.",
+          ),
+        maxCharsPerBlock: z
+          .number()
+          .int()
+          .min(GET_RECONSTRUCTED_REQUEST_MIN_MAX_CHARS)
+          .optional()
+          .describe(
+            "Cap per text/value field, per block " +
+              `(default ${GET_RECONSTRUCTED_REQUEST_DEFAULT_MAX_CHARS}, ` +
+              `min ${GET_RECONSTRUCTED_REQUEST_MIN_MAX_CHARS})`,
+          ),
+      },
+    },
+    async (args) => {
+      if (args.source === "codex") return notAvailableForReconstruction();
+      const ref = await localClaudeSessionStore.findSessionFileById(args.sessionId);
+      if (ref === undefined) return notFound(args.sessionId);
+      const input = await loadReconstructionInput(
+        args.sessionId,
+        ref.filePath,
+        localClaudeSessionStore,
+      );
+
+      if (args.requestId === undefined && args.line === undefined) {
+        return jsonResult(
+          {
+            sessionId: args.sessionId,
+            source: "claude-code" as const,
+            requests: listReconstructableRequests(input.records),
+          },
+          ["claude-session-jsonl"],
+        );
+      }
+
+      const target: string | number = args.requestId ?? (args.line as number);
+      const maxChars = args.maxCharsPerBlock ?? GET_RECONSTRUCTED_REQUEST_DEFAULT_MAX_CHARS;
+      const providers: ReconstructionProviders = {
+        template: createFilesystemTemplateProvider(),
+        diskContext: createFilesystemDiskContextProvider({ projectDirName: ref.projectDirName }),
+      };
+      const reconstructed = await reconstructRequest(input, target, providers);
+      if (reconstructed === undefined) {
+        return reconstructionRequestNotFound(args.sessionId, target);
+      }
+
+      return jsonResult(
+        {
+          sessionId: args.sessionId,
+          source: "claude-code" as const,
+          ...cappedReconstructedRequest(reconstructed, maxChars),
+        },
+        ["claude-session-jsonl"],
       );
     },
   );
