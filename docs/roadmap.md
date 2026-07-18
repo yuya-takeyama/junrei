@@ -75,6 +75,9 @@ Status legend: ✅ done / 🚧 in progress / ⬜ planned
   free API/Web ports and prints browser-ready URLs; `junrei-browser-test`
   shares that contract between Codex in-app Browser checks and Claude Code's
   `preview-verifier`
+- ✅ Turborepo-based task running for `build`/`typecheck`/`test` with local
+  caching (`turbo.json`, root scripts now `turbo run <task>`); `dev`/`start`
+  stay on the pnpm launcher, out of turbo's scope (2026-07-18)
 
 ## v2 — Concept & IA redesign
 
