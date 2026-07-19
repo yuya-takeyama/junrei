@@ -26,3 +26,4 @@ skipped. When Actions is healthy, the normal CI-watch flow applies.
 - Quality gates: `pnpm typecheck && pnpm lint && pnpm test` — CI runs the same.
 - Docs live in `docs/` (design.md, roadmap.md) — keep roadmap.md updated as
   features land.
+- Running sessions cost-efficiently: see `docs/cost-playbook.md`.

@@ -125,6 +125,47 @@ bucket × model mix — with each shape's avg cost / return size in
 across sessions in `wastePatterns[]`). Params also take `repo?`, `days?`
 (default 14), `detail?`.
 
+## Diagnosis protocol
+
+Before choosing which levers to recommend for an expensive session, **classify
+its archetype** from `analyze_session`'s `delegation` cost shares
+(`mainCostShare` / `subagentCostShare`). The archetype decides the lever set —
+prescribing before classifying is how analyses reach for the wrong fix. Full
+provenance and per-rule verify-signals: `docs/cost-playbook.md`.
+
+- **MARATHON** — `mainCostShare` ≥ 85%. Orchestrator-context-dominated: the
+  cost is turns × a never-compacted context (seen climbing to 400–650K), not
+  delegation. Levers: cap context lifetime (compact / split), one PR per
+  session.
+- **FAN-OUT** — `mainCostShare` ≤ 55% (`subagentCostShare` dominant).
+  Subagent-tier / turn-length-dominated. Levers: drop the subagent tier (opus
+  is ~5× sonnet per message — reserve it for adversarial review), bound the
+  subagent turn budget (~60 tool calls; >150 is a design failure).
+- **MIXED** — in between (the main thread AND the subagents are each large
+  lines). Apply both lever sets.
+
+Context lifetime is the cross-cutting check for all three: `compactions` was
+empty in every studied session and context ran to 270–503K even in fan-out
+sessions, so a high `contextTokens` peak is a finding regardless of archetype.
+
+### Refuted hypotheses — do not re-litigate these
+
+These were tested against Junrei data and rejected; do not spend an analysis
+re-deriving them (evidence in `docs/cost-playbook.md` §0):
+
+- **Bash dollar waste is not a cost lever.** Direct bash spend is ≈$1 even in
+  expensive sessions. Duplicate reruns are a *signal* of re-exploration
+  (context inflation), never the recoverable spend themselves — report them as
+  a signal, not a dollar opportunity.
+- **Subagent return size is rarely the driver.** Main-thread `tool_result`
+  totals measured ≈48K tokens; keep the return contract, but don't attribute a
+  session's cost to return payloads.
+- **Fan-out width per se is not the driver.** Per-subagent economics match
+  between expensive and cheap twins; the tier and turn budget drive cost, not
+  the worker count.
+- **Error/harness friction is <1%.** `apiErrors` ≈ 0 and tool-error rates are
+  low everywhere; the cost gap is structural (method), not error churn.
+
 ## Hard rules
 
 ### Every claim cites provenance

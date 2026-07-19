@@ -7,6 +7,16 @@ file tracks only what is in progress or ahead.
 
 ## In progress
 
+### Cost-performance study landed (2026-07-20)
+
+The external + internal cost-performance research landed as durable docs
+([research/2026-07-cost-performance-study.md](./research/2026-07-cost-performance-study.md),
+[cost-playbook.md](./cost-playbook.md)) and updated delegation/analysis skills.
+Next: ⬜ promote the discovered structures to first-class metrics (archetype
+classification, context lifetime, opus-message ratio, turn-budget distribution)
+and ⬜ a what-if cost simulator (re-simulate a session's cost under per-PR
+compaction / screenshot eviction — verification queue D1/D5).
+
 ### Renewal: insight layer & learnings loop (2026-07-19)
 
 The pivot from an agent-statistics analyzer to self-improvement-loop
