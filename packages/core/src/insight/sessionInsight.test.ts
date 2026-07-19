@@ -153,6 +153,41 @@ describe("buildSessionInsight", () => {
     });
   });
 
+  describe("whatIf (D1/D5) — full detail only", () => {
+    const whatIfTimeline = [10, 50, 110, 150].map((t) => ({
+      contextTokens: t,
+      model: "claude-opus-4-1-20250805",
+      line: t,
+    }));
+
+    it("omits whatIf on a concise response (concise must not grow)", () => {
+      const insight = buildSessionInsight(input({ detail: "concise", whatIfTimeline }));
+      expect(insight.whatIf).toBeUndefined();
+    });
+
+    it("attaches the two counterfactual scenarios on a full response", () => {
+      const insight = buildSessionInsight(
+        input({
+          detail: "full",
+          whatIfTimeline,
+          whatIfFallbackModel: "claude-opus-4-1-20250805",
+        }),
+      );
+      expect(insight.whatIf).toBeDefined();
+      expect(insight.whatIf?.map((s) => s.scenario)).toEqual([
+        "compaction-policy",
+        "evict-heavy-results",
+      ]);
+      // Never blended into the measured cost fields.
+      expect(insight.summary.costUsd).toBe(5);
+    });
+
+    it("omits whatIf when no timeline was supplied even in full detail", () => {
+      const insight = buildSessionInsight(input({ detail: "full" }));
+      expect(insight.whatIf).toBeUndefined();
+    });
+  });
+
   it("reports a truncatedFields entry for a full-detail cap (costDrivers beyond the 10-thread full-detail limit)", () => {
     const byThread = Array.from({ length: 11 }, (_, i) =>
       thread({ thread: `agent-${i}`, model: "haiku", estUsd: 11 - i, resultChars: 100 }),

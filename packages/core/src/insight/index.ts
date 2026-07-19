@@ -82,3 +82,17 @@ export {
   oversizedReturnsToWaste,
   rankWaste,
 } from "./waste.js";
+export type {
+  WhatIfBasis,
+  WhatIfCompaction,
+  WhatIfEvictedResult,
+  WhatIfEviction,
+  WhatIfHeavyResult,
+  WhatIfInput,
+  WhatIfResult,
+  WhatIfScenarioBase,
+  WhatIfScenarioName,
+  WhatIfSkipped,
+  WhatIfTimelinePoint,
+} from "./whatIf.js";
+export { buildWhatIf } from "./whatIf.js";

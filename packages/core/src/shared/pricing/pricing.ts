@@ -168,6 +168,28 @@ export function estimateCostUsd(model: string, usage: TokenUsage): number | unde
   return estimateCostComponents(model, usage)?.totalCost;
 }
 
+/**
+ * The per-token cache-READ rate for a model at a given request's input-side
+ * size, mirroring `estimateCostComponents`' tier choice: Anthropic bills a
+ * request whose total input-side tokens exceed 200k at the `above_200k` tier
+ * for the whole request, so the tier is picked from `contextTokens`. Falls
+ * back to 0.1x the input rate when a model carries no explicit cache-read
+ * entry (Anthropic's documented default multiplier); returns `undefined` when
+ * the model has no pricing at all. Split out so the what-if simulator can
+ * price a counterfactual context series at the SAME rate the real cost
+ * accrued at, without duplicating the tiered-rate logic.
+ */
+export function cacheReadRatePerToken(model: string, contextTokens: number): number | undefined {
+  const pricing = findModelPricing(model);
+  if (pricing?.input_cost_per_token === undefined) return undefined;
+  const above = contextTokens > TIER_THRESHOLD;
+  return (
+    (above ? pricing.cache_read_input_token_cost_above_200k_tokens : undefined) ??
+    pricing.cache_read_input_token_cost ??
+    pricing.input_cost_per_token * 0.1
+  );
+}
+
 export function pricingSnapshotInfo(): { source: string; fetchedAt: string; modelCount: number } {
   return {
     source: snapshot.source,

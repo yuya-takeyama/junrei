@@ -57,6 +57,62 @@ const ARCHETYPE_CHIP: Record<
   mixed: { cls: "abadge mixed", title: "in between — both levers apply" },
 };
 
+/** A what-if scenario as it arrives on the payload (computed or skipped). */
+type WhatIfEntry = NonNullable<SessionInsight["whatIf"]>[number];
+
+const WHATIF_LABEL: Record<"compaction-policy" | "evict-heavy-results", string> = {
+  "compaction-policy": "Compact at threshold",
+  "evict-heavy-results": "Evict heavy results",
+};
+
+/**
+ * The compact "What if" card (Story tab) — server values only. Each scenario
+ * shows its name, its estimated saving (priced USD when available, else the
+ * exact token saving), and its headline assumption. These are MODEL-BASED
+ * COUNTERFACTUALS (`basis: "counterfactual-model"`), never billed amounts, so
+ * the card labels them as projections and stays visually distinct from the
+ * measured recommendations above. Rendered only when `whatIf` is present.
+ */
+function WhatIfCard({ whatIf }: { whatIf: readonly WhatIfEntry[] }) {
+  // Computed scenarios lead; skipped ones render as a muted n/a line so the
+  // reader sees WHY a scenario didn't run rather than it silently vanishing.
+  return (
+    <div className="whatif-card">
+      <div className="whatif-head mono fs11 mut">
+        <span>What if</span>
+        <span className="amb" title="Model-based counterfactuals — projections, not billed amounts">
+          counterfactual
+        </span>
+      </div>
+      <ul className="whatif-list">
+        {whatIf.map((s) => {
+          const label = WHATIF_LABEL[s.scenario];
+          if ("skipped" in s) {
+            return (
+              <li key={s.scenario} className="whatif-row mut">
+                <span className="whatif-name fs12">{label}</span>
+                <span className="whatif-save mono fs11">n/a — {s.reason}</span>
+              </li>
+            );
+          }
+          const pct = s.estSavedPct === null ? null : `${Math.round(s.estSavedPct * 100)}%`;
+          const saving =
+            s.estSavedUsd !== undefined
+              ? `~${formatUsd(s.estSavedUsd)}${pct === null ? "" : ` (${pct})`}`
+              : `~${s.estSavedTokens.toLocaleString()} tok${pct === null ? "" : ` (${pct})`}`;
+          return (
+            <li key={s.scenario} className="whatif-row">
+              <span className="whatif-name fs12">{label}</span>
+              <span className="whatif-save mono fs11 t-gr">{saving}</span>
+              <span className="whatif-note mono fs11 mut">{s.assumptions[0]}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedKeys }: Props) {
   const { summary, recommendations, waste, delegation, contextLifetime } = insight;
   const badge = (
@@ -161,6 +217,10 @@ export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedK
               );
             })}
           </ol>
+        )}
+
+        {insight.whatIf !== undefined && insight.whatIf.length > 0 && (
+          <WhatIfCard whatIf={insight.whatIf} />
         )}
 
         <div className="insight-foot mono fs11 mut">
