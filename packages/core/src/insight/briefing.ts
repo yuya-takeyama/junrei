@@ -57,6 +57,21 @@ export interface BuildBriefingInput {
   learnings: Learning[];
 }
 
+/**
+ * One local-calendar day's total cost — the footer sparkbar's series (PR3
+ * web Home). Derived verbatim from the trend window's own day buckets
+ * (`TrendsReport.buckets`), so the sparkbar can never disagree with the KPI
+ * strip's window cost (both trace to the same `computeTrends` output). The
+ * series length is the briefing window itself (`days`), not a fixed span —
+ * the caption reads "last N days" from `dailyCosts.length` rather than
+ * inventing days the window never covered.
+ */
+export interface BriefingDailyCost {
+  /** `YYYY-MM-DD` local calendar day, oldest-first. */
+  date: string;
+  costUsd: number;
+}
+
 /** A demonstrably-working delegation pattern. */
 export interface BriefingWin {
   model: string;
@@ -81,6 +96,16 @@ export interface BriefingSummary {
   window: { days: number; startDate: string; endDate: string };
   costUsd: number;
   sessionCount: number;
+  /**
+   * Total recoverable waste this window — the sum of every ranked waste item's
+   * known `impactUsd` (across ALL waste, not just the shown slice), or null
+   * when nothing in the window could be priced. Computed here so the web KPI
+   * strip and the WASTE section header both display ONE server number rather
+   * than re-summing `waste[]` client-side (concept G5: no client recompute).
+   */
+  wasteUsd: number | null;
+  /** `wasteUsd` as a fraction (0-1) of `costUsd`, or null when either is unavailable. */
+  wasteShareOfCost: number | null;
   /** 0-1, null when the window had no effective-input token volume. */
   cacheHitRate: number | null;
   /** Subagent share of cost, 0-1, null when unpriced / no cost. */
@@ -100,6 +125,8 @@ export interface Briefing {
   waste: WasteItem[];
   wins: BriefingWin[];
   learnings: BriefingLearnings;
+  /** Per-day cost series over the window, oldest-first — the footer sparkbar. */
+  dailyCosts: BriefingDailyCost[];
   topSessions: TrendsReport["anomalies"]["topSessions"];
   /** Features unavailable across the contributing sessions (union), if any. */
   notAvailable?: string[];
@@ -112,13 +139,27 @@ const CONCISE_WINS_LIMIT = 3;
 const FULL_WASTE_LIMIT = 50;
 const RECENT_LEARNINGS_LIMIT = 5;
 
-function summarize(input: BuildBriefingInput): BriefingSummary {
+/** Total known-dollar waste across every ranked item (null when none was priced), and its share of window cost. */
+function wasteTotals(
+  allWaste: readonly WasteItem[],
+  costUsd: number,
+): { wasteUsd: number | null; wasteShareOfCost: number | null } {
+  const priced = allWaste.filter((w) => w.impactUsd !== undefined);
+  if (priced.length === 0) return { wasteUsd: null, wasteShareOfCost: null };
+  const wasteUsd = priced.reduce((sum, w) => sum + (w.impactUsd as number), 0);
+  return { wasteUsd, wasteShareOfCost: costUsd > 0 ? wasteUsd / costUsd : null };
+}
+
+function summarize(input: BuildBriefingInput, allWaste: readonly WasteItem[]): BriefingSummary {
   const { window, summary } = input.trends;
   const { current, delta } = summary;
+  const { wasteUsd, wasteShareOfCost } = wasteTotals(allWaste, current.totalCostUsd);
   return {
     window: { days: window.days, startDate: window.startDate, endDate: window.endDate },
     costUsd: current.totalCostUsd,
     sessionCount: current.sessionCount,
+    wasteUsd,
+    wasteShareOfCost,
     cacheHitRate: current.cacheHitRate,
     delegationShare: current.subagentCostShare,
     delta:
@@ -197,6 +238,11 @@ function collectWins(sessions: readonly BriefingSessionInput[]): BriefingWin[] {
     .sort((a, b) => b.launches - a.launches);
 }
 
+/** Project the trend window's day buckets onto the sparkbar's `{date, costUsd}` series (oldest-first, as `computeTrends` already orders them). */
+function collectDailyCosts(trends: TrendsReport): BriefingDailyCost[] {
+  return trends.buckets.map((b) => ({ date: b.date, costUsd: b.totalCostUsd }));
+}
+
 function summarizeLearnings(learnings: readonly Learning[]): BriefingLearnings {
   const counts: Record<LearningStatus, number> = { open: 0, applied: 0, verified: 0, rejected: 0 };
   for (const l of learnings) counts[l.status] += 1;
@@ -237,8 +283,8 @@ function briefingNextSteps(summary: BriefingSummary, waste: WasteItem[]): string
 
 /** Build a repo briefing from an already-computed trend window plus per-session material. */
 export function buildBriefing(input: BuildBriefingInput): Briefing {
-  const summary = summarize(input);
   const allWaste = collectWaste(input.sessions);
+  const summary = summarize(input, allWaste);
   const wins = collectWins(input.sessions);
   const learnings = summarizeLearnings(input.learnings);
   const notAvailable = collectNotAvailable(input.sessions);
@@ -255,6 +301,7 @@ export function buildBriefing(input: BuildBriefingInput): Briefing {
     waste,
     wins: shownWins,
     learnings,
+    dailyCosts: collectDailyCosts(input.trends),
     topSessions: input.trends.anomalies.topSessions,
     ...(notAvailable.length > 0 && { notAvailable }),
   };

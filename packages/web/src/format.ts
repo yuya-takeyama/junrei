@@ -1,8 +1,8 @@
 /**
  * Fraction of "effective input" tokens (input + cache-read + cache-creation)
  * actually served from cache — used by the session-level stat strip (L1,
- * `shell/StatStrip.tsx`), the agent detail shell (L3, `AgentShell.tsx`), and
- * the Trends screen. Re-exported (not redefined) from `@junrei/core`'s
+ * `shell/StatStrip.tsx`) and the agent detail shell (L3, `AgentShell.tsx`).
+ * Re-exported (not redefined) from `@junrei/core`'s
  * `shared/metrics.ts`, which promoted this formula out of its original home
  * here (Phase 1 of the trends feature) so the server-side trends aggregate
  * shares the exact same definition — keeping the re-export means every

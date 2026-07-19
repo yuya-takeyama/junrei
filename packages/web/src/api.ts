@@ -1,4 +1,3 @@
-import type { TrendsReport } from "@junrei/core";
 import type { AppType } from "@junrei/server";
 import type { InferResponseType } from "hono/client";
 import { hc } from "hono/client";
@@ -22,19 +21,6 @@ export type SessionListItem = InferResponseType<
 export type ClaudeSessionListItem = Extract<SessionListItem, { source: "claude-code" }>;
 export type CodexSessionListItem = Extract<SessionListItem, { source: "codex" }>;
 export type ModelMixEntry = SessionListItem["modelMix"][number];
-
-type RepoOverviewResponse = InferResponseType<typeof client.api.overview.$get>;
-
-/**
- * Repo-level rollup shape — see `@junrei/server`'s `overview.ts` for the
- * exact aggregation. The web no longer FETCHES `GET /api/overview` (the
- * session-list band computes its filter-aware rollup client-side — see
- * `computeFilteredOverview` in repoOverviewHelpers.ts), but the response
- * type is still the canonical source for the band's field shapes
- * (`byModel`/`perDay`/`delegation`), keeping them pinned to what the server
- * (and the `get_repo_overview` MCP tool) actually serves.
- */
-export type RepoOverview = Extract<RepoOverviewResponse, { overview: unknown }>["overview"];
 
 type ClaudeSessionResponse = InferResponseType<
   (typeof client.api.sessions)["claude-code"][":id"]["$get"]
@@ -226,26 +212,85 @@ export async function fetchAgentSession(id: string, agentId: string): Promise<Ag
 }
 
 /**
- * Fetch the multi-day trend report (`GET /api/trends`) for the Trends
- * screen. Typed against `@junrei/core`'s `TrendsReport` directly rather than
- * `InferResponseType` (unlike every other fetch* above): the route handler
- * returns `c.json(computeTrends(...))` verbatim (`packages/server/src/app.ts`),
- * so the core type — the source of truth `computeTrends` itself is declared
- * against — already matches the wire shape exactly, with no envelope to
- * unwrap and no separate DTO worth maintaining.
+ * The conclusion-first repo briefing (`GET /api/briefing`) — the Briefing
+ * home's sole data source (PR3). Typed via `InferResponseType` so the KPI
+ * strip / waste / wins / learnings / dailyCosts all read the wire shape the
+ * server actually serves (`buildRepoBriefing` -> `buildBriefing` in
+ * `@junrei/core`), never a hand-maintained DTO. `BriefingWaste`/`BriefingWin`
+ * narrow the sections' own row types for the presentational components.
  */
-export async function fetchTrends(params: {
-  days: number;
-  timeZone: string;
-  repo?: string;
-}): Promise<TrendsReport> {
-  const res = await client.api.trends.$get({
+// The route also has a 400 branch (an ambiguous bare `repo`) — narrow to the
+// success shape so the section row types below resolve off `Briefing` cleanly.
+export type Briefing = Extract<
+  InferResponseType<typeof client.api.briefing.$get>,
+  { summary: unknown }
+>;
+export type BriefingWaste = Briefing["waste"][number];
+export type BriefingWin = Briefing["wins"][number];
+export type BriefingLearningRef = Briefing["learnings"]["recent"][number];
+export type BriefingTopSession = Briefing["topSessions"][number];
+
+/**
+ * Fetch the repo briefing. `repo` scopes it (an absolute repoRoot / bucket
+ * key from the repo selector, or a bare name the server resolves); `days` is
+ * the masthead's period toggle (1/7/30). A 400 (an ambiguous bare `repo`)
+ * still throws here — the home only ever sends resolved keys from its
+ * selector, so this path is defensive.
+ */
+export async function fetchBriefing(params: { repo?: string; days: number }): Promise<Briefing> {
+  const res = await client.api.briefing.$get({
     query: {
       days: String(params.days),
-      tz: params.timeZone,
       ...(params.repo !== undefined && { repo: params.repo }),
     },
   });
   if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-  return (await res.json()) as TrendsReport;
+  return (await res.json()) as Briefing;
+}
+
+type LearningsResponse = InferResponseType<typeof client.api.learnings.$get>;
+/** One repo-local learning as the ledger serves it (`@junrei/core`'s `Learning`). Backs the Learnings loop board. */
+export type Learning = LearningsResponse["learnings"][number];
+
+/** Fetch the repo-local learning ledger (`GET /api/learnings`). `repo` scopes it to one ledger; omit for every known repo. */
+export async function fetchLearnings(
+  repo?: string,
+): Promise<{ learnings: Learning[]; warnings: string[] }> {
+  const res = await client.api.learnings.$get({
+    query: { ...(repo !== undefined && { repo }) },
+  });
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  const body = (await res.json()) as { learnings: Learning[]; warnings: string[] };
+  return body;
+}
+
+/**
+ * The Learnings board's write path (`POST /api/learnings`) — the SAME upsert
+ * `log_learning` runs. Three call shapes the board uses:
+ *  - Accept an open learning -> `{ repoPath, id, status: "applied" }`
+ *  - Dismiss an open learning -> `{ repoPath, id, status: "rejected" }`
+ *  - Log a waste finding      -> `{ source, sessionId, finding, change, proposedBy: "agent" }`
+ * `repoPath` (an existing learning's own `repo`) or `source`+`sessionId` (a
+ * waste item's provenance) lets the server resolve the ledger's repo root.
+ */
+export interface PostLearningInput {
+  repoPath?: string;
+  source?: SessionRef["source"];
+  sessionId?: string;
+  id?: string;
+  finding?: string;
+  change?: string;
+  expectedEffect?: string;
+  status?: Learning["status"];
+  proposedBy?: Learning["proposedBy"];
+}
+
+export async function postLearning(input: PostLearningInput): Promise<Learning> {
+  const res = await client.api.learnings.$post({ json: input });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${String(res.status)}`);
+  }
+  const body = (await res.json()) as { learning: Learning };
+  return body.learning;
 }

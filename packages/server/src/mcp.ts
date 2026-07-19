@@ -59,6 +59,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import {
+  AmbiguousRepoError,
   buildRepoBriefing,
   buildSessionInsightFor,
   findPatternsFor,
@@ -120,6 +121,21 @@ function notFound(sessionId: string) {
 
 function toolError(text: string) {
   return { content: [{ type: "text" as const, text }], isError: true };
+}
+
+/**
+ * Turn a bare-`repo` ambiguity into an actionable tool error listing the
+ * candidate repoRoots — shared by `briefing`/`find_patterns`, whose `repo`
+ * param accepts a bare name (see `resolveRepoParam` in insight.ts). Re-throws
+ * anything else so genuine failures still surface.
+ */
+function ambiguousRepoError(err: unknown) {
+  if (err instanceof AmbiguousRepoError) {
+    return toolError(
+      `${err.message}\nRe-run with repo set to one of: ${err.candidates.join(", ")}`,
+    );
+  }
+  throw err;
 }
 
 // ---------------------------------------------------------------------------
@@ -695,7 +711,7 @@ export function createMcpServer(): McpServer {
           .string()
           .optional()
           .describe(
-            "Normalized repo key (a repoRoot path or fallback bucket key); omit for all repos",
+            "Repo to scope to: a bare repo name (e.g. 'junrei'), an absolute repoRoot path, or a fallback bucket key; omit for all repos. A bare name matching several repos returns the candidates to disambiguate.",
           ),
         days: z
           .number()
@@ -710,14 +726,19 @@ export function createMcpServer(): McpServer {
           .describe("concise trims lists to headline entries (default); full returns everything"),
       },
     },
-    async ({ repo, days, detail }) =>
-      insightText(
-        await buildRepoBriefing({
-          ...(repo !== undefined && { repo }),
-          ...(days !== undefined && { days }),
-          ...(detail !== undefined && { detail }),
-        }),
-      ),
+    async ({ repo, days, detail }) => {
+      try {
+        return insightText(
+          await buildRepoBriefing({
+            ...(repo !== undefined && { repo }),
+            ...(days !== undefined && { days }),
+            ...(detail !== undefined && { detail }),
+          }),
+        );
+      } catch (err) {
+        return ambiguousRepoError(err);
+      }
+    },
   );
 
   // -------------------------------------------------------------------------
@@ -759,7 +780,12 @@ export function createMcpServer(): McpServer {
             "text = full-text search; delegation = shape aggregation; waste = waste-class rollup",
           ),
         query: z.string().optional().describe("Substring to find — required for kind: 'text'"),
-        repo: z.string().optional().describe("Normalized repo key to scope to; omit for all repos"),
+        repo: z
+          .string()
+          .optional()
+          .describe(
+            "Repo to scope to: a bare repo name, an absolute repoRoot path, or a fallback bucket key; omit for all repos",
+          ),
         days: z.number().int().min(1).max(90).optional().describe("Window in days (default 14)"),
         detail: z
           .enum(["concise", "full"])
@@ -771,15 +797,19 @@ export function createMcpServer(): McpServer {
       if (kind === "text" && (query === undefined || query.trim() === "")) {
         return toolError("kind: 'text' requires a non-empty `query`.");
       }
-      return insightText(
-        await findPatternsFor({
-          kind: kind as PatternKind,
-          ...(query !== undefined && { query }),
-          ...(repo !== undefined && { repo }),
-          ...(days !== undefined && { days }),
-          ...(detail !== undefined && { detail }),
-        }),
-      );
+      try {
+        return insightText(
+          await findPatternsFor({
+            kind: kind as PatternKind,
+            ...(query !== undefined && { query }),
+            ...(repo !== undefined && { repo }),
+            ...(days !== undefined && { days }),
+            ...(detail !== undefined && { detail }),
+          }),
+        );
+      } catch (err) {
+        return ambiguousRepoError(err);
+      }
     },
   );
 

@@ -14,7 +14,6 @@ import {
 import { formatDateTime, formatDuration, formatUsd } from "./format.js";
 import type { ModelClass } from "./modelClass.js";
 import { classifyModel, MODEL_CLASS_ORDER } from "./modelClass.js";
-import { OverviewBand } from "./OverviewBand.js";
 import {
   ALL_REPOS,
   parseDayParam,
@@ -34,7 +33,7 @@ import {
   sourceBadgeLabel,
   subagentCellText,
 } from "./sessionListHelpers.js";
-import { Band } from "./shell/Band.js";
+import { RailLayout } from "./shell/RailLayout.js";
 
 /**
  * Rows per CLIENT-side page. The fetch itself is always the whole listable
@@ -215,19 +214,8 @@ export function SessionList() {
   };
 
   return (
-    <div>
-      <Band
-        left={<span className="mono fs11 mut">{"// agent statistics analyzer"}</span>}
-        right={
-          <>
-            <Link className="linkc mono fs11" to="/trends">
-              → trends
-            </Link>
-            <span className="mono fs11 mut">local · ~/.claude · ~/.codex</span>
-          </>
-        }
-      />
-      <div className="fx ac jb hpad gap12" style={{ padding: "18px 28px 14px", flexWrap: "wrap" }}>
+    <RailLayout active="sessions">
+      <div className="fx ac jb hpad gap12" style={{ padding: "22px 28px 14px", flexWrap: "wrap" }}>
         <h1 className="ttl" style={{ fontSize: "20px" }}>
           Sessions
         </h1>
@@ -352,12 +340,9 @@ export function SessionList() {
         </div>
       </div>
 
-      {/* Rendered for every list view now (repo ∩ date ∩ search, not just a
-          selected repo) — only once the rows are loaded, which mirrors the
-          old fetch-silently-then-appear behavior and guarantees the band
-          never aggregates a half-loaded list. */}
-      {sessions !== null && <OverviewBand sessions={filtered} />}
-
+      {/* The aggregate OverviewBand is gone in PR3 — the Briefing home (`/`) is
+          now the single at-a-glance rollup surface, so the session list stays a
+          plain filterable table. */}
       {error !== null && <div className="mut hpad">Failed to load sessions: {error}</div>}
       {error === null && sessions === null && <div className="mut hpad">Analyzing sessions…</div>}
 
@@ -369,7 +354,12 @@ export function SessionList() {
             <span className="lbl">Start</span>
             <span className="lbl cellr">Dur</span>
             <span className="lbl cellr">Turns</span>
-            <span className="lbl cellr">Cost est</span>
+            <span
+              className="lbl cellr"
+              title="Estimated USD cost. A trailing * means some usage in the row had no known pricing, so the figure is a lower bound."
+            >
+              Cost
+            </span>
             <span className="lbl">Model mix</span>
             <span className="lbl cellr">Sub</span>
             <span className="lbl cellr nowrap" title="Failed tool calls">
@@ -461,6 +451,6 @@ export function SessionList() {
           </button>
         </div>
       )}
-    </div>
+    </RailLayout>
   );
 }

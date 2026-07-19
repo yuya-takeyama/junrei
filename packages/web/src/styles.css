@@ -360,39 +360,6 @@ a.l0g:hover {
   border-bottom: 1px solid var(--bd);
 }
 
-/* Overview band — aggregate stat strip shown above the table for every
-   session-list view (see OverviewBand.tsx). Mirrors `.b-strip`/`.b-cell`'s
-   look (dotted separators, uppercase `.lbl`, `.big`/`.sub` value pairs)
-   without the hover/link affordance those carry — these cells aren't
-   navigable. Class names keep the `rob-` (repo-overview-band) prefix from
-   before the band stopped being repo-gated — no visual/behavioral change,
-   renaming CSS classes purely for the sake of it isn't worth the churn. */
-.rob-strip {
-  display: flex;
-  flex-wrap: wrap;
-  border-top: 1px dotted var(--bd);
-  border-bottom: 1px dotted var(--bd);
-}
-.rob-cell {
-  flex: 1;
-  padding: 14px 18px;
-  border-right: 1px dotted var(--bd);
-  min-width: 130px;
-}
-.rob-days {
-  display: flex;
-  align-items: flex-end;
-  gap: 5px;
-  height: 40px;
-}
-.rob-bar {
-  flex: 1;
-  max-width: 22px;
-  background: var(--amb);
-  opacity: 0.8;
-  min-height: 1px;
-}
-
 .mix {
   display: flex;
   height: 8px;
@@ -1814,103 +1781,716 @@ button.fb {
 }
 
 /* ---------------------------------------------------------------------
-   Trends (L0, sibling to the session list) — window/repo controls, KPI
-   tile row, daily stacked-by-model cost chart, main/subagent delegation
-   split, efficiency small multiples, cadence panel, anomalies panel. See
-   Trends.tsx and the trends/ subfolder.
+   PR3 renewal — left nav rail (RailLayout), Briefing home (Pattern A),
+   Learnings loop board (Pattern B), shared provenance badge (Pattern C).
+   Accent semantics map onto the existing token palette (no new colors):
+   amber (--amb) = learnings, red (--err) = waste, green/teal (--h) =
+   wins/verified, blue (--s) = delegation. `t-*` are the text-accent
+   utilities these three screens share.
    --------------------------------------------------------------------- */
 
-/* Spike-day marker (`DailyCostChart.tsx`) — a small amber dot above the
-   flagged column, same "amber dot = flagged/notable" vocabulary as
-   `.cmark`/`.axamb` (compaction markers, Context growth chart). Anchored to
-   `.scol`'s own positioning context (see that rule's comment above). */
-.scol-spike::before {
-  content: "";
-  position: absolute;
-  top: -7px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--amb);
+.t-am {
+  color: var(--amb);
+}
+.t-rd {
+  color: var(--err);
+}
+.t-gr {
+  color: var(--h);
+}
+.t-bl {
+  color: var(--s);
 }
 
-/* Delegation-split chart segment fills (`DelegationSplitChart.tsx`) — main
-   (the baseline scope) muted, subagents `--s` (a plain identity color, the
-   same accent `modelClass.ts` uses for the Sonnet family, reused generically
-   here as "the other scope"). Deliberately NOT `--amb`: delegating work to
-   subagents is the mission's own goal, not a cost worth flagging, and
-   docs/concept.md §4.6 rules out red/green-style judgment coloring entirely
-   ("numbers, never grades") — see `DelegationSplitChart.tsx`'s doc comment. */
-.k-main {
-  background: var(--mut);
+/* ---- Left nav rail + main content shell (RailLayout.tsx) ---- */
+.rail-layout {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
 }
-.k-sub {
-  background: var(--s);
+.rail {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 18px;
+  border-right: 1px dotted var(--bd);
 }
-
-/* Efficiency small-multiples row (`EfficiencyMultiples.tsx`) — three compact
-   sparklines sharing one card each. */
-.efm-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+.rail-wm {
+  font-size: 15px;
+  letter-spacing: 0.22em;
+  font-weight: 600;
 }
-.efm-spark {
-  fill: none;
-  stroke: var(--amb);
-  stroke-width: 1.5;
+.rail-nav {
+  margin-top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
 }
-.efm-dot {
-  fill: var(--amb);
+.rail-item {
+  font-size: 13.5px;
+  color: var(--mut);
+  padding: 9px 12px;
+  border-radius: var(--rad);
+  position: relative;
+  font-weight: 500;
 }
-/* Reference-band rect (`EfficiencyMultiples.tsx`'s subagent-return sparkline)
-   — an annotation, not a judgment (docs/concept.md §4.6 explicitly allows
-   "reference points from published research ... shown as annotations,
-   clearly sourced"), so this stays a neutral, low-contrast fill rather than
-   reusing any tone color. */
-.efm-band {
-  fill: var(--bd);
-  opacity: 0.5;
+.rail-item:hover {
+  color: var(--tx);
 }
-
-/* Anomalies panel (`AnomaliesPanel.tsx`) — top-5-by-cost session rows and
-   the spike-day list. Rank | repo | prompt snippet | started | source | cost. */
-.trend-top {
-  display: grid;
-  grid-template-columns: 20px 110px minmax(0, 1fr) 96px 62px 70px;
-  gap: 10px;
-  align-items: center;
-  padding: 7px 0;
-  border-bottom: 1px dotted var(--bd);
-  font-size: 12.5px;
-  color: inherit;
-}
-.trend-top.hdr {
-  border-bottom: 1px solid var(--bd);
-}
-a.trend-top:hover {
+.rail-item.on {
+  color: var(--tx);
   background: var(--pan);
 }
-.trend-spike-row {
+.rail-item.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--amb);
+  border-radius: 2px;
+}
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--mut);
+  opacity: 0.85;
+}
+.rail-foot .theme-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.rail-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Narrow viewport: the rail collapses to a horizontal top bar so the content
+   keeps full width. */
+@media (max-width: 720px) {
+  .rail-layout {
+    flex-direction: column;
+  }
+  .rail {
+    flex-basis: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 18px;
+    border-right: none;
+    border-bottom: 1px dotted var(--bd);
+  }
+  .rail-nav {
+    margin-top: 0;
+    flex-direction: row;
+    gap: 4px;
+  }
+  .rail-item.on::before {
+    display: none;
+  }
+  .rail-item.on {
+    border-bottom: 2px solid var(--amb);
+  }
+  .rail-foot {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .rail-foot .theme-toggle {
+    margin-top: 0;
+  }
+}
+
+/* ---- Provenance badge (Pattern C, ProvenanceBadge.tsx) ---- */
+.prov-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--mut);
+  border: 1px dotted var(--bd);
+  border-radius: var(--rad);
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.prov-call {
+  color: var(--amb);
+}
+.prov-tok {
+  opacity: 0.8;
+}
+
+/* ---- Briefing home (Home.tsx / BriefingView.tsx, Pattern A) ---- */
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 22px 30px 15px;
+  border-bottom: 1px dotted var(--bd);
+}
+.dateline {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.mast-ctl {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 0;
-  font-size: 12px;
-  color: var(--mut);
+  flex-wrap: wrap;
 }
-/* Spike-day rows are drill-down links into the session list (see
-   `AnomaliesPanel.tsx`) — same hover affordance as `.trend-top`'s rows. */
-a.trend-spike-row:hover {
+.seg {
+  display: flex;
+  border: 1px solid var(--bd);
+  border-radius: var(--rad);
+  overflow: hidden;
+}
+.seg-btn {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 13px;
+  color: var(--mut);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.seg-btn.on {
   background: var(--pan);
+  color: var(--tx);
+}
+.seg-btn:hover {
+  color: var(--tx);
+}
+.seg-btn:focus-visible {
+  outline: 2px solid var(--amb);
+  outline-offset: -2px;
 }
 
-/* Daily cost columns (`DailyCostChart.tsx`) are drill-down links into the
-   session list too — `.scol` itself stays a plain flex column (see its own
-   rule above) since `<a>` inherits that fine; this just adds the same hover
-   affordance every other clickable row in this app gets. */
-a.scol:hover {
-  opacity: 0.8;
+.brief-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 20px 30px 26px;
+  gap: 4px;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr) auto;
+  overflow: hidden;
+}
+.kpi {
+  padding: 13px 16px;
+  border-right: 1px dotted var(--bd);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kpi-badge {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 14px;
+}
+.kpi-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mut);
+  font-weight: 600;
+}
+.kpi-val {
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+  font-size: 11px;
+}
+.ldots {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ldots span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.dot.am {
+  background: var(--amb);
+}
+.dot.bl {
+  background: var(--s);
+}
+.dot.gr {
+  background: var(--h);
+}
+
+/* Section header (LEARNINGS / WASTE / WINS) — title, rule, meta, badge. */
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 22px 0 12px;
+}
+.sec-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.sec-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--bd);
+}
+.sec-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+
+.brief-empty {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+.brief-next {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.lcard {
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-height: 116px;
+}
+.lcard-body {
+  line-height: 1.45;
+}
+.lchip {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--rad);
+  border: 1px solid var(--bd);
+  color: var(--mut);
+}
+.lchip.open {
+  color: var(--amb);
+  border-color: var(--amb);
+}
+.lchip.applied {
+  color: var(--s);
+  border-color: var(--s);
+}
+.lchip.verified {
+  color: var(--h);
+  border-color: var(--h);
+}
+
+.brief-dual {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 26px;
+}
+@media (max-width: 900px) {
+  .brief-dual {
+    grid-template-columns: 1fr;
+  }
+  .lgrid {
+    grid-template-columns: 1fr;
+  }
+  .kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .kpi-badge {
+    display: none;
+  }
+}
+
+.wlist {
+  display: flex;
+  flex-direction: column;
+}
+.wrw {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 11px 2px;
+  border-bottom: 1px dotted var(--bd);
+}
+.wrw:last-child {
+  border-bottom: none;
+}
+.wrank {
+  font-size: 12px;
+  color: var(--mut);
+  padding-top: 1px;
+}
+.wmain {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.wtitle {
+  line-height: 1.4;
+}
+.wfix {
+  color: var(--mut);
+}
+.wprov {
+  color: var(--s);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wprov:hover {
+  text-decoration: underline;
+}
+.wend {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+}
+.west {
+  font-size: 14px;
+  color: var(--err);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ghost {
+  font-family: var(--ui);
+  font-size: 10.5px;
+  color: var(--mut);
+  border: 1px dotted var(--bd);
+  background: transparent;
+  border-radius: var(--rad);
+  padding: 4px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ghost:hover:not(:disabled) {
+  color: var(--tx);
+  border-color: var(--mut);
+}
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wincol {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wincard {
+  padding: 13px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.win-metric {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1;
+}
+.win-unit {
+  font-size: 11px;
+  color: var(--mut);
+  font-weight: 400;
+}
+.win-body {
+  line-height: 1.4;
+}
+
+/* Footer sparkbar (CostSparkbar.tsx) — salvaged relative-height bar vocab. */
+.sparkwrap {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px dotted var(--bd);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.spark-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 54px;
+}
+.spark-bar {
+  width: 14px;
+  background: var(--mut);
+  opacity: 0.55;
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+.spark-bar.today {
+  background: var(--amb);
+  opacity: 1;
+}
+
+/* ---- Learnings loop board (Learnings.tsx / LearningsBoard.tsx, Pattern B) ---- */
+.board {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0 28px 24px;
+}
+.loop-health {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 12px 0;
+  border-bottom: 1px dotted var(--bd);
+  margin-bottom: 16px;
+}
+.lh-loop {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mut);
+  padding-right: 18px;
+  margin-right: 4px;
+  border-right: 1px dotted var(--bd);
+}
+.lh-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 20px;
+  border-right: 1px dotted var(--bd);
+}
+.lh-item:last-child {
+  border-right: none;
+}
+.lh-k {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+.lh-v {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.board-cols {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+@media (max-width: 900px) {
+  .board-cols {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 560px) {
+  .board-cols {
+    grid-template-columns: 1fr;
+  }
+}
+.board-col {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+.phead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px 9px;
+  border-bottom: 1px solid var(--bd);
+}
+.pname {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.pcount {
+  font-size: 11px;
+  color: var(--mut);
+}
+.phead .prov-badge {
+  margin-left: auto;
+}
+.pcards {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.pcards-empty {
+  padding: 8px 2px;
+  line-height: 1.5;
+}
+
+.lb-card {
+  background: var(--pan);
+  border: 1px solid var(--bd);
+  border-top-width: 2px;
+  border-radius: var(--rad);
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lb-card.tint-r {
+  border-top-color: var(--err);
+}
+.lb-card.tint-a {
+  border-top-color: var(--amb);
+}
+.lb-card.tint-b {
+  border-top-color: var(--s);
+}
+.lb-card.tint-g {
+  border-top-color: var(--h);
+}
+.lb-card.muted {
+  opacity: 0.6;
+}
+.lb-est {
+  font-size: 14px;
+  color: var(--err);
+  font-weight: 600;
+}
+.lb-id {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.lb-chip {
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--rad);
+  line-height: 1.1;
+}
+.lb-chip.r {
+  color: var(--err);
+}
+.lb-chip.a {
+  color: var(--amb);
+}
+.lb-chip.b {
+  color: var(--s);
+}
+.lb-chip.g {
+  color: var(--h);
+}
+.lb-chip.m {
+  color: var(--mut);
+}
+.lb-body {
+  line-height: 1.42;
+}
+.lb-prov {
+  color: var(--s);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb-prov:hover {
+  text-decoration: underline;
+}
+.lb-meta {
+  color: var(--mut);
+}
+.lb-effect {
+  color: var(--h);
+  background: var(--bg);
+  border: 1px dotted var(--bd);
+  border-radius: var(--rad);
+  padding: 5px 8px;
+  line-height: 1.4;
+}
+.lb-act {
+  align-self: flex-start;
+}
+.lb-btns {
+  display: flex;
+  gap: 8px;
+}
+.btn-accept {
+  font-family: var(--ui);
+  font-size: 11px;
+  background: var(--amb);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--rad);
+  padding: 5px 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-accept:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-dismiss {
+  font-family: var(--ui);
+  font-size: 11px;
+  background: transparent;
+  color: var(--mut);
+  border: 1px dotted var(--bd);
+  border-radius: var(--rad);
+  padding: 5px 13px;
+  cursor: pointer;
+}
+.btn-dismiss:hover:not(:disabled) {
+  color: var(--tx);
+  border-color: var(--mut);
+}
+.btn-accept:focus-visible,
+.btn-dismiss:focus-visible,
+.ghost:focus-visible {
+  outline: 2px solid var(--amb);
+  outline-offset: -2px;
 }
