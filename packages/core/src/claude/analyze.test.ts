@@ -533,6 +533,54 @@ describe("analyzeClaudeSession with meta.json files lacking toolUseId", () => {
   });
 });
 
+describe("analyzeClaudeSession with a Workflow-tool run that has no run-state file yet", () => {
+  // `55555555…555` (see subagents.test.ts / workflows.test.ts) has TWO
+  // Workflow-tool runs: wf_run1 (a real `workflows/wf_run1.json` run-state
+  // file) and wf_run_orphan (agent sidecars under
+  // `subagents/workflows/wf_run_orphan/` but no matching run-state file at
+  // all — the "still running when analyzed" shape `buildWorkflowRunSummaries`
+  // synthesizes for). The main transcript's second `Workflow` tool_use
+  // (toolu_workflow2) launches wf_run_orphan with a `tool_result` mentioning
+  // its generated script `tools-tab-design-wf_run_orphan.js`.
+  const WORKFLOW_SESSION_FILE = join(
+    FIXTURE_PROJECTS,
+    "-Users-test-proj/55555555-5555-5555-5555-555555555555.jsonl",
+  );
+
+  it("synthesizes a run summary for the orphan run alongside the parsed one", async () => {
+    const analysis = await analyzeClaudeSession(WORKFLOW_SESSION_FILE);
+    expect(analysis.workflowRuns.map((r) => r.runId).sort()).toEqual(["wf_run1", "wf_run_orphan"]);
+
+    const orphan = analysis.workflowRuns.find((r) => r.runId === "wf_run_orphan");
+    expect(orphan?.agentCount).toBe(1);
+    expect(orphan?.phases).toEqual([]);
+    expect(orphan?.status).toBeUndefined();
+    expect(orphan?.durationMs).toBeUndefined();
+  });
+
+  it("derives the orphan run's name from its launch's script filename", async () => {
+    const analysis = await analyzeClaudeSession(WORKFLOW_SESSION_FILE);
+    const orphan = analysis.workflowRuns.find((r) => r.runId === "wf_run_orphan");
+    expect(orphan?.name).toBe("tools-tab-design");
+    expect(orphan?.toolUseId).toBe("toolu_workflow2");
+    expect(orphan?.launchLine).toBeDefined();
+  });
+
+  it("leaves the parsed wf_run1 summary unaffected", async () => {
+    const analysis = await analyzeClaudeSession(WORKFLOW_SESSION_FILE);
+    const run1 = analysis.workflowRuns.find((r) => r.runId === "wf_run1");
+    expect(run1?.name).toBe("widget-research");
+    expect(run1?.agentCount).toBe(2);
+    expect(run1?.status).toBe("completed");
+  });
+
+  it("keeps workflowRunId on the orphan run's member node so the web can still group it", async () => {
+    const analysis = await analyzeClaudeSession(WORKFLOW_SESSION_FILE);
+    const orphanNode = analysis.subagents.find((n) => n.agentId === "wf3333333333333");
+    expect(orphanNode?.workflowRunId).toBe("wf_run_orphan");
+  });
+});
+
 describe("analyzeClaudeSession with a corrupt subagent transcript", () => {
   // Regression coverage for the "one unreadable subagent sidecar shouldn't
   // fail the whole session" bug: a session with two subagent sidecars, one

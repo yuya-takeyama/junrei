@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ModelUsageSummary, SubagentNodeJson } from "../../api.js";
+import type { ModelUsageSummary, SubagentNodeJson, WorkflowRunSummaryJson } from "../../api.js";
 import {
   activeModels,
   costShare,
+  displayName,
   findAgentPath,
   flattenSubagents,
+  groupedTreeRows,
   isSessionLive,
   mainDelegatedSplit,
   mainDelegatedTokenSplit,
@@ -294,5 +296,137 @@ describe("spawnedByLabel", () => {
     };
     expect(spawnedByLabel(lintFixer, [testWriter])).toBe("test-writer");
     expect(spawnedByLabel(testWriter, [testWriter])).toBe("main");
+  });
+});
+
+describe("groupedTreeRows", () => {
+  it("synthesizes a workflow header for a member whose runId has no entry in workflowRuns, instead of dropping it", () => {
+    // Mirrors the still-running-workflow bug: Claude Code writes agent
+    // sidecars under subagents/workflows/<runId>/ immediately, but
+    // workflows/<runId>.json only once the run completes — `workflowRuns`
+    // can be `[]` (or just missing this run) while the member node is
+    // already discovered.
+    const orphanMember: SubagentNodeJson = {
+      ...node("wf-agent-1", 0.5),
+      workflowRunId: "wf_run_orphan",
+      startedAt: "2026-07-10T00:05:00.000Z",
+    };
+    const rows = groupedTreeRows([orphanMember], []);
+    expect(rows.map((r) => r.kind)).toEqual(["workflow-header", "agent"]);
+
+    const header = rows[0];
+    if (header?.kind !== "workflow-header") throw new Error("expected a workflow-header row");
+    expect(header.runId).toBe("wf_run_orphan");
+    expect(header.name).toBeUndefined();
+    expect(header.status).toBeUndefined();
+    expect(header.agentCount).toBe(1);
+
+    const agentRow = rows[1];
+    if (agentRow?.kind !== "agent") throw new Error("expected an agent row");
+    expect(agentRow.row.id).toBe("wf-agent-1");
+  });
+
+  it("appends orphan run groups after every run present in workflowRuns, leaving known runs' rendering unchanged", () => {
+    const known: SubagentNodeJson = { ...node("wf-known", 0.1), workflowRunId: "wf_run1" };
+    const orphan: SubagentNodeJson = { ...node("wf-orphan", 0.2), workflowRunId: "wf_run_orphan" };
+    const knownRun: WorkflowRunSummaryJson = {
+      runId: "wf_run1",
+      name: "widget-research",
+      agentCount: 1,
+      phases: [],
+    };
+    const rows = groupedTreeRows([known, orphan], [knownRun]);
+    const headers = rows.filter((r) => r.kind === "workflow-header");
+    expect(headers.map((h) => h.runId)).toEqual(["wf_run1", "wf_run_orphan"]);
+    expect(headers[0]?.name).toBe("widget-research");
+    expect(headers[1]?.name).toBeUndefined();
+  });
+
+  it("orders multiple orphan runs by their earliest member's startedAt, undefined-started runs last", () => {
+    const later: SubagentNodeJson = {
+      ...node("wf-b", 0.1),
+      workflowRunId: "wf_run_b",
+      startedAt: "2026-07-10T01:00:00.000Z",
+    };
+    const earlier: SubagentNodeJson = {
+      ...node("wf-a", 0.1),
+      workflowRunId: "wf_run_a",
+      startedAt: "2026-07-10T00:00:00.000Z",
+    };
+    const noStart: SubagentNodeJson = { ...node("wf-c", 0.1), workflowRunId: "wf_run_c" };
+    const rows = groupedTreeRows([later, earlier, noStart], []);
+    const headerRunIds = rows.filter((r) => r.kind === "workflow-header").map((r) => r.runId);
+    expect(headerRunIds).toEqual(["wf_run_a", "wf_run_b", "wf_run_c"]);
+  });
+
+  it("still returns [] for a session with no subagents and no workflow runs at all", () => {
+    expect(groupedTreeRows([], [])).toEqual([]);
+  });
+});
+
+describe("displayName", () => {
+  it("prefers workflowLabel, then description, for a workflow-subagent node", () => {
+    const withLabel: SubagentNodeJson = {
+      ...node("wf1", 0.1),
+      agentType: "workflow-subagent",
+      workflowLabel: "research:agentcore",
+      description: "should not win",
+    };
+    expect(displayName(withLabel)).toBe("research:agentcore");
+
+    const withDescription: SubagentNodeJson = {
+      ...node("wf2", 0.1),
+      agentType: "workflow-subagent",
+      description: "Refactor foo",
+    };
+    expect(displayName(withDescription)).toBe("Refactor foo");
+  });
+
+  it("falls back to the first line of promptPreview, truncated to ~48 chars, for an unlabeled workflow-subagent", () => {
+    // Regression coverage: before this fallback, every unlabeled workflow
+    // agent rendered as the literal string "workflow-subagent" (its
+    // `agentType`) — indistinguishable from one another in the tree.
+    const short: SubagentNodeJson = {
+      ...node("wf3", 0.1),
+      agentType: "workflow-subagent",
+      promptPreview: "orphaned task",
+    };
+    expect(displayName(short)).toBe("orphaned task");
+
+    const multiline: SubagentNodeJson = {
+      ...node("wf4", 0.1),
+      agentType: "workflow-subagent",
+      promptPreview: "first line only\nsecond line never shows",
+    };
+    expect(displayName(multiline)).toBe("first line only");
+
+    const long: SubagentNodeJson = {
+      ...node("wf5", 0.1),
+      agentType: "workflow-subagent",
+      promptPreview: "x".repeat(80),
+    };
+    expect(displayName(long)).toBe(`${"x".repeat(48)}…`);
+  });
+
+  it("falls back to agentId when a workflow-subagent has neither label, description, nor promptPreview", () => {
+    const bare: SubagentNodeJson = { ...node("wf6", 0.1), agentType: "workflow-subagent" };
+    expect(displayName(bare)).toBe("wf6");
+  });
+
+  it("keeps the classic subagent chain unchanged: description, then agentType, then agentId", () => {
+    const withDescription: SubagentNodeJson = {
+      ...node("classic1", 0.1),
+      agentType: "general-purpose",
+      description: "Refactor foo",
+    };
+    expect(displayName(withDescription)).toBe("Refactor foo");
+
+    const withTypeOnly: SubagentNodeJson = {
+      ...node("classic2", 0.1),
+      agentType: "general-purpose",
+    };
+    expect(displayName(withTypeOnly)).toBe("general-purpose");
+
+    expect(displayName(node("classic3", 0.1))).toBe("classic3");
   });
 });

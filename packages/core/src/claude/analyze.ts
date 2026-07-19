@@ -69,6 +69,12 @@ const RETURNED_PREVIEW_LIMIT = 2000;
  * transcripts actually discovered for this run (`listSubagentRefs`), which
  * can be less than the run state's own `agentCount` for a still-running or
  * partially-synced run.
+ *
+ * A run can also exist with NO `workflows/<runId>.json` at all — the state
+ * file is only written once the run completes, so a still-running run is
+ * SYNTHESIZED from the agent sidecars alone (see `buildWorkflowRunSummaries`).
+ * There, `status`/`durationMs` are always absent (no evidence either way) and
+ * `phases` is always `[]`.
  */
 export interface ClaudeWorkflowRunSummary {
   runId: string;
@@ -437,27 +443,49 @@ async function analyzeSubagents(
 }
 
 /**
- * Build the session-level `ClaudeWorkflowRunSummary` list from every parsed
- * run-state file, cross-referenced against the discovered agent refs (for
- * `agentCount`) and the main transcript (for `toolUseId`/`launchLine`).
- * Independent of whether any agents were actually discovered for a run — a
- * run-state file with zero matching sidecars still gets a summary entry,
- * just with `agentCount: 0`.
+ * Build the session-level `ClaudeWorkflowRunSummary` list, cross-referenced
+ * against the discovered agent refs (for `agentCount`) and the main
+ * transcript (for `toolUseId`/`launchLine`/a best-effort `name`).
+ *
+ * Two sources feed this, and a run can appear from EITHER without the other:
+ *  - Every parsed run-state file (`workflowRuns`, from `workflows.ts`) gets a
+ *    summary, independent of whether any agents were actually discovered for
+ *    it — a run-state file with zero matching sidecars still gets an entry,
+ *    just with `agentCount: 0`.
+ *  - Every `workflowRunId` seen among `refs` but with NO matching run-state
+ *    file ALSO gets a summary, synthesized from whatever's independently
+ *    knowable. This is the common case for a run that's still IN PROGRESS
+ *    when the session is analyzed: Claude Code writes each agent's sidecar
+ *    transcript under `subagents/workflows/<runId>/` as it goes, but only
+ *    writes `workflows/<runId>.json` once the run COMPLETES (see
+ *    `workflows.ts`'s doc comment). Without this branch, a running workflow's
+ *    member nodes carry `workflowRunId` but `listWorkflowRuns` returns `[]`
+ *    for that id, so the run — and every agent in it — silently disappears
+ *    from `workflowRuns` (and, downstream, from the web's grouped tree; see
+ *    `agentTree.ts`'s `groupedTreeRows`). A synthesized entry deliberately
+ *    never sets `status`/`durationMs` (no run-state file means no evidence
+ *    for either — inventing "running" here would be exactly the kind of
+ *    guessed status `SubagentStatus`'s doc comment warns against; the web
+ *    infers a live look from session liveness instead) and always has
+ *    `phases: []` (phase membership also only exists in the run-state file).
+ *
+ * Parsed entries keep `workflowRuns`' own order; synthesized entries follow,
+ * sorted by `launchLine` (undefined last) then `runId` for a deterministic
+ * order across runs — `agentCountByRunId`'s iteration order otherwise follows
+ * `refs`' discovery order, which isn't guaranteed stable.
  */
 function buildWorkflowRunSummaries(
   workflowRuns: readonly WorkflowRun[],
   refs: readonly SubagentRef[],
   mainData: SessionData,
 ): ClaudeWorkflowRunSummary[] {
-  if (workflowRuns.length === 0) return [];
-
   const agentCountByRunId = new Map<string, number>();
   for (const ref of refs) {
     if (ref.workflowRunId === undefined) continue;
     agentCountByRunId.set(ref.workflowRunId, (agentCountByRunId.get(ref.workflowRunId) ?? 0) + 1);
   }
 
-  return workflowRuns.map((run) => {
+  const parsed = workflowRuns.map((run) => {
     const launch = findWorkflowLaunch(mainData, run.runId);
     return {
       runId: run.runId,
@@ -469,6 +497,28 @@ function buildWorkflowRunSummaries(
       ...(launch !== undefined && { toolUseId: launch.toolUseId, launchLine: launch.line }),
     };
   });
+
+  const parsedRunIds = new Set(workflowRuns.map((run) => run.runId));
+  const synthesized = [...agentCountByRunId]
+    .filter(([runId]) => !parsedRunIds.has(runId))
+    .map(([runId, agentCount]) => {
+      const launch = findWorkflowLaunch(mainData, runId);
+      const name = launch === undefined ? undefined : extractWorkflowScriptName(launch.text, runId);
+      return {
+        runId,
+        ...(name !== undefined && { name }),
+        phases: [] as WorkflowPhase[],
+        agentCount,
+        ...(launch !== undefined && { toolUseId: launch.toolUseId, launchLine: launch.line }),
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.launchLine ?? Number.POSITIVE_INFINITY) - (b.launchLine ?? Number.POSITIVE_INFINITY) ||
+        a.runId.localeCompare(b.runId),
+    );
+
+  return [...parsed, ...synthesized];
 }
 
 /**
@@ -478,16 +528,41 @@ function buildWorkflowRunSummaries(
  * carries a `toolUseId` (unlike classic Agent/Task launches), and a session
  * can invoke `Workflow` more than once (e.g. resuming after editing the
  * script), so matching is done PER RUN ID rather than assuming a single
- * `Workflow` call exists.
+ * `Workflow` call exists. `text` is returned alongside (not just
+ * `toolUseId`/`line`) because it's also the only surviving evidence of a
+ * run's NAME when no run-state file exists yet — see
+ * `extractWorkflowScriptName`. A real result reads roughly:
+ * "Workflow launched in background. Task ID: ...\nSummary: ...\nTranscript
+ * dir: .../subagents/workflows/wf_6f1fd80b-d16\nScript file:
+ * /Users/.../workflows/scripts/tools-tab-design-wf_6f1fd80b-d16.js".
  */
 function findWorkflowLaunch(
   mainData: SessionData,
   runId: string,
-): { toolUseId: string; line: number } | undefined {
+): { toolUseId: string; line: number; text: string } | undefined {
   const call = mainData.toolCalls.find(
     (c) => c.name === "Workflow" && c.result?.text.includes(runId) === true,
   );
-  return call === undefined ? undefined : { toolUseId: call.toolUseId, line: call.line };
+  if (call?.result === undefined) return undefined;
+  return { toolUseId: call.toolUseId, line: call.line, text: call.result.text };
+}
+
+/**
+ * Best-effort workflow name for a run with no `workflows/<runId>.json` state
+ * file — `workflowName` otherwise lives ONLY in that file, so a still-running
+ * run has no other source for it. Claude Code names a run's generated script
+ * `<workflowName>-<runId>.js` (see `findWorkflowLaunch`'s doc comment for a
+ * real example), so the script's own basename is the one surviving trace of
+ * the name while the run is in flight. `runId` is regex-escaped before being
+ * spliced into the pattern — run ids aren't guaranteed regex-safe. Returns
+ * `undefined` (never a guess from the run id itself) when the launch's result
+ * text doesn't contain that pattern at all — an older harness version, or a
+ * launch that couldn't be matched.
+ */
+function extractWorkflowScriptName(resultText: string, runId: string): string | undefined {
+  const escapedRunId = runId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`([\\w-]+)-${escapedRunId}\\.js`).exec(resultText);
+  return match?.[1];
 }
 
 /**

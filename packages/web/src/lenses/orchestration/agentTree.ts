@@ -202,6 +202,21 @@ export interface AgentTreeRow {
 export type GroupedTreeRow = WorkflowHeaderRow | WorkflowPhaseHeaderRow | AgentTreeRow;
 
 /**
+ * Earliest `startedAt` among a run's member nodes, `undefined` when none has
+ * one — the sort key for orphan run groups in `groupedTreeRows` (deterministic
+ * render position without an authoritative `launchLine`/run order to fall
+ * back on, since an orphan run by definition has no run-state file).
+ */
+function earliestStartedAt(nodes: readonly SubagentNodeJson[]): string | undefined {
+  let earliest: string | undefined;
+  for (const n of nodes) {
+    if (n.startedAt === undefined) continue;
+    if (earliest === undefined || n.startedAt < earliest) earliest = n.startedAt;
+  }
+  return earliest;
+}
+
+/**
  * Tree rows for the Tree view, with workflow-run grouping layered on top of
  * `flattenSubagents`:
  *  - Classic (non-Workflow-tool) subagents flatten EXACTLY as
@@ -218,9 +233,23 @@ export type GroupedTreeRow = WorkflowHeaderRow | WorkflowPhaseHeaderRow | AgentT
  *    Any member agent whose `workflowPhase` doesn't match a known phase
  *    title (including no phase at all) is appended after the named phases
  *    with no phase header of its own — still inside the run's group.
- *  - Run groups are appended after every classic row, in the order
- *    `workflowRuns` is given; a run with zero discovered member nodes
- *    contributes nothing (no empty header).
+ *  - Run groups for runs present in `workflowRuns` are appended after every
+ *    classic row, in the order `workflowRuns` is given; a run with zero
+ *    discovered member nodes contributes nothing (no empty header).
+ *  - INVARIANT: every discovered agent is rendered. A member node whose
+ *    `workflowRunId` has NO matching entry in `workflowRuns` still gets a
+ *    group — a `WorkflowHeaderRow` synthesized with `name`/`status`
+ *    undefined and `agentCount` taken from the member count itself, followed
+ *    by its flattened members exactly like a known run's leftover
+ *    (phase-less) agents. This is mostly belt-and-suspenders: `analyze.ts`'s
+ *    `buildWorkflowRunSummaries` already synthesizes a summary for a run
+ *    still in progress (no `workflows/<runId>.json` written yet), so
+ *    `workflowRuns` normally already covers every `workflowRunId` seen among
+ *    `subagents`. This branch is what keeps that true even for a stale cached
+ *    analysis, or any other gap between the two lists — a member agent must
+ *    NEVER silently vanish just because its run has no summary. Orphan groups
+ *    are appended after every run present in `workflowRuns`, ordered by their
+ *    earliest member's `startedAt` (undefined last) then `runId`.
  */
 export function groupedTreeRows(
   subagents: readonly SubagentNodeJson[],
@@ -231,7 +260,6 @@ export function groupedTreeRows(
     kind: "agent" as const,
     row,
   }));
-  if (workflowRuns.length === 0) return out;
 
   const membersByRun = new Map<string, SubagentNodeJson[]>();
   for (const node of subagents) {
@@ -240,8 +268,26 @@ export function groupedTreeRows(
     if (list === undefined) membersByRun.set(node.workflowRunId, [node]);
     else list.push(node);
   }
+  if (workflowRuns.length === 0 && membersByRun.size === 0) return out;
 
-  for (const run of workflowRuns) {
+  const knownRunIds = new Set(workflowRuns.map((run) => run.runId));
+  const orphanRuns: WorkflowRunSummaryJson[] = [...membersByRun.keys()]
+    .filter((runId) => !knownRunIds.has(runId))
+    .sort((a, b) => {
+      const aStart = earliestStartedAt(membersByRun.get(a) ?? []);
+      const bStart = earliestStartedAt(membersByRun.get(b) ?? []);
+      if (aStart === undefined && bStart === undefined) return a.localeCompare(b);
+      if (aStart === undefined) return 1;
+      if (bStart === undefined) return -1;
+      return aStart.localeCompare(bStart) || a.localeCompare(b);
+    })
+    .map((runId) => ({
+      runId,
+      agentCount: (membersByRun.get(runId) ?? []).length,
+      phases: [],
+    }));
+
+  for (const run of [...workflowRuns, ...orphanRuns]) {
     const members = membersByRun.get(run.runId);
     if (members === undefined || members.length === 0) continue;
 
@@ -354,16 +400,47 @@ export function spawnedByLabel(
   return parent === undefined ? spawnedBy : displayName(parent);
 }
 
+/** Length `promptPreviewName` truncates a workflow-subagent's fallback label to (with a trailing ellipsis when cut). */
+const DISPLAY_NAME_PROMPT_LIMIT = 48;
+
+/**
+ * First line of `promptPreview`, trimmed and truncated to
+ * `DISPLAY_NAME_PROMPT_LIMIT` chars — the last-resort display name for a
+ * `workflow-subagent` node with no `workflowLabel`/`description` (see
+ * `displayName`). `undefined` for a missing or blank preview, so the caller
+ * falls through to `agentId` instead of showing an empty label.
+ */
+function promptPreviewName(promptPreview: string | undefined): string | undefined {
+  if (promptPreview === undefined) return undefined;
+  const firstLine = promptPreview.split("\n")[0]?.trim();
+  if (firstLine === undefined || firstLine.length === 0) return undefined;
+  return firstLine.length > DISPLAY_NAME_PROMPT_LIMIT
+    ? `${firstLine.slice(0, DISPLAY_NAME_PROMPT_LIMIT)}…`
+    : firstLine;
+}
+
 /**
  * Display name for a tree row: for a Workflow-tool agent, its run-state
  * `label` (e.g. "research:agentcore") wins first — far more legible than the
  * generic `description`/`agentType` a `workflow-subagent` meta.json carries
- * (always just `"workflow-subagent"`, not a real description); classic
- * subagents fall through the same chain as before (description, then agent
- * type, then the raw id).
+ * (always just `"workflow-subagent"`, not a real description). When NEITHER
+ * is available (no run-state entry for this agent — the orphan/still-running
+ * case `groupedTreeRows` now also renders instead of dropping), falling
+ * through to `agentType` would show the literal string "workflow-subagent"
+ * for every such row, indistinguishable from one another — so a
+ * `workflow-subagent` node instead falls through to its own first prompt
+ * line (`promptPreviewName`) before the raw id. Classic subagents are
+ * unaffected: `workflowLabel` is never set for them (see `SubagentNode`'s
+ * doc comment in `@junrei/core`), so they fall straight to the same
+ * `description ?? agentType ?? agentId` chain as before.
  */
 export function displayName(node: SubagentNodeJson): string {
-  return node.workflowLabel ?? node.description ?? node.agentType ?? node.agentId;
+  if (node.workflowLabel !== undefined) return node.workflowLabel;
+  if (node.description !== undefined) return node.description;
+  if (node.agentType === "workflow-subagent") {
+    return promptPreviewName(node.promptPreview) ?? node.agentId;
+  }
+  return node.agentType ?? node.agentId;
 }
 
 /** Session wall-clock span (ms) for positioning waterfall bars — undefined if unusable. */
