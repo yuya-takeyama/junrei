@@ -24,19 +24,18 @@ interface Props<K extends string> {
  * different column jumps to `defaultDir`.
  *
  * `aria-sort` lives on the cell, not the `<button>` inside it — and the
- * cell is a real `<th scope="col">`, not a styled `<span>`: this app's
- * tables are otherwise CSS grids of `<div>`/`<span>` (no `<table>`), but
- * `aria-sort` is only valid on `columnheader`/`rowheader`/`cell`/`row`
- * roles, and Biome's a11y rules (`useAriaPropsSupportedByRole`,
- * `useSemanticElements`, `useFocusableInteractive`) push toward the native
- * element over faking the role on a `<span>`. `<th>` blockifies fine as a
- * CSS Grid item (see `styles.css`'s `.bcmd th, .bhh th` reset for the table
- * header chrome — bold/centered/padded — it doesn't want here), so it slots
- * into the existing `.bcmd`/`.bhh` grid rows unchanged. Those two grids
- * (plus their header/data row `<div>`s) also carry `role="table"`/
- * `role="row"` at their call sites — `<th>`'s implicit columnheader role,
- * and thus `aria-sort`, is only guaranteed to reach assistive tech with
- * that ancestry in place, since these grids have no real `<table>` ancestor.
+ * cell is a `<div role="columnheader">`, not a real `<th>`: this app's
+ * tables are CSS grids of `<div>`/`<span>` (no `<table>`), and HTML only
+ * allows `<th>` inside `<tr>` — rendered under the `.bcmd`/`.bhh` row
+ * `<div>`s, React warns "<th> cannot be a child of <div>" on every mount.
+ * So the cell follows the same ARIA-table convention its call sites
+ * already use (`role="table"`/`role="row"` on those grid `<div>`s):
+ * `columnheader` is exactly the role a `<th scope="col">` would have
+ * carried implicitly, and one of the few roles `aria-sort` is valid on
+ * (`useAriaPropsSupportedByRole` accepts it). Biome's `useSemanticElements`
+ * preference for the native element is suppressed inline below for the
+ * same reason as at those call sites — the native element is precisely
+ * what's invalid in this markup.
  */
 export function SortableHeaderCell<K extends string>({
   label,
@@ -50,7 +49,13 @@ export function SortableHeaderCell<K extends string>({
   const ariaSort = isActive ? (sortSpec.dir === "asc" ? "ascending" : "descending") : "none";
 
   return (
-    <th className={align === "right" ? "cellr" : undefined} scope="col" aria-sort={ariaSort}>
+    // biome-ignore lint/a11y/useSemanticElements: a native <th> is invalid DOM inside this CSS-grid-of-divs row (see the doc comment above); role="columnheader" is the closest available semantics
+    // biome-ignore lint/a11y/useFocusableInteractive: the keyboard-operable control is the inner sort <button>; the cell itself must stay out of the tab sequence (same as the role="row" divs at the call sites)
+    <div
+      className={align === "right" ? "cellr" : undefined}
+      role="columnheader"
+      aria-sort={ariaSort}
+    >
       <button
         type="button"
         className={`sortbtn lbl${isActive ? " on" : ""}`}
@@ -59,6 +64,6 @@ export function SortableHeaderCell<K extends string>({
         {label}
         {isActive && <span className="sortind">{sortSpec.dir === "asc" ? "▲" : "▼"}</span>}
       </button>
-    </th>
+    </div>
   );
 }

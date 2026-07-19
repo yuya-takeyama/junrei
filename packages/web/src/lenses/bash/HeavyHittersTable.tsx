@@ -74,9 +74,9 @@ export function HeavyHittersTable({ heavyHitters, sortSpec, onSortChange, onOpen
   );
 
   return (
-    // `role="table"`/`role="row"` restore the ancestry a `<th aria-sort>` needs to
-    // keep its implicit columnheader role (and thus expose `aria-sort` to AT) — see
-    // `SortableHeaderCell.tsx`'s doc comment. `.bhh` isn't one shared grid but a
+    // `role="table"`/`role="row"` provide the ancestry the `role="columnheader"`
+    // cells (`SortableHeaderCell.tsx`) need to expose `aria-sort` to AT — see that
+    // component's doc comment. `.bhh` isn't one shared grid but a
     // per-row `display:grid` repeated on every row `<div>` (header + data alike), so
     // "table"/"row" land on this outer wrapper and each `.bhh` row rather than on
     // `.bhh` itself. No `<table>`/`<tr>` fits this CSS-grid-of-`<div>`s layout, so

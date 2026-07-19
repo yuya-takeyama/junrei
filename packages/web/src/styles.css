@@ -1521,23 +1521,6 @@ button.fb {
   border-bottom: 1px solid var(--bd);
 }
 
-/* `SortableHeaderCell.tsx` renders a real `<th scope="col">` (Biome's a11y
-   rules want a native element for `aria-sort`, not a `<span role=
-   "columnheader">` — see that component's doc comment) even though every
-   other cell in these grids (`.bcmd`/`.bhh`) is a plain `<div>`/`<span>`.
-   `<th>` blockifies fine as a CSS Grid item, but its UA stylesheet still
-   bolds/centers/pads it by default — reset all three so it sits in the grid
-   indistinguishably from its `<span>` siblings. Scoped to these grid
-   families rather than a bare `th` selector, since a bare reset would
-   silently clobber any unrelated `<table>` this app adds later. */
-.bcmd th,
-.bhh th {
-  font-weight: inherit;
-  text-align: inherit;
-  vertical-align: inherit;
-  padding: 0;
-}
-
 /* Sortable column header (`SortableHeaderCell.tsx`) — a `<button>` carrying
    `.lbl`'s usual mono/uppercase/muted look so a header row of sort buttons
    reads identically to a plain `.lbl` header; `.on` (the active sort
