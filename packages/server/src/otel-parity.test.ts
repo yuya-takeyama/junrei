@@ -80,15 +80,15 @@ describe("byte-for-byte parity: JUNREI_OTEL_DIR unset vs. set-but-empty", () => 
     else process.env.JUNREI_OTEL_DIR = previousOtelDir;
   });
 
-  it("MCP get_session_summary: identical bytes with JUNREI_OTEL_DIR unset vs. set-but-empty", async () => {
+  it("MCP analyze_session: identical bytes with JUNREI_OTEL_DIR unset vs. set-but-empty", async () => {
     delete process.env.JUNREI_OTEL_DIR;
-    const withoutOtel = await callToolText("get_session_summary", {
+    const withoutOtel = await callToolText("analyze_session", {
       source: "claude-code",
       sessionId: CLAUDE_SESSION_ID,
     });
 
     process.env.JUNREI_OTEL_DIR = emptyOtelDir;
-    const withEmptyOtelDir = await callToolText("get_session_summary", {
+    const withEmptyOtelDir = await callToolText("analyze_session", {
       source: "claude-code",
       sessionId: CLAUDE_SESSION_ID,
     });
@@ -96,12 +96,20 @@ describe("byte-for-byte parity: JUNREI_OTEL_DIR unset vs. set-but-empty", () => 
     expect(withEmptyOtelDir).toBe(withoutOtel);
   });
 
-  it("MCP list_sessions: identical bytes with JUNREI_OTEL_DIR unset vs. set-but-empty", async () => {
+  it("MCP get_evidence: identical bytes with JUNREI_OTEL_DIR unset vs. set-but-empty", async () => {
     delete process.env.JUNREI_OTEL_DIR;
-    const withoutOtel = await callToolText("list_sessions", {});
+    const withoutOtel = await callToolText("get_evidence", {
+      source: "claude-code",
+      sessionId: CLAUDE_SESSION_ID,
+      select: { type: "first_prompt" },
+    });
 
     process.env.JUNREI_OTEL_DIR = emptyOtelDir;
-    const withEmptyOtelDir = await callToolText("list_sessions", {});
+    const withEmptyOtelDir = await callToolText("get_evidence", {
+      source: "claude-code",
+      sessionId: CLAUDE_SESSION_ID,
+      select: { type: "first_prompt" },
+    });
 
     expect(withEmptyOtelDir).toBe(withoutOtel);
   });

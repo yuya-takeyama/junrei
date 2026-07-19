@@ -3,10 +3,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { computeTrends, extractSessionId } from "@junrei/core";
+import {
+  computeTrends,
+  createLearning,
+  extractSessionId,
+  type LearningStatus,
+  type LearningVerification,
+  updateLearning,
+} from "@junrei/core";
 import { type Context, Hono } from "hono";
 import { resolveBashPercentile } from "./bash-percentile.js";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
+import { buildRepoBriefing, listLearningsForRepo, resolveLearningRepoRoot } from "./insight.js";
 import { createMcpServer } from "./mcp.js";
 import { getRepoOverview } from "./overview.js";
 import {
@@ -219,6 +227,115 @@ export function createApp(options: CreateAppOptions = {}) {
             ...(repo !== undefined && { repo }),
           }),
         );
+      })
+      // Conclusion-first repo briefing (the web's Home in PR3) — the same
+      // `buildRepoBriefing` gather+build path the `briefing` MCP tool calls,
+      // so the two surfaces can't drift. `days` is a plain integer here
+      // (1..90); an out-of-range/NaN value falls back to the default inside
+      // `buildRepoBriefing`.
+      .get("/api/briefing", async (c) => {
+        const rawRepo = c.req.query("repo");
+        const repo = rawRepo === undefined || rawRepo === "" ? undefined : rawRepo;
+        const rawDays = Number.parseInt(c.req.query("days") ?? "", 10);
+        const days =
+          Number.isInteger(rawDays) && rawDays >= 1 && rawDays <= 90 ? rawDays : undefined;
+        const detail = c.req.query("detail") === "full" ? "full" : "concise";
+        return c.json(
+          await buildRepoBriefing({
+            ...(repo !== undefined && { repo }),
+            ...(days !== undefined && { days }),
+            detail,
+          }),
+        );
+      })
+      // Repo-local learning ledger — GET lists (scanning every known repo root
+      // when `repo` is omitted), POST is the SAME upsert `log_learning` runs
+      // (the web's Accept/Dismiss/Log buttons in PR3). `repo` is a normalized
+      // repo key: an absolute path pins one ledger, a fallback bucket key has
+      // no on-disk ledger (empty result).
+      .get("/api/learnings", async (c) => {
+        const rawRepo = c.req.query("repo");
+        const repo = rawRepo === undefined || rawRepo === "" ? undefined : rawRepo;
+        const rawStatus = c.req.query("status");
+        const status =
+          rawStatus === "open" ||
+          rawStatus === "applied" ||
+          rawStatus === "verified" ||
+          rawStatus === "rejected"
+            ? (rawStatus as LearningStatus)
+            : undefined;
+        return c.json(
+          await listLearningsForRepo({
+            ...(repo !== undefined && { repo }),
+            ...(status !== undefined && { status }),
+          }),
+        );
+      })
+      .post("/api/learnings", async (c) => {
+        let body: {
+          repoPath?: string;
+          source?: "claude-code" | "codex";
+          sessionId?: string;
+          id?: string;
+          finding?: string;
+          change?: string;
+          expectedEffect?: string;
+          status?: LearningStatus;
+          verification?: LearningVerification;
+          proposedBy?: "agent" | "human";
+        };
+        try {
+          body = (await c.req.json()) as typeof body;
+        } catch {
+          return c.json({ error: "request body must be JSON" } as const, 400);
+        }
+        const repoRoot = await resolveLearningRepoRoot({
+          ...(body.repoPath !== undefined && { repoPath: body.repoPath }),
+          ...(body.source !== undefined && { source: body.source }),
+          ...(body.sessionId !== undefined && { sessionId: body.sessionId }),
+        });
+        if (repoRoot === undefined) {
+          return c.json(
+            {
+              error: "could not resolve a repo root — pass repoPath, or source + sessionId",
+            } as const,
+            400,
+          );
+        }
+        const sourceSessions =
+          body.source !== undefined && body.sessionId !== undefined
+            ? [{ source: body.source, sessionId: body.sessionId }]
+            : [];
+        if (body.id === undefined) {
+          if (body.finding === undefined || body.change === undefined) {
+            return c.json(
+              { error: "creating a learning requires finding and change" } as const,
+              400,
+            );
+          }
+          const learning = await createLearning(repoRoot, {
+            finding: body.finding,
+            change: body.change,
+            ...(body.expectedEffect !== undefined && { expectedEffect: body.expectedEffect }),
+            ...(body.status !== undefined && { status: body.status }),
+            ...(body.proposedBy !== undefined && { proposedBy: body.proposedBy }),
+            ...(sourceSessions.length > 0 && { sourceSessions }),
+          });
+          return c.json({ learning, created: true });
+        }
+        try {
+          const learning = await updateLearning(repoRoot, body.id, {
+            ...(body.status !== undefined && { status: body.status }),
+            ...(body.finding !== undefined && { finding: body.finding }),
+            ...(body.change !== undefined && { change: body.change }),
+            ...(body.expectedEffect !== undefined && { expectedEffect: body.expectedEffect }),
+            ...(body.verification !== undefined && { verification: body.verification }),
+            ...(sourceSessions.length > 0 && { sourceSessions }),
+          });
+          return c.json({ learning, created: false });
+        } catch (err) {
+          return c.json({ error: err instanceof Error ? err.message : String(err) } as const, 404);
+        }
       })
       // Source-prefixed routes, symmetric between the two harnesses: both
       // Claude and Codex now scope by `{id}` alone (a bare session UUID) —

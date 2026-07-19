@@ -1,12 +1,12 @@
 /**
- * Byte-for-byte parity guard for Goshuin Phase D: the opt-in wire capture must
- * be PURELY ADDITIVE. Every EXISTING MCP tool must produce identical output
- * whether the captures directory is absent or present-but-empty — i.e. no
- * existing tool reads captures. Only the two new tools (`get_actual_request`/
- * `get_hidden_calls`) touch the capture store, and they're excluded here.
+ * Byte-for-byte parity guard: the opt-in wire capture must be PURELY ADDITIVE.
+ * Every non-diagnostic MCP tool must produce identical output whether the
+ * captures directory is absent or present-but-empty — i.e. no core loop tool
+ * reads captures. Only the diagnostic `inspect_wire` tool (JUNREI_DIAGNOSTICS
+ * =1, mode: actual/hidden) touches the capture store, and it's excluded here.
  *
  * (The model for this is the same "representative responses, two configs,
- * assert identical" shape a future OTel parity test would use.)
+ * assert identical" shape the OTel parity test uses.)
  */
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -37,22 +37,22 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
   return content[0]?.text ?? "";
 }
 
-/** Representative existing tools — none of which should ever read captures. */
+/** Representative core-loop tools — none of which should ever read captures. */
 const EXISTING_TOOL_CALLS = [
-  { name: "list_sessions", arguments: { source: "all" } },
+  { name: "briefing", arguments: { days: 30 } },
   {
-    name: "get_session_summary",
+    name: "analyze_session",
     arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
   },
-  { name: "get_first_prompt", arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID } },
   {
-    name: "get_records",
-    arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, lines: [1, 2, 3] },
+    name: "get_evidence",
+    arguments: {
+      source: "claude-code",
+      sessionId: CLAUDE_SESSION_ID,
+      select: { type: "first_prompt" },
+    },
   },
-  {
-    name: "get_reconstructed_request",
-    arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
-  },
+  { name: "find_patterns", arguments: { kind: "text", query: "Fix the bug" } },
 ] as const;
 
 async function collectResponses(): Promise<string[]> {
