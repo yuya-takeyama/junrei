@@ -62,7 +62,10 @@ tool's payload tells you whether the next step is worth it.
    `subagentCount`, `models`, `oversizedReturnCount`), and
    `recommendations[]` — each carrying a ready-to-submit `logLearningCall`
    object (`finding`, `change`, `expectedEffect?`, `sourceSessions[]`) so
-   acting on it is a single `log_learning` call. Read `briefing`'s top waste
+   acting on it is passing that object VERBATIM as a single `log_learning`
+   call's arguments — `log_learning` preserves `sourceSessions` exactly as
+   given, it does not need (or want) to be trimmed to `finding`/`change`.
+   Read `briefing`'s top waste
    session's `firstPrompt` context in mind: quantitative data has no opinion on
    intent, so know the task before judging any behavior "wrong".
 3. **`get_evidence`** — the drill-down, ONLY for a claim that needs
@@ -85,11 +88,18 @@ tool's payload tells you whether the next step is worth it.
 4. **`log_learning`** — record (or update) a learning in the repo-local ledger
    under `<repoRoot>/.junrei/learnings/<id>.json`. This is the ONLY tool that
    WRITES a learning, and it is an **upsert**:
-   - **Create** — omit `id`, pass `finding` + `change` (an
-     `analyze_session` recommendation's `logLearningCall` fills these; add
-     `expectedEffect?`). The repoRoot is `repoPath` if given, else derived from
-     the `source` + `sessionId` session's cwd. Pass `source` + `sessionId` to
-     attach provenance. `proposedBy` defaults to `agent`.
+   - **Create** — omit `id`, pass `finding` + `change`. An `analyze_session`
+     recommendation's `logLearningCall` object is accepted **VERBATIM**: pass
+     it as the call's arguments as-is (`finding`, `change`, `expectedEffect?`,
+     `sourceSessions[]` — all of them, not just `finding`/`change`) and every
+     contributing session's provenance is preserved exactly, unchanged. The
+     repoRoot is `repoPath` if given, else derived from the FIRST
+     `sourceSessions` entry's session cwd, else the top-level `source` +
+     `sessionId` session's cwd. Passing top-level `source` + `sessionId`
+     alone (no `sourceSessions`) still attaches single-session provenance as
+     before; if you pass both, `sourceSessions` wins and the top-level pair is
+     merged in only if it isn't already one of the array's entries.
+     `proposedBy` defaults to `agent`.
    - **Update** — pass the `id` plus a `status` transition
      (`open` → `applied` → `verified`/`rejected`; `applied` stamps `appliedAt`,
      `verified`/`rejected` stamps `resolvedAt`) and/or a `verification`

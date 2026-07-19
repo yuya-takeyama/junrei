@@ -1010,3 +1010,137 @@ describe("OTel receiver — POST /otlp/v1/logs and /otlp/v1/metrics (opt-in, Dec
     });
   });
 });
+
+// POST /api/learnings is the SAME upsert `log_learning` runs (see app.ts's
+// route comment) — these mirror mcp.test.ts's "sourceSessions provenance"
+// coverage over HTTP to prove the two surfaces stay in parity.
+describe("POST /api/learnings — sourceSessions provenance parity with log_learning", () => {
+  let repoPath: string;
+
+  beforeEach(async () => {
+    repoPath = await mkdtemp(join(tmpdir(), "junrei-learnings-http-"));
+  });
+  afterEach(async () => {
+    await rm(repoPath, { recursive: true, force: true });
+  });
+
+  interface LearningSource {
+    source: "claude-code" | "codex";
+    sessionId: string;
+    title?: string;
+  }
+  interface LearningResponse {
+    created: boolean;
+    learning: {
+      id: string;
+      finding: string;
+      change: string;
+      sourceSessions: LearningSource[];
+    };
+  }
+
+  async function postLearning(body: Record<string, unknown>) {
+    const app = createApp();
+    const res = await app.request("/api/learnings", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+    return { res, body: (await res.json()) as LearningResponse };
+  }
+
+  it("round-trips an analyze_session-shaped logLearningCall verbatim (dogfood fix)", async () => {
+    const sourceSessions: LearningSource[] = [
+      {
+        source: "claude-code",
+        sessionId: "a19ae6e1-b2ef-4c11-8a1a-000000000001",
+        title: "30k-char pnpm result inside",
+      },
+    ];
+    const { res, body } = await postLearning({
+      repoPath,
+      finding: "30k-char pnpm result inside",
+      change: "Use a quieter pnpm flag instead of piping the full output.",
+      sourceSessions,
+    });
+    expect(res.status).toBe(200);
+    expect(body.created).toBe(true);
+    expect(body.learning.sourceSessions).toEqual(sourceSessions);
+  });
+
+  it("top-level source+sessionId alone still attaches single-session provenance (pre-existing behavior)", async () => {
+    const { res, body } = await postLearning({
+      repoPath,
+      finding: "single-session finding",
+      change: "single-session fix",
+      source: "claude-code",
+      sessionId: "sess-legacy",
+    });
+    expect(res.status).toBe(200);
+    expect(body.learning.sourceSessions).toEqual([
+      { source: "claude-code", sessionId: "sess-legacy" },
+    ]);
+  });
+
+  it("both present, top-level pair absent from the array: sourceSessions wins, pair is merged in", async () => {
+    const { res, body } = await postLearning({
+      repoPath,
+      finding: "merge-in case",
+      change: "merge-in fix",
+      sourceSessions: [{ source: "claude-code", sessionId: "sess-x" }],
+      source: "codex",
+      sessionId: "sess-z",
+    });
+    expect(res.status).toBe(200);
+    expect(body.learning.sourceSessions).toEqual([
+      { source: "claude-code", sessionId: "sess-x" },
+      { source: "codex", sessionId: "sess-z" },
+    ]);
+  });
+
+  it("both present, top-level pair already in the array: no duplicate is added", async () => {
+    const sourceSessions: LearningSource[] = [
+      { source: "claude-code", sessionId: "sess-x" },
+      { source: "codex", sessionId: "sess-z" },
+    ];
+    const { res, body } = await postLearning({
+      repoPath,
+      finding: "no-dup case",
+      change: "no-dup fix",
+      sourceSessions,
+      source: "codex",
+      sessionId: "sess-z",
+    });
+    expect(res.status).toBe(200);
+    expect(body.learning.sourceSessions).toEqual(sourceSessions);
+  });
+
+  it("update mode also accepts an explicit sourceSessions array", async () => {
+    const created = await postLearning({
+      repoPath,
+      finding: "updatable finding",
+      change: "updatable fix",
+      source: "claude-code",
+      sessionId: "sess-original",
+    });
+    expect(created.res.status).toBe(200);
+    const updatedSourceSessions: LearningSource[] = [
+      { source: "claude-code", sessionId: "sess-original" },
+      { source: "codex", sessionId: "sess-followup", title: "Follow-up" },
+    ];
+    const app = createApp();
+    const res = await app.request("/api/learnings", {
+      method: "POST",
+      body: JSON.stringify({
+        repoPath,
+        id: created.body.learning.id,
+        sourceSessions: updatedSourceSessions,
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as LearningResponse;
+    expect(body.created).toBe(false);
+    expect(body.learning.sourceSessions).toEqual(updatedSourceSessions);
+  });
+});
