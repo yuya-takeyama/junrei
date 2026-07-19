@@ -64,6 +64,29 @@ const XARGS_VALUE_FLAGS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Executables that produce no meaningful stdout of their own — so when a
+ * chained or piped call also contains a "real" command, that real command,
+ * not one of these, is what actually produced the result chars. Used by
+ * `primaryCommand` to skip past a leading `cd`/`echo`/etc. instead of
+ * mis-attributing e.g. a 24k-char `cat` dump to the `echo` that merely
+ * printed a separator line ahead of it.
+ */
+const NEAR_ZERO_OUTPUT_COMMANDS: ReadonlySet<string> = new Set([
+  "cd",
+  "pushd",
+  "popd",
+  "echo",
+  "printf",
+  "true",
+  "false",
+  ":",
+  "sleep",
+  "touch",
+  "mkdir",
+  "exit",
+]);
+
+/**
  * Shell control-flow keywords. When a segment's first token is one of these,
  * it's classified via `controlKeyword` instead of attempting
  * executable/subcommand extraction — naive splitting on `;` (one of our four
@@ -660,15 +683,41 @@ export function parseShellCommand(command: string): ParsedShellCommand {
 
 /**
  * The one segment a whole (possibly piped/chained) Bash call should be
- * attributed to: the first segment with a resolved `executable` that isn't
- * `cd`. Segments that are empty, env-assignment-only, or an unresolved pure
+ * attributed to. Two-tier selection, applied uniformly whether the segments
+ * came from a pipe or a `;`/`&&`/`||` chain — `parseShellCommand` flattens
+ * every operator into the same segment list and doesn't record which one
+ * separated a given pair, so attribution can't distinguish chain types, and
+ * skip-the-trivial-segments-first is the right call for both: a pipe's
+ * earlier stages and a sequence's earlier statements are equally capable of
+ * being a throwaway `echo`/`cd` ahead of the command that actually produced
+ * the result.
+ *
+ *  1. Prefer the first segment whose `executable` is defined and is NOT in
+ *     `NEAR_ZERO_OUTPUT_COMMANDS` — e.g. `cd X; echo "==="; cat -n file`
+ *     skips `cd` and `echo` to land on `cat`, and `echo "$x" | jq .foo` skips
+ *     `echo` to land on `jq`.
+ *  2. If no segment qualifies under (1) — every segment is trivial,
+ *     unresolved, or `cd` — fall back to the original rule: the first
+ *     segment with a resolved `executable` that isn't `cd`. This keeps a
+ *     lone trivial command attributed to itself (`echo hi` alone → `echo`)
+ *     rather than falling through to "(unparsed)".
+ *
+ * Segments that are empty, env-assignment-only, or an unresolved pure
  * wrapper already carry `executable: undefined` (see `resolveExecutable`),
- * so no separate check is needed for those cases beyond the `cd` exclusion.
- * `undefined` when no segment qualifies (e.g. `cd /foo` alone, or a
- * control-flow-only command).
+ * so no separate check is needed for those beyond the `cd` exclusion in (2).
+ * `undefined` when no segment qualifies under either tier (e.g. `cd /foo`
+ * alone, or a control-flow-only command).
  */
 export function primaryCommand(parsed: ParsedShellCommand): ShellSegment | undefined {
+  const nonTrivial = parsed.segments.find(
+    (seg) => seg.executable !== undefined && !NEAR_ZERO_OUTPUT_COMMANDS.has(seg.executable),
+  );
+  if (nonTrivial !== undefined) return nonTrivial;
   return parsed.segments.find((seg) => seg.executable !== undefined && seg.executable !== "cd");
 }
 
-export { KNOWN_COMMAND_FAMILIES, WRAPPER_COMMANDS as KNOWN_WRAPPER_COMMANDS };
+export {
+  KNOWN_COMMAND_FAMILIES,
+  NEAR_ZERO_OUTPUT_COMMANDS,
+  WRAPPER_COMMANDS as KNOWN_WRAPPER_COMMANDS,
+};

@@ -477,4 +477,37 @@ describe("primaryCommand", () => {
     const parsed = parseShellCommand("cd /repo && time pnpm test");
     expect(primaryCommand(parsed)?.executable).toBe("pnpm");
   });
+
+  describe("near-zero-output skipping", () => {
+    it("skips a chained cd and echo to attribute a sequential chain to the real command", () => {
+      const parsed = parseShellCommand('cd X; echo "==="; cat -n f');
+      expect(primaryCommand(parsed)?.executable).toBe("cat");
+    });
+
+    it("skips a leading echo in a pipeline to attribute to the real command", () => {
+      const parsed = parseShellCommand('echo "$x" | jq .');
+      expect(primaryCommand(parsed)?.executable).toBe("jq");
+    });
+
+    it("falls back to the trivial command itself when nothing else qualifies", () => {
+      const parsed = parseShellCommand("echo hi");
+      expect(primaryCommand(parsed)?.executable).toBe("echo");
+    });
+
+    it("returns undefined for cd alone (no fallback segment qualifies either)", () => {
+      const parsed = parseShellCommand("cd /foo");
+      expect(primaryCommand(parsed)).toBeUndefined();
+    });
+
+    it("still picks the first real command when two non-trivial commands are chained", () => {
+      const parsed = parseShellCommand("git fetch && git rebase");
+      expect(primaryCommand(parsed)?.executable).toBe("git");
+      expect(primaryCommand(parsed)?.subcommand).toBe("fetch");
+    });
+
+    it("skips a trailing echo status-print after a real command", () => {
+      const parsed = parseShellCommand("pnpm test; echo EXIT=$?");
+      expect(primaryCommand(parsed)?.executable).toBe("pnpm");
+    });
+  });
 });
