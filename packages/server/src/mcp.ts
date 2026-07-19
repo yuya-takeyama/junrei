@@ -1,4 +1,5 @@
 import {
+  type BashOpportunity,
   type BashStats,
   buildSourceCompleteness,
   type ClaudeSessionAnalysis,
@@ -31,6 +32,7 @@ import {
 } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { resolveBashPercentile } from "./bash-percentile.js";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import { getRepoOverview } from "./overview.js";
 import {
@@ -818,6 +820,12 @@ const BASH_STATS_MAX_TOP_COMMANDS = 100;
 const BASH_STATS_PROGRAM_FREQUENCY_LIMIT = 30;
 /** Shared cap for every OTHER list in the response (background tasks, each waste category) — `byCommand`/`programFrequency` have their own caps above. */
 const BASH_STATS_LIST_CAP = 20;
+/** Fixed (not caller-configurable) — `byThread` is inherently small (one row per thread-model), so this is defensive headroom, not a real-world cap. */
+const BASH_STATS_BY_THREAD_CAP = 50;
+const BASH_STATS_DEFAULT_TOP_OPPORTUNITIES = 10;
+const BASH_STATS_MAX_TOP_OPPORTUNITIES = 50;
+/** Defensive cap for an opportunity's own templated text fields (`title`/`fixText`/`heuristicNote`) — same explicit-truncation contract `capTextField` uses everywhere else in this file, sized generously since every real value here is a short, templated string (a command capped to ~200 chars, wrapped in a sentence or two). */
+const BASH_OPPORTUNITY_TEXT_MAX_CHARS = 2000;
 
 const GET_TOOL_CALLS_DEFAULT_LIMIT = 50;
 const GET_TOOL_CALLS_MAX_LIMIT = 200;
@@ -839,18 +847,64 @@ function capList<T>(items: readonly T[], cap: number): CappedList<T> {
 }
 
 /**
+ * One `BashOpportunity` (see `@junrei/core`'s `bash-opportunities.ts`),
+ * shaped for the MCP response: every field passes through UNCHANGED
+ * (`fixText` included — this is the point, an agent acts on it directly)
+ * except the three templated text fields (`title`/`fixText`/`heuristicNote`),
+ * which get the SAME explicit `capTextField` truncation contract every other
+ * text field in this file uses (a `<field>Truncated` flag, plus
+ * `<field>FullCharCount` only when a cut actually happened) — defensive, not
+ * expected to ever fire in practice (see `BASH_OPPORTUNITY_TEXT_MAX_CHARS`).
+ * `evidence` is NOT re-capped here — `@junrei/core`'s own `EVIDENCE_LIMIT`
+ * (10) already bounds it at the source.
+ */
+function toOpportunityItem(opportunity: BashOpportunity) {
+  const title = capTextField(opportunity.title, BASH_OPPORTUNITY_TEXT_MAX_CHARS);
+  const fixText = capTextField(opportunity.fixText, BASH_OPPORTUNITY_TEXT_MAX_CHARS);
+  const heuristicNote =
+    opportunity.heuristicNote !== undefined
+      ? capTextField(opportunity.heuristicNote, BASH_OPPORTUNITY_TEXT_MAX_CHARS)
+      : undefined;
+  return {
+    ...opportunity,
+    title: title.text,
+    titleTruncated: title.truncated,
+    ...(title.fullCharCount !== undefined && { titleFullCharCount: title.fullCharCount }),
+    fixText: fixText.text,
+    fixTextTruncated: fixText.truncated,
+    ...(fixText.fullCharCount !== undefined && { fixTextFullCharCount: fixText.fullCharCount }),
+    ...(heuristicNote !== undefined && {
+      heuristicNote: heuristicNote.text,
+      heuristicNoteTruncated: heuristicNote.truncated,
+      ...(heuristicNote.fullCharCount !== undefined && {
+        heuristicNoteFullCharCount: heuristicNote.fullCharCount,
+      }),
+    }),
+  };
+}
+
+/**
  * Shape one `BashStats` (either the joint main+subagents value already on
  * `ClaudeSessionAnalysis`, or a main-thread-only recompute) into the MCP
- * response body — every list capped per `CappedList`'s contract; `totals` and
- * `heavyHitters` pass through unchanged (`heavyHitters` is already a fixed
- * top-10 from `computeBashStats` itself, nothing left to cap here).
+ * response body — every list capped per `CappedList`'s contract; `totals`
+ * (already carrying `estUsd` — see `BashTotals.estUsd`) and `heavyHitters`
+ * pass through unchanged (`heavyHitters` is already a fixed top-10 from
+ * `computeBashStats` itself, nothing left to cap here). `byThread` (new in
+ * v2 PR D) is small by construction — one row per thread that has any Bash
+ * calls — so `BASH_STATS_BY_THREAD_CAP` is defensive headroom, not a
+ * real-world limit. `opportunities` (new in v2 PR D) is the ranked,
+ * templated fix-suggestion list `@junrei/core`'s `computeBashOpportunities`
+ * already sorts best-first — capped to `topOpportunities` and shaped via
+ * `toOpportunityItem`.
  */
-function toBashStatsResponse(stats: BashStats, topCommands: number) {
+function toBashStatsResponse(stats: BashStats, topCommands: number, topOpportunities: number) {
   const byStatus = { completed: 0, failed: 0, unresolved: 0 };
   for (const task of stats.background) byStatus[task.status] += 1;
+  const cappedOpportunities = capList(stats.opportunities, topOpportunities);
   return {
     totals: stats.totals,
     byCommand: capList(stats.byCommand, topCommands),
+    byThread: capList(stats.byThread, BASH_STATS_BY_THREAD_CAP),
     programFrequency: capList(stats.programFrequency, BASH_STATS_PROGRAM_FREQUENCY_LIMIT),
     heavyHitters: stats.heavyHitters,
     background: { byStatus, tasks: capList(stats.background, BASH_STATS_LIST_CAP) },
@@ -859,6 +913,11 @@ function toBashStatsResponse(stats: BashStats, topCommands: number) {
       largeResults: capList(stats.waste.largeResults, BASH_STATS_LIST_CAP),
       rerunAfterError: capList(stats.waste.rerunAfterError, BASH_STATS_LIST_CAP),
       bashAsRead: capList(stats.waste.bashAsRead, BASH_STATS_LIST_CAP),
+    },
+    opportunities: {
+      items: cappedOpportunities.items.map(toOpportunityItem),
+      totalCount: cappedOpportunities.totalCount,
+      truncated: cappedOpportunities.truncated,
     },
   };
 }
@@ -1868,35 +1927,57 @@ export function createMcpServer(): McpServer {
     "get_bash_stats",
     {
       description:
-        "Bash-command analytics for one session: totals (calls/errors/chars/estimatedTokens), " +
-        "commands grouped by resolved family+subcommand (e.g. `git diff`) ranked by result size " +
-        "with each group's `sharePct` of total result chars, per-executable segment frequency " +
-        "(covers every side of a pipeline, not just the primary command), the top 10 calls by " +
-        "result size, background (run_in_background) task outcomes, and quantitative waste " +
-        "signals — near-duplicate command groups, oversized results, same-command reruns " +
-        "immediately after a failure, and Bash calls that read a file the way the Read tool " +
-        "would (cat/head/tail/sed -n). These are observations, not judgments: interpretation is " +
-        "the caller's job. Every list beyond a small fixed cap reports `totalCount` and " +
-        "`truncated` alongside the (possibly shorter) `items` array — a capped list never reads " +
-        "as complete. Char counts (`inputChars`/`resultChars`/`totalInputChars`/" +
-        "`totalResultChars`) are EXACT, read straight from the session record; `estimatedTokens` " +
-        "is a `Math.ceil(chars / 4)` HEURISTIC (no real tokenizer runs over Bash text) — good for " +
+        "Bash-command analytics for one session: totals (calls/errors/chars/estimatedTokens/" +
+        "estUsd), commands grouped by resolved family+subcommand (e.g. `git diff`) ranked by " +
+        "result size with each group's `sharePct` of total result chars, a per-thread rollup " +
+        "(`byThread` — main vs. each subagent's own calls/chars/estUsd, for seeing where Bash " +
+        "spend actually sat), per-executable segment frequency (covers every side of a " +
+        "pipeline, not just the primary command), the top 10 calls by result size, background " +
+        "(run_in_background) task outcomes, quantitative waste signals (near-duplicate command " +
+        "groups, oversized results, same-command reruns immediately after a failure, and Bash " +
+        "calls that read a file the way the Read tool would — cat/head/tail/sed -n), and a " +
+        "ranked `opportunities` list of TEMPLATED fix suggestions derived from that same waste " +
+        "data. Every `opportunities` item's `fixText` is copy-ready, imperative, DATA-FILLED " +
+        "text (the command/thread/pattern/size actually observed) — it is NOT LLM-generated " +
+        "advice, just a fill-in-the-blanks template over `waste`, so treat it as a starting " +
+        "point, not a verdict. Each item's `savingsBasis` says how its `estUsdSaved` was " +
+        'derived: `"measured"` (near-duplicate/rerun-after-error — a real sum over actual ' +
+        'repeat occurrences), `"heuristic"` (bash-as-read/large-result — a fixed coefficient ' +
+        "applied to real chars, since there's no evidence of what the fixed version would " +
+        "actually have produced; see `heuristicNote` for the exact coefficient), or " +
+        '`"none"` (no class produces this today, reserved). `estUsdSaved` is ALL-OR-NOTHING: ' +
+        "absent unless every contributing occurrence resolved a priced thread model — never a " +
+        "partial sum. EVERY dollar figure in this response ($ from `totals`/`byCommand`/" +
+        "`byThread`/`heavyHitters`/`waste`/`opportunities`, and `bashPercentile`'s ranking) is " +
+        "an ESTIMATE from a fixed per-model pricing table applied to char counts, never a " +
+        "billed amount. These are observations, not judgments: interpretation is the caller's " +
+        "job. Every list beyond a small fixed cap reports `totalCount` and `truncated` " +
+        "alongside the (possibly shorter) `items` array — a capped list never reads as " +
+        "complete. Char counts (`inputChars`/`resultChars`/`totalInputChars`/`totalResultChars`) " +
+        "are EXACT, read straight from the session record; `estimatedTokens` is a " +
+        "`Math.ceil(chars / 4)` HEURISTIC (no real tokenizer runs over Bash text) — good for " +
         "relative comparison, not exact accounting. A background task's `wallClockMs` is " +
         "wall-clock time from launch to the harness's completion notification (includes real " +
         "background execution time), NOT context/API cost. `includeSubagents: false` does NOT " +
-        "post-hoc filter the joint result (rankings/sharePct are computed jointly across every " +
-        "thread and can't be un-mixed) — it recomputes stats from the main transcript ALONE. " +
-        'Works for both Claude Code sessions and Codex CLI sessions (source: "codex"), covering ' +
-        "shell calls across function_call (shell/exec_command, including a bash/sh/zsh -lc " +
-        "wrapper unwrapped to its inner command), local_shell_call, and the 0.144+ unified-exec " +
-        "custom_tool_call form. Codex specifics: `background` is always empty (no " +
-        "run_in_background concept exists in Codex's data model yet); a `local_shell_call`-sourced " +
-        'entry\'s `resultChars` reflects only a synthesized "exited with code N" placeholder ' +
-        "(Codex records no real stdout/stderr for that wire surface, unlike function_call/" +
-        "custom_tool_call entries, which do carry real output text). Every response includes " +
-        "sourceCompleteness — a machine-readable declaration of what the underlying session " +
-        "source cannot show; treat absent/not-recorded dimensions as unknowable from this data, " +
-        "not as evidence of absence.",
+        "post-hoc filter the joint result (rankings/sharePct/opportunities are computed jointly " +
+        "across every thread and can't be un-mixed) — it recomputes stats from the main " +
+        'transcript ALONE. `bashPercentile` ("this session is pNN for this repo") is present ' +
+        "only when this session's repo has >= 5 Bash-tracked sessions to rank against (same " +
+        "gate the Bash tab's header-strip chip uses) — ABSENT, not zero, whenever the repo " +
+        "history is too thin; a Codex session's percentile is always ranked on its own " +
+        "MAIN-THREAD-ONLY figure (see the `note` field on a Codex response, when present) " +
+        "regardless of `includeSubagents`, since the repo distribution it's ranked against is " +
+        "itself built the same way. Works for both Claude Code sessions and Codex CLI sessions " +
+        '(source: "codex"), covering shell calls across function_call (shell/exec_command, ' +
+        "including a bash/sh/zsh -lc wrapper unwrapped to its inner command), local_shell_call, " +
+        "and the 0.144+ unified-exec custom_tool_call form. Codex specifics: `background` is " +
+        "always empty (no run_in_background concept exists in Codex's data model yet); a " +
+        "`local_shell_call`-sourced entry's `resultChars` reflects only a synthesized \"exited " +
+        'with code N" placeholder (Codex records no real stdout/stderr for that wire surface, ' +
+        "unlike function_call/custom_tool_call entries, which do carry real output text). Every " +
+        "response includes sourceCompleteness — a machine-readable declaration of what the " +
+        "underlying session source cannot show; treat absent/not-recorded dimensions as " +
+        "unknowable from this data, not as evidence of absence.",
       inputSchema: {
         ...sessionRef,
         includeSubagents: z
@@ -1916,32 +1997,86 @@ export function createMcpServer(): McpServer {
             "Cap on the byCommand list length " +
               `(default ${BASH_STATS_DEFAULT_TOP_COMMANDS}, max ${BASH_STATS_MAX_TOP_COMMANDS})`,
           ),
+        topOpportunities: z
+          .number()
+          .int()
+          .min(1)
+          .max(BASH_STATS_MAX_TOP_OPPORTUNITIES)
+          .optional()
+          .describe(
+            "Cap on the opportunities list length " +
+              `(default ${BASH_STATS_DEFAULT_TOP_OPPORTUNITIES}, ` +
+              `max ${BASH_STATS_MAX_TOP_OPPORTUNITIES})`,
+          ),
       },
     },
-    async ({ source, sessionId, includeSubagents, topCommands }) => {
-      // zod already enforces topCommands <= BASH_STATS_MAX_TOP_COMMANDS.
+    async ({ source, sessionId, includeSubagents, topCommands, topOpportunities }) => {
+      // zod already enforces topCommands <= BASH_STATS_MAX_TOP_COMMANDS and
+      // topOpportunities <= BASH_STATS_MAX_TOP_OPPORTUNITIES.
       const cap = topCommands ?? BASH_STATS_DEFAULT_TOP_COMMANDS;
+      const oppCap = topOpportunities ?? BASH_STATS_DEFAULT_TOP_OPPORTUNITIES;
       const includeSub = includeSubagents ?? true;
 
       if (source === "codex") {
-        const stats = includeSub
-          ? (await getCodexSession(sessionId))?.bashStats
-          : await getCodexSessionBashStatsMainOnly(sessionId);
+        const analysis = await getCodexSession(sessionId);
+        if (analysis === undefined) return notFound(sessionId);
+        // Percentile ranking always needs the main-thread-only figure — the
+        // SAME basis every repo-distribution sample was itself built from
+        // (see `bash-percentile.ts`'s doc comment) — never the joint
+        // `analysis.bashStats`, which OVERRIDES with a forest-inclusive
+        // recompute once a sub-agent forest exists. Cheap regardless of
+        // `includeSubagents`: `getCodexSessionBashStatsMainOnly` just reads
+        // the already mtime-cached single-file analysis.
+        const mainOnlyStats = await getCodexSessionBashStatsMainOnly(sessionId);
+        const stats = includeSub ? analysis.bashStats : mainOnlyStats;
         if (stats === undefined) return notFound(sessionId);
+        const bashPercentile =
+          mainOnlyStats === undefined
+            ? undefined
+            : await resolveBashPercentile(analysis, {
+                estUsd: mainOnlyStats.totals.estUsd,
+                resultChars: mainOnlyStats.totals.resultChars,
+              });
         return jsonResult(
-          { sessionId, includeSubagents: includeSub, ...toBashStatsResponse(stats, cap) },
+          {
+            sessionId,
+            includeSubagents: includeSub,
+            ...toBashStatsResponse(stats, cap, oppCap),
+            ...(bashPercentile !== undefined && {
+              bashPercentile: {
+                ...bashPercentile,
+                note:
+                  "Ranked on this session's own main-thread-only Bash figure, regardless of " +
+                  "includeSubagents — the repo distribution it's ranked against is itself " +
+                  "always built from main-thread-only figures (see get_bash_stats' tool " +
+                  "description).",
+              },
+            }),
+          },
           ["codex-session-jsonl"],
         );
       }
 
+      // Claude's `bashStats` is ALREADY the main+every-subagent joint pass at
+      // both list-item and detail time (no forest-override discrepancy the
+      // way Codex has), so `analysis.bashStats.totals` is directly the right
+      // percentile basis regardless of `includeSubagents` — fetched here
+      // (mtime-cached, so cheap on repeat calls) even when the response body
+      // itself will recompute a main-only `stats` below.
+      const analysis = await getSession(sessionId);
+      if (analysis === undefined) return notFound(sessionId);
+      const bashPercentile = await resolveBashPercentile(analysis, {
+        estUsd: analysis.bashStats.totals.estUsd,
+        resultChars: analysis.bashStats.totals.resultChars,
+      });
+
       if (includeSub) {
-        const analysis = await getSession(sessionId);
-        if (analysis === undefined) return notFound(sessionId);
         return jsonResult(
           {
             sessionId,
             includeSubagents: true,
-            ...toBashStatsResponse(analysis.bashStats, cap),
+            ...toBashStatsResponse(analysis.bashStats, cap, oppCap),
+            ...(bashPercentile !== undefined && { bashPercentile }),
           },
           ["claude-session-jsonl"],
         );
@@ -1951,7 +2086,12 @@ export function createMcpServer(): McpServer {
       if (data === undefined) return notFound(sessionId);
       const stats = computeBashStats([{ thread: "main", data }]);
       return jsonResult(
-        { sessionId, includeSubagents: false, ...toBashStatsResponse(stats, cap) },
+        {
+          sessionId,
+          includeSubagents: false,
+          ...toBashStatsResponse(stats, cap, oppCap),
+          ...(bashPercentile !== undefined && { bashPercentile }),
+        },
         ["claude-session-jsonl"],
       );
     },

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { computeRepoOverview, repoKeyOf, repoKeyOfSession } from "./overview.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { computeRepoOverview, getRepoOverview, repoKeyOf, repoKeyOfSession } from "./overview.js";
 import type { AnySessionListItem } from "./sessions.js";
 import type { ClaudeSessionListItem } from "./sources/claude.js";
 import type { CodexSessionListItem } from "./sources/codex.js";
@@ -525,5 +525,62 @@ describe("repoKeyOfSession — session-detail analog of repoKeyOf", () => {
   it("falls back to the codex-cwd: bucket, using (unknown cwd) when cwd itself is missing", () => {
     expect(repoKeyOfSession({ source: "codex" as const, cwd: "/repo" })).toBe("codex-cwd:/repo");
     expect(repoKeyOfSession({ source: "codex" as const })).toBe("codex-cwd:(unknown cwd)");
+  });
+});
+
+// `getRepoOverview` memoization (perf fix, PR C review finding + v2 PR D —
+// see its own doc comment for the chosen TTL invalidation and staleness
+// bound). Points CLAUDE_CONFIG_DIR/CODEX_HOME at directories that don't
+// exist — this test only exercises the CACHE's own identity/expiry
+// behavior, not real session data, so an empty (zeroed) overview per call is
+// fine; what matters is whether a call reuses the SAME object reference
+// (cache hit — `computeRepoOverview` builds a fresh object literal every
+// time it actually runs, so reference equality is a clean, dependency-free
+// way to observe a hit vs. a recompute) or gets a freshly recomputed one.
+// `nowMs` is the same "override for tests" clock-injection parameter
+// `getRepoOverview` accepts specifically so this test can assert the TTL
+// boundary deterministically instead of racing a real 30-second clock.
+describe("getRepoOverview — memoization", () => {
+  let previousConfigDir: string | undefined;
+  let previousCodexHome: string | undefined;
+
+  beforeAll(() => {
+    previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    previousCodexHome = process.env.CODEX_HOME;
+    process.env.CLAUDE_CONFIG_DIR = "/no/such/dir/junrei-overview-cache-test";
+    process.env.CODEX_HOME = "/no/such/dir/junrei-overview-cache-test-codex";
+  });
+
+  afterAll(() => {
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+  });
+
+  it("reuses the cached overview (same object reference) within the TTL", async () => {
+    const repo = "/no/such/repo/memo-test-a";
+    const t0 = 1_000_000;
+    const first = await getRepoOverview(repo, t0);
+    const second = await getRepoOverview(repo, t0 + 1_000);
+    expect(second).toBe(first);
+  });
+
+  it("recomputes (a new object, equal data) once the TTL has elapsed", async () => {
+    const repo = "/no/such/repo/memo-test-b";
+    const t0 = 1_000_000;
+    const first = await getRepoOverview(repo, t0);
+    const stale = await getRepoOverview(repo, t0 + 30_001);
+    expect(stale).not.toBe(first);
+    expect(stale).toEqual(first);
+  });
+
+  it("caches each repoKey independently", async () => {
+    const t0 = 1_000_000;
+    const a1 = await getRepoOverview("/no/such/repo/memo-test-c1", t0);
+    const b1 = await getRepoOverview("/no/such/repo/memo-test-c2", t0);
+    const a2 = await getRepoOverview("/no/such/repo/memo-test-c1", t0 + 1_000);
+    expect(a2).toBe(a1);
+    expect(a2).not.toBe(b1);
   });
 });

@@ -3,6 +3,17 @@
  * trees. MUST NOT import from either of those trees.
  */
 
+// `BashOpportunity*` are `BashStats.opportunities`' own item shape (see
+// `bash-opportunities.ts`'s module doc comment) — exported from here
+// alongside the rest of the Bash-analysis output vocabulary above, same
+// "shared data shape, one canonical export site" convention.
+export type {
+  BashOpportunity,
+  BashOpportunityClass,
+  BashOpportunityEvidence,
+  BashOpportunityLever,
+  BashOpportunitySavingsBasis,
+} from "./bash-opportunities.js";
 /**
  * `Bash*`/`BashStats`/`BashWaste` are the harness-neutral OUTPUT shapes of
  * the Bash-analysis engine (`./bash-stats.ts`) — exported from here only
@@ -28,6 +39,7 @@ export type {
   BashProgramFrequency,
   BashRerunAfterError,
   BashStats,
+  BashThreadGroup,
   BashTotals,
   BashWaste,
 } from "./bash-stats.js";

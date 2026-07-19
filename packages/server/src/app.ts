@@ -5,10 +5,10 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { computeTrends, extractSessionId } from "@junrei/core";
 import { type Context, Hono } from "hono";
-import { computeSessionBashPercentile, type SessionBashFigure } from "./bash-percentile.js";
+import { resolveBashPercentile } from "./bash-percentile.js";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import { createMcpServer } from "./mcp.js";
-import { getRepoOverview, repoKeyOfSession } from "./overview.js";
+import { getRepoOverview } from "./overview.js";
 import {
   claudeAdapter,
   codexAdapter,
@@ -51,30 +51,6 @@ export type CreateAppOptions = {
 
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
-}
-
-/**
- * The Bash tab v2 header strip's percentile chip ("pNN for this repo · M.Mx
- * median") — the one small server addition the redesign needed, since the
- * web layer never imports `@junrei/core` directly (see `bash-percentile.ts`'s
- * doc comment). Resolves the SAME repo bucket `GET /api/overview`/
- * `get_repo_overview` already aggregate for this session's own list row
- * (`repoKeyOfSession`, kept in lockstep with `repoKeyOf`), re-lists that
- * repo, and ranks `ownFigure` against it — `undefined` (chip hidden) when
- * the repo doesn't yet have enough Bash-tracked sessions to rank against
- * (see `computeSessionBashPercentile`'s own gate).
- *
- * `ownFigure` is the caller's responsibility to get right — see
- * `computeSessionBashPercentile`'s doc comment for why a Codex session must
- * pass its main-thread-only figure, never its detail view's
- * (possibly forest-inclusive) `bashStats.totals`.
- */
-async function resolveBashPercentile(
-  session: Parameters<typeof repoKeyOfSession>[0],
-  ownFigure: SessionBashFigure,
-) {
-  const overview = await getRepoOverview(repoKeyOfSession(session));
-  return computeSessionBashPercentile(ownFigure, overview.bash);
 }
 
 /**
