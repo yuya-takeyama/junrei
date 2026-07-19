@@ -80,6 +80,31 @@ describe("flattenSubagents", () => {
       ["doc-scanner", [], true],
     ]);
   });
+
+  it("flattens under a base spine at an offset depth, keeping ├ on the last root when more siblings follow", () => {
+    const member = node("wf-member", 0.2);
+
+    // Inside a non-last run (base [false]) with another phase group following:
+    // the member sits at depth 2, under main's open spine, and keeps ├.
+    const midSpine = flattenSubagents([member], [false], true);
+    expect(midSpine.map((r) => [r.id, r.depth, r.ancestorIsLast, r.isLast])).toEqual([
+      ["wf-member", 2, [false], false],
+    ]);
+    expect(midSpine[0]?.prefix).toBe("│ ├ ");
+
+    // Inside the LAST run (base [true]) with nothing following: └ closes.
+    const closing = flattenSubagents([member], [true]);
+    expect(closing.map((r) => [r.id, r.isLast])).toEqual([["wf-member", true]]);
+    expect(closing[0]?.prefix).toBe("  └ ");
+  });
+
+  it("propagates a moreSiblingsFollow root's open spine to its nested children", () => {
+    const child = node("child", 0.1);
+    const parent = node("parent", 0.2, [child]);
+    const rows = flattenSubagents([parent], [], true);
+    // parent keeps ├ (isLast false), so the child's guide column carries │.
+    expect(rows.map((r) => `${r.prefix}${r.id}`)).toEqual(["├ parent", "│ └ child"]);
+  });
 });
 
 describe("subtreeCost", () => {
@@ -493,6 +518,113 @@ describe("groupedTreeRows", () => {
     const expectedSpanMs =
       Date.parse("2026-07-19T07:10:00.000Z") - Date.parse("2026-07-19T06:40:00.000Z");
     expect(header.durationMs).toBe(expectedSpanMs);
+  });
+
+  it("renders run groups as depth-1 siblings after the classic roots — last classic keeps ├, only the final run header closes with └", () => {
+    const classic = node("classic-1", 0.1);
+    const memberA: SubagentNodeJson = { ...node("wf-a", 0.2), workflowRunId: "wf_run_a" };
+    const memberB: SubagentNodeJson = { ...node("wf-b", 0.3), workflowRunId: "wf_run_b" };
+    const runs: WorkflowRunSummaryJson[] = [
+      { runId: "wf_run_a", name: "a", agentCount: 1, phases: [] },
+      { runId: "wf_run_b", name: "b", agentCount: 1, phases: [] },
+    ];
+    const rows = groupedTreeRows([classic, memberA, memberB], runs);
+
+    const classicRow = rows[0];
+    if (classicRow?.kind !== "agent") throw new Error("expected an agent row first");
+    // Run groups follow at the same sibling level, so the last classic root
+    // no longer closes main's spine.
+    expect(classicRow.row.isLast).toBe(false);
+
+    const headers = rows.filter((r) => r.kind === "workflow-header");
+    expect(headers.map((h) => [h.runId, h.isLast])).toEqual([
+      ["wf_run_a", false],
+      ["wf_run_b", true],
+    ]);
+  });
+
+  it("flattens phase members at depth 2 on one shared spine — a phase's local last keeps ├, only the run's overall last member gets └", () => {
+    const imp: SubagentNodeJson = {
+      ...node("imp", 0.2),
+      workflowRunId: "wf_run1",
+      workflowPhase: "Implement",
+    };
+    const ship: SubagentNodeJson = {
+      ...node("ship", 0.1),
+      workflowRunId: "wf_run1",
+      workflowPhase: "Ship",
+    };
+    const run: WorkflowRunSummaryJson = {
+      runId: "wf_run1",
+      name: "r",
+      agentCount: 2,
+      phases: [{ title: "Implement" }, { title: "Ship" }],
+    };
+    const rows = groupedTreeRows([imp, ship], [run]);
+    expect(rows.map((r) => (r.kind === "agent" ? r.row.id : r.kind))).toEqual([
+      "workflow-header",
+      "phase-header",
+      "imp",
+      "phase-header",
+      "ship",
+    ]);
+
+    const impRow = rows[2];
+    const shipRow = rows[4];
+    if (impRow?.kind !== "agent" || shipRow?.kind !== "agent") {
+      throw new Error("expected agent rows at indexes 2 and 4");
+    }
+    expect(impRow.row.depth).toBe(2);
+    expect(impRow.row.ancestorIsLast).toEqual([true]);
+    // The Ship group follows on the same spine, so Implement's last member
+    // keeps ├ — the vertical line runs through the Ship band.
+    expect(impRow.row.isLast).toBe(false);
+    expect(shipRow.row.isLast).toBe(true);
+  });
+
+  it("quarantines phase-less members under an untracked pseudo-band — but only when a named band rendered above", () => {
+    const imp: SubagentNodeJson = {
+      ...node("imp", 0.2),
+      workflowRunId: "wf_run1",
+      workflowPhase: "Implement",
+    };
+    const stray: SubagentNodeJson = { ...node("stray", 0.1), workflowRunId: "wf_run1" };
+    const run: WorkflowRunSummaryJson = {
+      runId: "wf_run1",
+      name: "r",
+      agentCount: 2,
+      phases: [{ title: "Implement" }],
+    };
+    const rows = groupedTreeRows([imp, stray], [run]);
+    expect(
+      rows.map((r) => {
+        if (r.kind === "agent") return r.row.id;
+        if (r.kind === "phase-header") return `phase:${r.phaseTitle ?? "untracked"}`;
+        return r.kind;
+      }),
+    ).toEqual(["workflow-header", "phase:Implement", "imp", "phase:untracked", "stray"]);
+
+    // An orphan run has no named phases at all — members hang straight under
+    // the header, no pseudo-band (nothing to misattribute them to).
+    const orphan: SubagentNodeJson = { ...node("only", 0.1), workflowRunId: "wf_orphan" };
+    expect(groupedTreeRows([orphan], []).map((r) => r.kind)).toEqual(["workflow-header", "agent"]);
+  });
+
+  it("gives phase bands the run's guide spine — outer main spine open unless the run is the last sibling", () => {
+    const a: SubagentNodeJson = { ...node("a", 0.1), workflowRunId: "wf_a", workflowPhase: "P" };
+    const b: SubagentNodeJson = { ...node("b", 0.1), workflowRunId: "wf_b", workflowPhase: "P" };
+    const runs: WorkflowRunSummaryJson[] = [
+      { runId: "wf_a", name: "a", agentCount: 1, phases: [{ title: "P" }] },
+      { runId: "wf_b", name: "b", agentCount: 1, phases: [{ title: "P" }] },
+    ];
+    const rows = groupedTreeRows([a, b], runs);
+    const bands = rows.filter((r) => r.kind === "phase-header");
+    expect(bands.map((band) => band.guides)).toEqual([
+      [false, false],
+      [true, false],
+    ]);
+    const agents = rows.filter((r) => r.kind === "agent");
+    expect(agents.map((r) => r.row.ancestorIsLast)).toEqual([[false], [true]]);
   });
 });
 

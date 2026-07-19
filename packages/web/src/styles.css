@@ -1129,11 +1129,21 @@ button.tn:hover {
 }
 /* Non-usage-bearing group rows for Workflow-tool runs (TreeView.tsx) — a
    `<div>`, not a `<button>` like ordinary agent rows: these summarize a
-   run/phase, they don't select anything. */
+   run/phase, they don't select anything. Both now carry `.tree-cell`
+   connectors: the run header is a depth-1 child of main (branch), the phase
+   band sits inside the run at member indent (guides only, no branch — a
+   band is a label between siblings, not a node of its own). */
 .tn.workflow-hdr {
   background: var(--pan);
   font-weight: 600;
   cursor: default;
+}
+/* The run header's muted "· workflow · N agents" suffix — the run NAME is
+   the row's subject, the mechanics stay quiet. */
+.wf-sub {
+  color: var(--mut);
+  font-weight: 400;
+  font-size: 11px;
 }
 .tn.phase-hdr {
   color: var(--mut);

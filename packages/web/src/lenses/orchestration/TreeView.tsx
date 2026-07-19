@@ -83,9 +83,17 @@ export function TreeView({ session, selected, onSelect }: Props) {
             const status = workflowHeaderStatus(entry.status, sessionLive);
             return (
               <div className="tn workflow-hdr" key={`wf-${entry.runId}`}>
-                <span className="nowrap">
-                  ⚙ Workflow: {entry.name ?? entry.runId} · {entry.agentCount}{" "}
-                  {entry.agentCount === 1 ? "agent" : "agents"}
+                <span className="tree-cell">
+                  <span className="tree-connectors" aria-hidden="true">
+                    <span className={entry.isLast ? "tree-branch last" : "tree-branch"} />
+                  </span>
+                  <span className="nowrap">
+                    ⚙ {entry.name ?? entry.runId}
+                    <span className="wf-sub">
+                      {" "}
+                      · workflow · {entry.agentCount} {entry.agentCount === 1 ? "agent" : "agents"}
+                    </span>
+                  </span>
                 </span>
                 <span className="mut fs11">—</span>
                 <StatusCell status={status} />
@@ -99,11 +107,28 @@ export function TreeView({ session, selected, onSelect }: Props) {
             );
           }
           if (entry.kind === "phase-header") {
+            const phaseKey = entry.phaseTitle ?? "untracked";
             return (
-              <div className="tn phase-hdr" key={`ph-${entry.runId}-${entry.phaseTitle}`}>
-                <span className="nowrap">
-                  {entry.phaseTitle} · {entry.agentCount}{" "}
-                  {entry.agentCount === 1 ? "agent" : "agents"}
+              <div className="tn phase-hdr" key={`ph-${entry.runId}-${phaseKey}`}>
+                <span className="tree-cell">
+                  <span className="tree-connectors" aria-hidden="true">
+                    {entry.guides.map((guideIsLast, index) => {
+                      const lineage = entry.guides
+                        .slice(0, index + 1)
+                        .map((isLast) => (isLast ? "last" : "more"))
+                        .join("-");
+                      return (
+                        <span
+                          className={guideIsLast ? "tree-guide" : "tree-guide has-line"}
+                          key={`${entry.runId}-${phaseKey}-${lineage}`}
+                        />
+                      );
+                    })}
+                  </span>
+                  <span className="nowrap">
+                    {entry.phaseTitle ?? "untracked"} · {entry.agentCount}{" "}
+                    {entry.agentCount === 1 ? "agent" : "agents"}
+                  </span>
                 </span>
               </div>
             );

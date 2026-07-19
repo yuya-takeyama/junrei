@@ -177,16 +177,34 @@ function buildPrefix(ancestorIsLast: readonly boolean[], isLast: boolean): strin
   return `${ancestorIsLast.map((last) => (last ? "  " : "│ ")).join("")}${isLast ? "└ " : "├ "}`;
 }
 
-/** Depth-first flatten of the subagent forest (main excluded), box-drawing prefix per row. */
-export function flattenSubagents(nodes: readonly SubagentNodeJson[]): FlatTreeRow[] {
+/**
+ * Depth-first flatten of the subagent forest (main excluded), box-drawing
+ * prefix per row. `base` prepends synthetic ancestor levels (their isLast
+ * flags, root-first) so a forest can be flattened as a subtree of an outer
+ * spine — workflow members under their run header pass `[runIsLast]`, making
+ * every member depth 2 with the run's guide column ahead of its branch.
+ * `moreSiblingsFollow` marks this list as non-terminal in its own sibling
+ * list: the caller will append more rows at the same level afterwards (run
+ * groups after the classic roots, another phase group after this one), so
+ * the last root here keeps ├ and the vertical spine continues instead of
+ * closing with └. Both default to the historical no-grouping behavior, so
+ * the Waterfall view's bare `flattenSubagents(session.subagents)` call is
+ * untouched.
+ */
+export function flattenSubagents(
+  nodes: readonly SubagentNodeJson[],
+  base: readonly boolean[] = [],
+  moreSiblingsFollow = false,
+): FlatTreeRow[] {
   const rows: FlatTreeRow[] = [];
   const visit = (
     list: readonly SubagentNodeJson[],
     depth: number,
     ancestorIsLast: readonly boolean[],
+    moreFollow: boolean,
   ) => {
     list.forEach((node, i) => {
-      const isLast = i === list.length - 1;
+      const isLast = i === list.length - 1 && !moreFollow;
       rows.push({
         id: node.agentId,
         depth,
@@ -196,14 +214,14 @@ export function flattenSubagents(nodes: readonly SubagentNodeJson[]): FlatTreeRo
         node,
         nested: depth > 1,
       });
-      visit(node.children, depth + 1, [...ancestorIsLast, isLast]);
+      visit(node.children, depth + 1, [...ancestorIsLast, isLast], false);
     });
   };
-  visit(nodes, 1, []);
+  visit(nodes, base.length + 1, base, moreSiblingsFollow);
   return rows;
 }
 
-/** A workflow run's non-usage-bearing header row — rollup computed client-side from its member nodes, never a second usage-bearing tree node (would double-count). */
+/** A workflow run's non-usage-bearing header row — rollup computed client-side from its member nodes, never a second usage-bearing tree node (would double-count). Rendered as a depth-1 child of main (branch connector like any classic root), so `isLast` says whether this run closes main's spine with └ — true only for the final run group, since run groups always render after every classic root. */
 export interface WorkflowHeaderRow {
   kind: "workflow-header";
   runId: string;
@@ -222,14 +240,25 @@ export interface WorkflowHeaderRow {
    */
   durationMs?: number;
   rollup: { tokens: number; costUsd: number };
+  isLast: boolean;
 }
 
-/** A phase sub-header within a workflow run's group, between that phase's agent rows and the next. */
+/**
+ * A phase sub-header within a workflow run's group, between that phase's
+ * agent rows and the next. `phaseTitle` undefined marks the synthesized
+ * "untracked" pseudo-phase that quarantines members whose `workflowPhase`
+ * matches no named phase — without it they'd read as members of the last
+ * named phase above them. `guides` carries the ancestor spine for the band's
+ * indent, same root-first isLast convention as `FlatTreeRow.ancestorIsLast`
+ * (`[runIsLast, false]`: main's spine, then the run's own always-continuing
+ * spine — a band is never the run's last row, its members follow below).
+ */
 export interface WorkflowPhaseHeaderRow {
   kind: "phase-header";
   runId: string;
-  phaseTitle: string;
+  phaseTitle?: string;
   agentCount: number;
+  guides: readonly boolean[];
 }
 
 /** An ordinary agent row (classic sidecar OR workflow agent) — same `FlatTreeRow` shape either way. */
@@ -319,21 +348,33 @@ export function memberSpanDurationMs(nodes: readonly SubagentNodeJson[]): number
 
 /**
  * Tree rows for the Tree view, with workflow-run grouping layered on top of
- * `flattenSubagents`:
- *  - Classic (non-Workflow-tool) subagents flatten EXACTLY as
- *    `flattenSubagents` already does — same order, box-drawing, nesting.
- *    Untouched.
+ * `flattenSubagents`. Everything under main is ONE sibling list — classic
+ * roots first, then one sibling per run group — so the connector spine reads
+ * as a single tree instead of headers floating at main's own level:
+ *  - Classic (non-Workflow-tool) subagents flatten first, same order and
+ *    nesting as before, but the last classic root keeps ├ whenever any run
+ *    group follows it (`moreSiblingsFollow`) — only the very last sibling
+ *    under main closes with └.
  *  - Workflow-tool agents (`workflowRunId` set — always root-level per
  *    `analyze.ts`'s `analyzeSubagents`) are pulled out of that flat pass and
- *    re-grouped instead: one `WorkflowHeaderRow` per run (name, agent count,
- *    a tokens/cost rollup summed from the member nodes — `subtreeTokens`/
- *    `subtreeCost`, so a workflow agent that itself spawned nested children
- *    still counts once), then a `WorkflowPhaseHeaderRow` per phase in
- *    `run.phases` order (each phase's own agents flattened via
- *    `flattenSubagents`, preserving nesting/box-drawing within the phase).
- *    Any member agent whose `workflowPhase` doesn't match a known phase
- *    title (including no phase at all) is appended after the named phases
- *    with no phase header of its own — still inside the run's group.
+ *    re-grouped instead: one `WorkflowHeaderRow` per run (a depth-1 child of
+ *    main, `isLast` set on the final group; name, agent count, a tokens/cost
+ *    rollup summed from the member nodes — `subtreeTokens`/`subtreeCost`, so
+ *    a workflow agent that itself spawned nested children still counts
+ *    once), then a `WorkflowPhaseHeaderRow` per phase in `run.phases` order,
+ *    each phase's agents flattened at depth 2 (`base: [runIsLast]`). Phases
+ *    are flattened per group but share the run's ONE member spine: every
+ *    group except the run's final one passes `moreSiblingsFollow`, so a
+ *    phase's local last member keeps ├ and the vertical line runs through
+ *    the next phase band — only the run's overall last member gets └.
+ *  - Any member agent whose `workflowPhase` doesn't match a known phase
+ *    title (including no phase at all) renders after the named phases under
+ *    a synthesized pseudo-phase band (`phaseTitle` undefined → "untracked")
+ *    so it can't be misread as part of the last named phase. The pseudo-band
+ *    only appears when at least one named phase band rendered above it — a
+ *    run with no named phases at all (an orphan group) hangs its members
+ *    straight under the header, where there's nothing to misattribute them
+ *    to.
  *  - Run groups for runs present in `workflowRuns` are appended after every
  *    classic row, in the order `workflowRuns` is given; a run with zero
  *    discovered member nodes contributes nothing (no empty header).
@@ -341,27 +382,22 @@ export function memberSpanDurationMs(nodes: readonly SubagentNodeJson[]): number
  *    `workflowRunId` has NO matching entry in `workflowRuns` still gets a
  *    group — a `WorkflowHeaderRow` synthesized with `name`/`status`
  *    undefined and `agentCount` taken from the member count itself, followed
- *    by its flattened members exactly like a known run's leftover
- *    (phase-less) agents. This is mostly belt-and-suspenders: `analyze.ts`'s
- *    `buildWorkflowRunSummaries` already synthesizes a summary for a run
- *    still in progress (no `workflows/<runId>.json` written yet), so
- *    `workflowRuns` normally already covers every `workflowRunId` seen among
- *    `subagents`. This branch is what keeps that true even for a stale cached
- *    analysis, or any other gap between the two lists — a member agent must
- *    NEVER silently vanish just because its run has no summary. Orphan groups
- *    are appended after every run present in `workflowRuns`, ordered by their
- *    earliest member's `startedAt` (undefined last) then `runId`.
+ *    by its flattened members exactly like a known run's untracked agents
+ *    (minus the pseudo-band, per above). This is mostly belt-and-suspenders:
+ *    `analyze.ts`'s `buildWorkflowRunSummaries` already synthesizes a
+ *    summary for a run still in progress (no `workflows/<runId>.json`
+ *    written yet), so `workflowRuns` normally already covers every
+ *    `workflowRunId` seen among `subagents`. This branch is what keeps that
+ *    true even for a stale cached analysis, or any other gap between the two
+ *    lists — a member agent must NEVER silently vanish just because its run
+ *    has no summary. Orphan groups are appended after every run present in
+ *    `workflowRuns`, ordered by their earliest member's `startedAt`
+ *    (undefined last) then `runId`.
  */
 export function groupedTreeRows(
   subagents: readonly SubagentNodeJson[],
   workflowRuns: readonly WorkflowRunSummaryJson[],
 ): GroupedTreeRow[] {
-  const classicRoots = subagents.filter((n) => n.workflowRunId === undefined);
-  const out: GroupedTreeRow[] = flattenSubagents(classicRoots).map((row) => ({
-    kind: "agent" as const,
-    row,
-  }));
-
   const membersByRun = new Map<string, SubagentNodeJson[]>();
   for (const node of subagents) {
     if (node.workflowRunId === undefined) continue;
@@ -369,7 +405,6 @@ export function groupedTreeRows(
     if (list === undefined) membersByRun.set(node.workflowRunId, [node]);
     else list.push(node);
   }
-  if (workflowRuns.length === 0 && membersByRun.size === 0) return out;
 
   const knownRunIds = new Set(workflowRuns.map((run) => run.runId));
   const orphanRuns: WorkflowRunSummaryJson[] = [...membersByRun.keys()]
@@ -388,10 +423,17 @@ export function groupedTreeRows(
       phases: [],
     }));
 
-  for (const run of [...workflowRuns, ...orphanRuns]) {
-    const members = membersByRun.get(run.runId);
-    if (members === undefined || members.length === 0) continue;
+  const runGroups = [...workflowRuns, ...orphanRuns]
+    .map((run) => ({ run, members: membersByRun.get(run.runId) ?? [] }))
+    .filter((group) => group.members.length > 0);
 
+  const classicRoots = subagents.filter((n) => n.workflowRunId === undefined);
+  const out: GroupedTreeRow[] = flattenSubagents(classicRoots, [], runGroups.length > 0).map(
+    (row) => ({ kind: "agent" as const, row }),
+  );
+
+  runGroups.forEach(({ run, members }, groupIndex) => {
+    const runIsLast = groupIndex === runGroups.length - 1;
     const rollup = members.reduce(
       (acc, n) => ({
         tokens: acc.tokens + subtreeTokens(n),
@@ -412,26 +454,41 @@ export function groupedTreeRows(
       agentCount: run.agentCount,
       ...(durationMs !== undefined && { durationMs }),
       rollup,
+      isLast: runIsLast,
     });
 
     const remaining = new Set(members);
+    const phaseGroups: { title?: string; nodes: SubagentNodeJson[] }[] = [];
     for (const phase of run.phases) {
       const inPhase = members.filter((n) => remaining.has(n) && n.workflowPhase === phase.title);
       if (inPhase.length === 0) continue;
       for (const n of inPhase) remaining.delete(n);
-      out.push({
-        kind: "phase-header",
-        runId: run.runId,
-        phaseTitle: phase.title,
-        agentCount: inPhase.length,
-      });
-      out.push(...flattenSubagents(inPhase).map((row) => ({ kind: "agent" as const, row })));
+      phaseGroups.push({ title: phase.title, nodes: inPhase });
     }
     if (remaining.size > 0) {
-      const leftover = members.filter((n) => remaining.has(n));
-      out.push(...flattenSubagents(leftover).map((row) => ({ kind: "agent" as const, row })));
+      phaseGroups.push({ nodes: members.filter((n) => remaining.has(n)) });
     }
-  }
+
+    const hasNamedPhase = phaseGroups.some((group) => group.title !== undefined);
+    phaseGroups.forEach((group, phaseIndex) => {
+      if (hasNamedPhase) {
+        out.push({
+          kind: "phase-header",
+          runId: run.runId,
+          ...(group.title !== undefined && { phaseTitle: group.title }),
+          agentCount: group.nodes.length,
+          guides: [runIsLast, false],
+        });
+      }
+      const moreSiblingsFollow = phaseIndex < phaseGroups.length - 1;
+      out.push(
+        ...flattenSubagents(group.nodes, [runIsLast], moreSiblingsFollow).map((row) => ({
+          kind: "agent" as const,
+          row,
+        })),
+      );
+    });
+  });
 
   return out;
 }
