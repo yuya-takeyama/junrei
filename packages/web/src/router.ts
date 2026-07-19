@@ -1,160 +1,236 @@
 /**
- * Lens tabs shown inside a session shell (the persistent "band" + tab bar).
- * Codex gets the same tab order as Claude
- * (overview/timeline/orchestration/context/files/bash — see
- * `codex/orchestration.ts` / `codex/files-skills.ts` / `codex/bash-stats.ts`
- * in `@junrei/core` for how a Codex sub-agent forest, file access/skill
- * invocations, and shell-call analytics are derived) — see
- * `CLAUDE_LENSES`/`CODEX_LENSES` below.
+ * Session-detail navigation model (PR4 IA: Story / Orchestration / Evidence).
  *
- * A former Codex-only "turns" lens (per-turn model/duration/token table)
- * existed here through Phase 1 of docs/roadmap.md's "Unified Timeline"; it's
- * gone from this union now that Phase 2 folded its table into the Timeline
- * lens's own turn-grouped spine (see `Timeline.tsx`'s `turnGroupable`).
- * `normalizeLens` still accepts the literal string `"turns"` as an input and
- * redirects it to `"timeline"` (see below) so old bookmarks/links keep
- * working — that redirect is what lets it be dropped from the `Lens` union
- * itself rather than kept as a dead tab value.
+ * The six historical lenses (overview/timeline/orchestration/context/files/
+ * tools) collapsed into three top-level LENSES:
+ *  - `story`        — the conclusion-first read: the FROM-THIS-SESSION insight
+ *                     callout over the embedded Timeline (absorbs the old
+ *                     `overview` + `timeline`).
+ *  - `orchestration`— unchanged subagent-forest views (tree/waterfall/flame).
+ *  - `evidence`     — the raw-detail lenses, now sub-tabs: `context` (the old
+ *                     Context & cost), `files` (Files & skills), `tools` (the
+ *                     cross-tool ranking, itself keeping its All | Bash split).
+ *                     Evidence is where internal ids (line numbers, tool_use_id)
+ *                     are the PRIMARY axis. They aren't exclusive to it, though:
+ *                     the Story callout still names thread-id hashes in its waste
+ *                     write-ups, and expanding a turn in Story's embedded Timeline
+ *                     reveals the same per-record line-number citations it always
+ *                     had (that drill-in was relocated wholesale into Story, not
+ *                     rebuilt, so its ids came along). The split is about default
+ *                     prominence — ids up front in Evidence, incidental elsewhere —
+ *                     not a hard boundary.
  *
- * "tools" (cross-thread per-tool usage/context-cost analysis, backed by
- * `SessionAnalysisCore.toolUsageStats` — see `Tools.tsx`) hosts two sub-tabs:
- * "All" (every tool a session called, ranked by est $) and "Bash" (the
- * former standalone Bash lens's command-level detail, backed by
- * `SessionAnalysisCore.bashStats` — see `Bash.tsx`, re-homed under this lens).
- * Both sub-tabs are source-uniform: `bashStats`/`toolUsageStats` are each
- * populated for Claude AND Codex (`codex/bash-stats.ts`/
- * `codex/tool-usage-stats.ts` in `@junrei/core` extract shell/tool calls from
- * `function_call`/`local_shell_call`/the 0.144+ unified-exec
- * `custom_tool_call`), so `CLAUDE_LENSES`/`CODEX_LENSES` are identical (kept
- * as separate exports anyway — see `CODEX_LENSES`'s own doc comment). The
- * old standalone `/bash` URL redirects to this lens's Bash sub-tab (see
- * `LEGACY_LENS_ALIASES`/`normalizeToolsSub`).
+ * URL shape: `/session/<source>/<id>[/<lens>[/<sub>[/<sub2>]]]`.
+ * `story` is the default lens and omits its segment (as `overview` did before);
+ * `context` is the default evidence sub and omits its segment; `all` is the
+ * default tools sub and omits its segment. So `/session/…/evidence` is the
+ * Context sub-tab, `/session/…/evidence/tools` is Tools/All, and
+ * `/session/…/evidence/tools/bash` is Tools/Bash.
+ *
+ * Every legacy lens URL redirects to its new home (see
+ * `legacySessionLensRedirect` / `legacyAgentLensRedirect`, both tested):
+ * overview→story, timeline→story, turns→story, context→evidence,
+ * files→evidence/files, tools→evidence/tools, tools/bash→evidence/tools/bash,
+ * bash→evidence/tools/bash.
  */
-export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "tools";
+export type Lens = "story" | "orchestration" | "evidence";
 
-const LENSES: readonly Lens[] = [
-  "overview",
-  "timeline",
-  "orchestration",
-  "context",
-  "files",
-  "tools",
-];
-
-/** Human label per lens — shared by SessionShell (L1) and AgentShell (L3) for the tab bar and placeholders. */
+/** Human label per lens — shared by SessionShell (L1) and AgentShell (L3) for the tab bar. */
 export const LENS_LABEL: Record<Lens, string> = {
-  overview: "Overview",
-  timeline: "Timeline",
+  story: "Story",
   orchestration: "Orchestration",
-  context: "Context & cost",
-  files: "Files & skills",
-  tools: "Tools",
+  evidence: "Evidence",
 };
 
-/** Tab bar for a Claude Code session shell — includes "tools" (see `Lens`'s doc comment). */
-export const CLAUDE_LENSES: readonly Lens[] = [
-  "overview",
-  "timeline",
-  "orchestration",
-  "context",
-  "files",
-  "tools",
-];
+const LENSES: readonly Lens[] = ["story", "orchestration", "evidence"];
 
 /**
- * Tab bar for a Codex session shell — identical to `CLAUDE_LENSES` (see
- * `Lens`'s doc comment on "tools" for why it's included now). Kept as its own
- * export, rather than collapsed into a single constant, since the two
- * lineups are independent facts that happen to fully overlap today — a
- * future Codex-only (or Claude-only) lens should be free to diverge without
- * an unrelated rename.
+ * Session-shell lens lineup — identical for both harnesses (a Codex session's
+ * subagent forest / file-access / tool stats are all populated the same way
+ * Claude's are; see `LENSES_BY_SOURCE`).
  */
-export const CODEX_LENSES: readonly Lens[] = [
-  "overview",
-  "timeline",
-  "orchestration",
-  "context",
-  "files",
-  "tools",
-];
+export const SESSION_LENSES: readonly Lens[] = ["story", "orchestration", "evidence"];
 
 /**
- * The two sub-tabs the "tools" lens hosts: "all" (cross-tool ranking, the
- * default) and "bash" (the re-homed Bash command-level detail). Addressed as
- * a `:sub?` URL segment beneath the lens (`/session/.../tools/bash`); the
- * default "all" is omitted from the URL, the same way "overview" is omitted
- * as a lens (see `sessionPath`).
- */
-export type ToolsSubTab = "all" | "bash";
-
-const TOOLS_SUBTABS: readonly ToolsSubTab[] = ["all", "bash"];
-
-function isToolsSubTab(value: string | undefined): value is ToolsSubTab {
-  return value !== undefined && (TOOLS_SUBTABS as readonly string[]).includes(value);
-}
-
-/**
- * Resolve the active `ToolsSubTab` for a `tools`-lens route from its raw URL
- * params. Three inputs converge here: (1) the legacy standalone `/bash` URL,
- * where `lensParam` is literally `"bash"` (normalized to the `tools` lens by
- * `normalizeLens`, but its Bash intent survives only in `lensParam`) →
- * `"bash"`; (2) an explicit `:sub` segment (`/tools/bash`) → that sub; (3) no
- * sub segment (`/tools`) → the default `"all"`. Only meaningful once the
- * resolved lens is `"tools"` — callers (SessionShell) gate on that.
- */
-export function normalizeToolsSub(
-  lensParam: string | undefined,
-  subParam: string | undefined,
-): ToolsSubTab {
-  if (lensParam === "bash") return "bash";
-  if (isToolsSubTab(subParam)) return subParam;
-  return "all";
-}
-
-/**
- * Lens lineup per source — a lookup, so the shells (SessionShell/AgentShell)
- * index it instead of branching on `source` themselves.
+ * Lens lineup per source for the SESSION shell — a lookup, so the shell indexes
+ * it instead of branching on `source`. Both sources get the full three; kept as
+ * a per-source map (rather than one constant) so a future source-specific
+ * divergence needs no call-site rename.
  */
 export const LENSES_BY_SOURCE: Record<SessionRef["source"], readonly Lens[]> = {
-  "claude-code": CLAUDE_LENSES,
-  codex: CODEX_LENSES,
+  "claude-code": SESSION_LENSES,
+  codex: SESSION_LENSES,
 };
+
+/**
+ * Lens lineup for the AGENT (subagent detail, L3) shell — only the lenses
+ * actually built for a subagent are shown as tabs (PR4 removed the "coming in a
+ * later PR" placeholder tabs entirely). A Claude subagent gets Story + Evidence
+ * (context/files); a Codex subagent additionally gets Orchestration, since its
+ * own analysis carries a real subagent forest (see AgentShell). Tools is not
+ * built for either at the agent level, so it never appears.
+ */
+export function agentLensesFor(source: SessionRef["source"]): readonly Lens[] {
+  return source === "codex" ? ["story", "orchestration", "evidence"] : ["story", "evidence"];
+}
 
 function isLens(value: string | undefined): value is Lens {
   return value !== undefined && (LENSES as readonly string[]).includes(value);
 }
 
-/**
- * Legacy lens URL segments that no longer name a current `Lens`, mapped to
- * where that content now lives — checked by `normalizeLens` before the
- * `isLens` union check, so the alias can resolve even though the target
- * string was deliberately dropped from `Lens` itself (see its doc comment).
- * "turns" folded into Timeline's own turn-grouped spine in docs/roadmap.md's
- * "Unified Timeline" Phase 2; "bash" became a sub-tab of the "tools" lens
- * (the standalone Bash lens was re-homed there) — an old `/bash` bookmark
- * resolves to the tools lens here, and `normalizeToolsSub` reads the same
- * `"bash"` `lensParam` to land it on the Bash sub-tab specifically.
- */
-const LEGACY_LENS_ALIASES: Record<string, Lens> = {
-  turns: "timeline",
-  bash: "tools",
-};
+// ---------------------------------------------------------------------------
+// Evidence sub-tabs
+// ---------------------------------------------------------------------------
 
 /**
- * Normalizes an optional lens URL segment to a valid `Lens`: a known legacy
- * alias redirects to its replacement (see `LEGACY_LENS_ALIASES`), a current
- * lens passes through, and anything else falls back to "overview".
- * Normalization happens only in the rendered component — the URL itself is
- * never rewritten, so a stale or invalid lens segment stays exactly as typed
- * (matches the pre-react-router `parseRoute` fallback behavior).
+ * The Evidence lens's sub-tabs. `context` is the default (omitted from the
+ * URL). `tools` keeps its own further All | Bash split (`ToolsSubTab`),
+ * addressed as a third URL segment (`/evidence/tools/bash`). The agent shell
+ * only exposes `context`/`files` (no cross-thread Tools ranking there).
+ */
+export type EvidenceSub = "context" | "files" | "tools";
+
+/** Session-shell Evidence sub-tabs (Tools included). */
+export const EVIDENCE_SUBS_SESSION: readonly EvidenceSub[] = ["context", "files", "tools"];
+/** Agent-shell Evidence sub-tabs (no cross-thread Tools ranking at the agent level). */
+export const EVIDENCE_SUBS_AGENT: readonly EvidenceSub[] = ["context", "files"];
+
+function isEvidenceSub(value: string | undefined): value is EvidenceSub {
+  return value === "context" || value === "files" || value === "tools";
+}
+
+/**
+ * Resolve the active Evidence sub-tab from the URL's `:sub?` segment. `context`
+ * is the default when the segment is absent or unrecognized — the "never break
+ * on a stale URL" convention every param parser here follows.
+ */
+export function normalizeEvidenceSub(subParam: string | undefined): EvidenceSub {
+  return isEvidenceSub(subParam) ? subParam : "context";
+}
+
+/** The two sub-tabs the Evidence Tools sub hosts: `all` (default) and `bash`. */
+export type ToolsSubTab = "all" | "bash";
+
+function isToolsSubTab(value: string | undefined): value is ToolsSubTab {
+  return value === "all" || value === "bash";
+}
+
+/**
+ * Resolve the Tools All | Bash sub from the URL's third segment
+ * (`/evidence/tools/<sub2>`). Only meaningful when the evidence sub is `tools`;
+ * defaults to `all`.
+ */
+export function normalizeToolsSub(sub2Param: string | undefined): ToolsSubTab {
+  return isToolsSubTab(sub2Param) ? sub2Param : "all";
+}
+
+// ---------------------------------------------------------------------------
+// Lens normalization + legacy redirect matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Legacy lens URL segments (dropped from the `Lens` union) mapped to the
+ * canonical trailing path they now live at (no leading slash; `""` = the bare
+ * story default). `tools`/`bash` are handled specially in the redirect helpers
+ * because they carry a further sub segment.
+ */
+const LEGACY_LENS_TARGET: Record<string, string> = {
+  overview: "",
+  timeline: "",
+  turns: "",
+  context: "evidence",
+  files: "evidence/files",
+};
+
+/** Legacy lens segments that must trigger a redirect (the URL is rewritten to canonical). */
+const LEGACY_LENS_SEGMENTS = new Set([
+  "overview",
+  "timeline",
+  "turns",
+  "context",
+  "files",
+  "tools",
+  "bash",
+]);
+
+/**
+ * Canonical trailing path (no leading slash) for a raw lens/sub/sub2 triple,
+ * mapping every legacy segment to its new home. `""` means the bare `story`
+ * default. Shared by the redirect helpers and the project-scoped-URL rebuild so
+ * the mapping can't diverge.
+ */
+export function canonicalLensSuffix(
+  lensParam: string | undefined,
+  subParam: string | undefined,
+  sub2Param: string | undefined,
+): string {
+  if (lensParam === undefined) return "";
+  if (lensParam === "story") return "";
+  if (lensParam === "orchestration") return "orchestration";
+  if (lensParam === "evidence") {
+    const sub = normalizeEvidenceSub(subParam);
+    if (sub === "context") return "evidence";
+    if (sub === "files") return "evidence/files";
+    return normalizeToolsSub(sub2Param) === "bash" ? "evidence/tools/bash" : "evidence/tools";
+  }
+  // Legacy lens segments:
+  if (lensParam === "tools") {
+    return subParam === "bash" ? "evidence/tools/bash" : "evidence/tools";
+  }
+  if (lensParam === "bash") return "evidence/tools/bash";
+  if (lensParam in LEGACY_LENS_TARGET) return LEGACY_LENS_TARGET[lensParam] as string;
+  // Unknown segment — fall back to story (rendered, not redirected).
+  return "";
+}
+
+/**
+ * The canonical `Lens` a raw first-segment resolves to (for rendering). A new
+ * lens passes through; a legacy segment maps to its replacement; anything else
+ * falls back to `story`. Never rewrites the URL itself — the redirect helpers
+ * below own that.
  */
 export function normalizeLens(value: string | undefined): Lens {
   if (isLens(value)) return value;
-  if (value !== undefined && value in LEGACY_LENS_ALIASES) {
-    return LEGACY_LENS_ALIASES[value] as Lens;
+  if (value === "context" || value === "files" || value === "tools" || value === "bash") {
+    return "evidence";
   }
-  return "overview";
+  return "story";
 }
+
+/**
+ * When a SESSION lens URL uses a legacy segment (`overview`/`timeline`/`turns`/
+ * `context`/`files`/`tools`/`bash`), the canonical trailing path to redirect it
+ * to; `undefined` when the URL is already canonical (a current lens, or an
+ * unknown segment left to render as story). Pure so main.tsx / SessionShell and
+ * the tests share one definition.
+ */
+export function legacySessionLensRedirect(
+  lensParam: string | undefined,
+  subParam: string | undefined,
+  sub2Param: string | undefined,
+): string | undefined {
+  if (lensParam === undefined || !LEGACY_LENS_SEGMENTS.has(lensParam)) return undefined;
+  return canonicalLensSuffix(lensParam, subParam, sub2Param);
+}
+
+/**
+ * Agent-shell legacy redirect — same matrix as the session shell, minus the
+ * cross-thread Tools ranking (which the agent shell doesn't host): a legacy
+ * agent `tools`/`bash` URL lands on Evidence's Context sub instead. `undefined`
+ * when already canonical.
+ */
+export function legacyAgentLensRedirect(lensParam: string | undefined): string | undefined {
+  if (lensParam === undefined || !LEGACY_LENS_SEGMENTS.has(lensParam)) return undefined;
+  if (lensParam === "context") return "evidence";
+  if (lensParam === "files") return "evidence/files";
+  // overview/timeline/turns → story; tools/bash have no agent home → Evidence/Context.
+  if (lensParam === "tools" || lensParam === "bash") return "evidence";
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// Session refs + path building
+// ---------------------------------------------------------------------------
 
 /**
  * Identifies one session to link/fetch — mirrors the server's per-source key
@@ -174,27 +250,18 @@ export function sessionRefOf(item: {
 }
 
 /**
- * react-router path pattern for the Claude Code session shell route,
- * registered with `createBrowserRouter` — bare session id, no `:project`
- * segment (dropped once bare-id server lookup made it unnecessary — see
- * `SessionRef`'s doc comment). Symmetric with `CODEX_SESSION_ROUTE_PATH`.
- *
- * The trailing optional `:sub?` segment addresses the "tools" lens's
- * sub-tabs (`/tools/bash`; see `ToolsSubTab`/`sessionPath`) — it stays
- * dynamic (not a static `tools/:sub`) so no extra route is needed, and is
- * parsed only when the resolved lens is "tools" (SessionShell). A legacy
- * project-scoped URL WITH an explicit lens (`/<project>/<uuid>/<lens>`) now
- * matches this pattern too (`:id=<project>`, `:lens=<uuid>`, `:sub=<lens>`)
- * rather than the catch-all — SessionShell's own UUID guard
- * (`isLegacyClaudeProjectScopedUrl`) still catches it and redirects, now
- * preserving the trailing lens from `:sub` (see SessionShell). The 4-segment
- * legacy agent-drilldown shape is still too long to match and falls through
- * to the catch-all as before (see `legacyClaudeSessionRedirectTarget`).
+ * react-router path patterns for the session shell routes — bare session id, no
+ * `:project` segment. The trailing `:lens?/:sub?/:sub2?` addresses the lens, the
+ * Evidence sub-tab, and (for Evidence/Tools) the All|Bash sub — all optional and
+ * parsed only for the lens they belong to (SessionShell). A legacy project-scoped
+ * URL WITH an explicit lens (`/<project>/<uuid>/<lens>`) still matches this
+ * pattern (`:id=<project>`, `:lens=<uuid>`, `:sub=<lens>`, `:sub2=<oldsub>`);
+ * SessionShell's own UUID guard (`isLegacyClaudeProjectScopedUrl`) redirects it,
+ * preserving the trailing lens.
  */
-export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:id/:lens?/:sub?";
-
-/** react-router path pattern for the Codex session shell route — no `:project` segment (Codex has none). Trailing `:sub?` addresses the tools lens's sub-tabs, same as `CLAUDE_SESSION_ROUTE_PATH`. */
-export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?/:sub?";
+export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:id/:lens?/:sub?/:sub2?";
+/** react-router path pattern for the Codex session shell route — same trailing optional segments. */
+export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?/:sub?/:sub2?";
 
 /**
  * UUID (v4-shaped) matcher used by the legacy-URL guards below — a
@@ -205,40 +272,42 @@ export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?/:sub?";
 export const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Build the path for a session route (`<Link to>` targets are always plain
- * pathnames — `createBrowserRouter` needs no `#` prefix). Omits the lens
- * segment for "overview" to match the app's historical URL shape (formerly
- * `#/session/.../id` under the hash router, now `/session/.../id` — rather
- * than `/session/.../id/overview`). Both sources share the same shape now
- * (`/session/<source>/<id>[/<lens>[/<sub>]]`) — see `SessionRef`'s doc comment.
- *
- * `sub` only applies to the "tools" lens (its `ToolsSubTab`); like the
- * default "overview" lens, the default "all" sub is omitted from the URL, so
- * `sessionPath(ref, "tools")` and `sessionPath(ref, "tools", "all")` both
- * yield `/session/.../tools`, while `sessionPath(ref, "tools", "bash")`
- * yields `/session/.../tools/bash`. `sub` is ignored for any other lens.
+ * Build the path for a session route. Omits the segment for every default:
+ * `story` lens, `context` evidence sub, `all` tools sub. So:
+ *  - `sessionPath(ref)` / `sessionPath(ref, "story")` → `/session/<src>/<id>`
+ *  - `sessionPath(ref, "orchestration")`             → `…/orchestration`
+ *  - `sessionPath(ref, "evidence")`                  → `…/evidence` (context)
+ *  - `sessionPath(ref, "evidence", "files")`         → `…/evidence/files`
+ *  - `sessionPath(ref, "evidence", "tools")`         → `…/evidence/tools` (all)
+ *  - `sessionPath(ref, "evidence", "tools", "bash")` → `…/evidence/tools/bash`
+ * `sub`/`toolsSub` are ignored for any non-evidence lens.
  */
-export function sessionPath(ref: SessionRef, lens: Lens = "overview", sub?: ToolsSubTab): string {
+export function sessionPath(
+  ref: SessionRef,
+  lens: Lens = "story",
+  sub?: EvidenceSub,
+  toolsSub?: ToolsSubTab,
+): string {
   const base = `/session/${ref.source}/${encodeURIComponent(ref.id)}`;
-  if (lens === "overview") return base;
-  const withLens = `${base}/${lens}`;
-  return lens === "tools" && sub !== undefined && sub !== "all" ? `${withLens}/${sub}` : withLens;
+  if (lens === "story") return base;
+  if (lens === "orchestration") return `${base}/orchestration`;
+  // evidence
+  const evSub = sub ?? "context";
+  if (evSub === "context") return `${base}/evidence`;
+  if (evSub === "files") return `${base}/evidence/files`;
+  // tools
+  return toolsSub === "bash" ? `${base}/evidence/tools/bash` : `${base}/evidence/tools`;
 }
 
 /**
  * True when a Claude Code session route's `:id`/`:lens?` params are actually
  * the legacy 2-segment URL shape (`/session/claude-code/<projectDirName>/<uuid>`,
- * no explicit lens — a `#/...` bookmark from before the history-router
- * migration is normalized to this plain-path form by main.tsx before the
- * router ever sees it) — under `CLAUDE_SESSION_ROUTE_PATH`'s pattern, this SHORT
+ * no explicit lens) — under `CLAUDE_SESSION_ROUTE_PATH`'s pattern this SHORT
  * legacy shape still matches (`:id` capturing the stale project dir, `:lens`
- * capturing the real id), so `SessionShell` consults this to redirect it
- * on the spot. A `projectDirName` is never UUID-shaped (see `SESSION_UUID_RE`'s
- * doc comment), so "id isn't a UUID but lens is" is unambiguous — never true
- * for a current-shape URL, where the id segment is always the raw UUID.
- * Longer legacy shapes (explicit lens, or the agent-drilldown route) don't
- * match this route at all and fall through to the catch-all instead — see
- * `legacyClaudeSessionRedirectTarget`.
+ * capturing the real id), so `SessionShell` consults this to redirect it. A
+ * `projectDirName` is never UUID-shaped, so "id isn't a UUID but lens is" is
+ * unambiguous — never true for a current-shape URL. Longer legacy shapes fall
+ * through to the catch-all instead — see `legacyClaudeSessionRedirectTarget`.
  */
 export function isLegacyClaudeProjectScopedUrl(
   idParam: string | undefined,
@@ -255,22 +324,18 @@ export function isLegacyClaudeProjectScopedUrl(
 /**
  * Legacy URL guard (web-only) for bookmarked Claude Code session links that
  * still carry the old `:project` segment in a shape LONGER than
- * `CLAUDE_SESSION_ROUTE_PATH` can match — `/session/claude-code/<projectDirName>/<uuid>/<lens>[?record=N]`
- * or the legacy agent-drilldown shape
- * `/session/claude-code/<projectDirName>/<uuid>/agent/<agentId>[/<lens>]`
- * (a pre-history-router `#/...` bookmark is normalized to this plain-path
- * form by main.tsx before the router runs — see `isLegacyClaudeProjectScopedUrl`'s
- * doc comment above).
- * These fall through every registered route to react-router's catch-all,
- * where this helper is consulted (see main.tsx). The plain 2-segment legacy
- * shape (`.../<project>/<uuid>` with no lens) is SHORT enough to still match
- * `CLAUDE_SESSION_ROUTE_PATH`'s optional `:lens?`, so it's handled inside
- * `SessionShell` instead (see its own UUID guard).
+ * `CLAUDE_SESSION_ROUTE_PATH` can match — e.g. the legacy agent-drilldown shape
+ * `/session/claude-code/<projectDirName>/<uuid>/agent/<agentId>[/<lens>]`.
+ * These fall through every registered route to react-router's catch-all, where
+ * this helper is consulted (see main.tsx). Returns the redirect target (new
+ * path + preserved query string), or `undefined` when `pathname` doesn't match
+ * the legacy shape.
  *
- * Returns the redirect target (new path + preserved query string), or
- * `undefined` when `pathname` doesn't match the legacy shape — the catch-all
- * falls back to the session list in that case, same as before this guard
- * existed.
+ * NOTE: this only strips the stale project segment; it does NOT remap legacy
+ * lens names in the trailing `rest` (a project-scoped deep link to `…/timeline`
+ * lands on `/session/claude-code/<uuid>/timeline`, which the SessionShell's own
+ * `legacySessionLensRedirect` then normalizes to `…/story` on arrival). Kept as
+ * two hops so each guard stays single-purpose and independently tested.
  */
 export function legacyClaudeSessionRedirectTarget(
   pathname: string,
@@ -286,43 +351,25 @@ export function legacyClaudeSessionRedirectTarget(
 
 /**
  * Build the path (+ `record` search param, and an optional `agent` search
- * param) that opens the record slide-over (L3, screen 8) for a given source
- * line — see `RecordDetail.tsx`.
+ * param) that opens the record slide-over (L3) for a given source line — see
+ * `RecordDetail.tsx`. The record is addressed with `?record=<line>` appended to
+ * the session path so it's shareable/bookmarkable and Back-closable, while the
+ * lens/sub segments stay untouched (the underlying lens never unmounts).
  *
- * The record slide-over is addressed with a `?record=<line>` query segment
- * appended to the session path (e.g. `/session/claude-code/id/timeline?record=42`)
- * rather than component-local state. Reasons: (1) it makes a specific record
- * shareable/bookmarkable, matching how every other drill-down in this app is
- * a real URL; (2) opening the panel pushes a history entry, so the browser
- * Back button closes it; (3) the lens path segment is untouched, so the
- * underlying lens component never unmounts and its scroll position survives
- * open/close, satisfying "without losing place".
- *
- * `agentId`, when given, adds a sibling `&agent=<agentId>` param so the
- * SESSION page (not the agent shell) can open a subagent's own record
- * in-place — e.g. the Bash lens's Fix Queue evidence rows rank calls across
- * every thread (see `HeavyHittersTable`'s doc comment), so most of its `L{N}`
- * links point at a subagent line. Routing those through `agentRecordPath`
- * (which navigates to the agent shell) used to lose the Fix Queue's own
- * context; carrying the agent id as a query param instead keeps the user on
- * the session page while still scoping the record fetch correctly (see
- * `fetchRecordDetail`'s optional `agent` argument). Distinct from
- * `agentRecordPath`, which addresses the agent shell's OWN record slide-over
- * (no `agent` query param needed there — the whole route is already agent-scoped).
- *
- * `sub` threads through to `sessionPath` so a record opened from the tools
- * lens's Bash sub-tab keeps the `/tools/bash` path in its URL (and thus in
- * the record's close href); ignored for any non-tools lens.
+ * `opts.agentId` adds a sibling `&agent=<agentId>` param so the SESSION page can
+ * open a subagent's own record in-place (the Evidence Tools heavy-hitters rank
+ * calls across every thread — see `HeavyHittersTable`). `opts.sub`/`opts.toolsSub`
+ * thread through to `sessionPath` so a record opened from an Evidence sub-tab
+ * keeps that sub in its URL (and thus in the record's close href).
  */
 export function recordPath(
   ref: SessionRef,
   lens: Lens,
   line: number,
-  agentId?: string,
-  sub?: ToolsSubTab,
+  opts: { agentId?: string; sub?: EvidenceSub; toolsSub?: ToolsSubTab } = {},
 ): string {
-  const base = `${sessionPath(ref, lens, sub)}?record=${line}`;
-  return agentId !== undefined ? `${base}&agent=${encodeURIComponent(agentId)}` : base;
+  const base = `${sessionPath(ref, lens, opts.sub, opts.toolsSub)}?record=${line}`;
+  return opts.agentId !== undefined ? `${base}&agent=${encodeURIComponent(opts.agentId)}` : base;
 }
 
 /**
@@ -335,46 +382,44 @@ export function parseRecordParam(searchParams: URLSearchParams): number | undefi
 }
 
 /**
- * Parses the `agent` search param that rides alongside `record` on the
- * SESSION page (see `recordPath`'s doc comment) — the subagent id whose
- * transcript the open record line belongs to. `undefined` when absent, same
- * "never break on a stale URL" convention every other param parser here
- * follows (an empty string could theoretically round-trip through
- * `URLSearchParams`, but `recordPath` never emits one, so this only guards
- * against a hand-edited URL).
+ * Parses the `agent` search param that rides alongside `record` on the SESSION
+ * page (see `recordPath`) — the subagent id whose transcript the open record
+ * line belongs to. `undefined` when absent.
  */
 export function parseRecordAgentParam(searchParams: URLSearchParams): string | undefined {
   const raw = searchParams.get("agent");
   return raw !== null && raw !== "" ? raw : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Agent (subagent detail, L3) routes
+// ---------------------------------------------------------------------------
+
 /**
- * react-router path patterns for the agent (subagent detail, L3) shell
- * routes, registered with `createBrowserRouter` alongside the session route
- * patterns — one per source, same split as `CLAUDE_SESSION_ROUTE_PATH`/
- * `CODEX_SESSION_ROUTE_PATH`. A Claude agent is a sidecar transcript scoped
- * under its session; a Codex sub-agent is a full session of its own (see
- * `sources/codex.ts` on the server), but both get the same nested URL shape
- * (`/session/<source>/<id>/agent/<agentId>[/<lens>]`) so a sub-agent's place
- * in its parent's tree is addressable and breadcrumbable for either source.
- * The static `agent` segment disambiguates these from the session patterns'
- * optional `:lens?` — react-router ranks a route with more static segments
- * higher, so `/session/claude-code/id/agent/x` matches this pattern rather
- * than being parsed as `CLAUDE_SESSION_ROUTE_PATH` with `lens="agent"` (see
- * router.test.ts).
+ * react-router path patterns for the agent (subagent detail, L3) shell routes.
+ * The static `agent` segment outranks the session routes' optional `:lens?`, so
+ * `/session/<src>/id/agent/x` matches these rather than the session pattern. The
+ * trailing `:lens?/:sub?` addresses the lens and (for Evidence) its sub-tab —
+ * the agent shell has no Evidence/Tools split, so no third segment is needed.
  */
-export const CLAUDE_AGENT_ROUTE_PATH = "session/claude-code/:id/agent/:agentId/:lens?";
-export const CODEX_AGENT_ROUTE_PATH = "session/codex/:id/agent/:agentId/:lens?";
+export const CLAUDE_AGENT_ROUTE_PATH = "session/claude-code/:id/agent/:agentId/:lens?/:sub?";
+export const CODEX_AGENT_ROUTE_PATH = "session/codex/:id/agent/:agentId/:lens?/:sub?";
 
 /**
  * Build the path for an agent (subagent detail, L3) route — mirrors
- * `sessionPath`, omitting the lens segment for "overview". `ref` is the
- * PARENT session the agent is viewed under; works for either source (see
- * `CLAUDE_AGENT_ROUTE_PATH`/`CODEX_AGENT_ROUTE_PATH`).
+ * `sessionPath`, omitting the segment for the `story` default and the `context`
+ * evidence default. `ref` is the PARENT session the agent is viewed under.
  */
-export function agentPath(ref: SessionRef, agentId: string, lens: Lens = "overview"): string {
+export function agentPath(
+  ref: SessionRef,
+  agentId: string,
+  lens: Lens = "story",
+  sub?: EvidenceSub,
+): string {
   const base = `/session/${ref.source}/${encodeURIComponent(ref.id)}/agent/${encodeURIComponent(agentId)}`;
-  return lens === "overview" ? base : `${base}/${lens}`;
+  if (lens === "story") return base;
+  if (lens === "orchestration") return `${base}/orchestration`;
+  return (sub ?? "context") === "files" ? `${base}/evidence/files` : `${base}/evidence`;
 }
 
 /**
@@ -386,9 +431,14 @@ export function agentRecordPath(
   agentId: string,
   lens: Lens,
   line: number,
+  sub?: EvidenceSub,
 ): string {
-  return `${agentPath(ref, agentId, lens)}?record=${line}`;
+  return `${agentPath(ref, agentId, lens, sub)}?record=${line}`;
 }
+
+// ---------------------------------------------------------------------------
+// Session-list query params
+// ---------------------------------------------------------------------------
 
 /** Session-list source filter tab — mirrors the server's `SessionSourceFilter` minus omission (the web always passes one explicitly). */
 export type SourceTab = "all" | "claude-code" | "codex";
@@ -401,9 +451,7 @@ function isSourceTab(value: string | null): value is SourceTab {
 
 /**
  * Normalizes the `?source=` query param on the session list to a valid
- * `SourceTab`, defaulting to "all" for anything missing or unrecognized —
- * same fallback shape as `normalizeLens` above, so a stale/invalid `source`
- * value never breaks the page, it just falls back to the merged view.
+ * `SourceTab`, defaulting to "all" for anything missing or unrecognized.
  */
 export function parseSourceTab(value: string | null): SourceTab {
   return isSourceTab(value) ? value : "all";
@@ -411,8 +459,7 @@ export function parseSourceTab(value: string | null): SourceTab {
 
 /**
  * Normalizes the `?page=` query param on the session list to a 1-based page
- * number, falling back to 1 for anything missing, non-numeric, or < 1 — same
- * "never break on a stale URL" shape as `parseSourceTab` above.
+ * number, falling back to 1 for anything missing, non-numeric, or < 1.
  */
 export function parseListPage(value: string | null): number {
   const page = value !== null && /^\d+$/.test(value) ? Number.parseInt(value, 10) : 0;
@@ -423,19 +470,11 @@ export function parseListPage(value: string | null): number {
 export const ALL_REPOS = "all";
 
 /**
- * Normalizes the `?repo=` query param on the session list to a filter value.
- * Unlike `parseSourceTab`, valid values aren't a fixed enum — they're
- * whatever `repoFilterKey` (see `sessionListHelpers.ts`) produces for the
- * sessions currently loaded, which is normally a `repoRoot` path — so this
- * only normalizes "param absent" to the `"all"` sentinel and passes anything
- * else through verbatim. A stale/unrecognized value just matches zero rows
- * until the user picks again, the same failure mode as any other filter
- * param pointing at data that no longer exists.
- *
- * Reused as-is by the Briefing home's own `?repo=` filter (Home.tsx) — the
- * key semantics are identical (`GET /api/briefing`'s `repo` param accepts the
- * same `repoRoot`/fallback-bucket keys as `GET /api/overview`'s, plus a bare
- * repo name resolved server-side), so it needs no screen-specific variant.
+ * Normalizes the `?repo=` query param to a filter value. Valid values aren't a
+ * fixed enum — they're whatever `repoFilterKey` produces for the loaded
+ * sessions (normally a `repoRoot` path) — so this only normalizes "param
+ * absent" to the `"all"` sentinel and passes anything else through verbatim.
+ * Reused as-is by the Briefing home's own `?repo=` filter (Home.tsx).
  */
 export function parseRepoParam(value: string | null): string {
   return value ?? ALL_REPOS;
@@ -444,47 +483,24 @@ export function parseRepoParam(value: string | null): string {
 const DAY_PARAM_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * Normalizes the session list's `?day=` query param — a single LOCAL
- * calendar day (`YYYY-MM-DD`) to filter the list to, the drill-down target
- * from a Trends screen spike-day row / daily chart column (see
- * `sessionListDayFilterPath` below). `undefined` for anything missing or
- * malformed, same "never break on a stale URL" convention as
- * `parseRepoParam` — a bad value just falls back to whatever date filter was
- * already active instead of throwing.
+ * Normalizes the session list's `?day=` query param — a single LOCAL calendar
+ * day (`YYYY-MM-DD`) to filter the list to. `undefined` for anything missing or
+ * malformed. (The old Trends-screen drill-down that generated these URLs is
+ * gone as of PR3/PR4, but the `?day=` FILTER itself is still honored for any
+ * bookmarked list URL — see SessionList.)
  */
 export function parseDayParam(value: string | null): string | undefined {
   return value !== null && DAY_PARAM_RE.test(value) ? value : undefined;
 }
 
-/**
- * Session list URL that filters to exactly one local calendar day (and,
- * when given, a repo) — used by the Trends screen's drill-down links
- * (`AnomaliesPanel.tsx`'s spike-day rows, `DailyCostChart.tsx`'s columns).
- * `day` is expected to be a `TrendBucket.date`/`TrendSpikeDay.date` value
- * (`YYYY-MM-DD`, already a LOCAL calendar day in the viewer's own tz — see
- * `@junrei/core`'s `localDayKey`), and the session list's `?day=` filter
- * resolves it via `dateFilter.ts`'s `localDayStartMs`, which interprets the
- * same `YYYY-MM-DD` string in the BROWSER's own local timezone — since the
- * Trends screen always sends `Intl.DateTimeFormat().resolvedOptions().timeZone`
- * (the browser's own tz) as its `tz` param, both screens agree on exactly
- * the same day boundaries for the same viewer. `repoKey` is omitted from the
- * URL when absent or the `ALL_REPOS` sentinel, matching every other repo-filter
- * link in this app.
- */
-export function sessionListDayFilterPath(day: string, repoKey?: string): string {
-  const params = new URLSearchParams({ day });
-  if (repoKey !== undefined && repoKey !== ALL_REPOS) params.set("repo", repoKey);
-  return `/?${params.toString()}`;
-}
-
 // ---------------------------------------------------------------------------
-// Top-level navigation (PR3 IA: Briefing / Sessions / Learnings) + Home masthead
+// Top-level navigation (Briefing / Sessions / Learnings) + Home masthead
 // ---------------------------------------------------------------------------
 
 /** react-router path for the moved session list — the old bare `/` (now the Briefing home) redirects legacy list URLs here (see `legacySessionListRedirectTarget`). */
 export const SESSIONS_ROUTE_PATH = "sessions";
 
-/** react-router path for the Learnings loop board (new in PR3). */
+/** react-router path for the Learnings loop board. */
 export const LEARNINGS_ROUTE_PATH = "learnings";
 
 /** Legacy `/trends` path — kept only so main.tsx can register the redirect to the Briefing home that absorbed it. */
@@ -501,10 +517,7 @@ export const NAV_ITEMS: readonly { key: NavKey; label: string; path: string }[] 
 
 /**
  * The Briefing masthead's period toggle (Today = 1 / 7d / 30d) — the `days`
- * window passed straight to `GET /api/briefing`. Distinct from the session
- * list's own `DATE_FILTER_PRESET_DAYS`: this bounds a server aggregation, that
- * bounds a client-side fetch window (same independence the old Trends window
- * kept from the list's presets).
+ * window passed straight to `GET /api/briefing`.
  */
 export const BRIEFING_PERIOD_DAYS: readonly number[] = [1, 7, 30];
 
@@ -514,8 +527,7 @@ export const DEFAULT_BRIEFING_PERIOD_DAYS = 7;
 /**
  * Normalizes the Briefing home's `?days=` query param to a value from
  * `BRIEFING_PERIOD_DAYS`, defaulting anything missing or unrecognized to
- * `DEFAULT_BRIEFING_PERIOD_DAYS` — same "never break on a stale URL"
- * convention every other query-param parser here follows.
+ * `DEFAULT_BRIEFING_PERIOD_DAYS`.
  */
 export function parseBriefingPeriodDays(value: string | null): number {
   const days = value !== null ? Number(value) : Number.NaN;
@@ -526,11 +538,9 @@ export function parseBriefingPeriodDays(value: string | null): number {
  * The session list moved from `/` to `/sessions` in PR3 (the bare `/` is now
  * the Briefing home). A bookmarked legacy list URL is recognized by carrying a
  * session-list-only query param — `source`, `page`, or `day` (the Briefing
- * home's own params are `repo`/`days`, which overlap only on the harmless
- * `repo`, so those three are the unambiguous tell). Returns the `/sessions`
- * path with the full original query preserved, or `undefined` for a bare (or
- * Briefing-only) `/` visit that should render the home. Pure so main.tsx's
- * index redirect and this file's tests share one definition.
+ * home's own params are `repo`/`days`). Returns the `/sessions` path with the
+ * full original query preserved, or `undefined` for a bare (or Briefing-only)
+ * `/` visit that should render the home.
  */
 export function legacySessionListRedirectTarget(search: string): string | undefined {
   const params = new URLSearchParams(search);

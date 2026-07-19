@@ -23,9 +23,19 @@ interface Props {
  * descendant threads for both sources, so the delegated split from
  * `session.delegation` is the honest caption either way.
  */
+/**
+ * Legend for the trailing `*` on a cost figure — a lower-bound marker meaning
+ * some usage in the total had no known pricing. Attached as a `title` tooltip
+ * wherever a `*`-able cost renders, matching the session-list's own legend
+ * (`SessionList.tsx`) so the asterisk means exactly one thing app-wide (PR4
+ * vocabulary sweep).
+ */
+export const COST_ESTIMATE_LEGEND =
+  "Estimated USD cost. A trailing * means some usage in the figure had no known pricing, so it's a lower bound.";
+
 export function StatStrip({ session }: Props) {
   const ref = sessionRefOf(session);
-  const contextHref = sessionPath(ref, "context");
+  const contextHref = sessionPath(ref, "evidence", "context");
   // Both sources carry `delegation` (all-zero `subagents` when there's no
   // sub-agent forest) — see `@junrei/core`'s `delegation.ts`.
   const delegatedShare = formatDelegatedShare(session.delegation);
@@ -34,17 +44,20 @@ export function StatStrip({ session }: Props) {
   return (
     <div className="b-strip mt16">
       <Cell label="Total cost" href={contextHref}>
-        <div className="big mt8 amb">
+        <div
+          className="big mt8 amb"
+          title={session.totalUsage.costIsComplete ? undefined : COST_ESTIMATE_LEGEND}
+        >
           {formatUsd(session.totalUsage.costUsd)}
           {session.totalUsage.costIsComplete ? "" : "*"}
         </div>
         <div className="sub num">
-          {formatUsd(session.delegation.subagents.costUsd ?? 0)} delegated
+          {formatUsd(session.delegation.subagents.costUsd ?? 0)} Delegated
           {delegatedShare !== undefined && ` — ${delegatedShare}`}
         </div>
       </Cell>
       {session.apiMessageCount !== undefined ? (
-        <Cell label="Turns / msgs" href={sessionPath(ref, "timeline")}>
+        <Cell label="Turns / msgs" href={sessionPath(ref, "story")}>
           <div className="big mt8">
             {session.userTurnCount}
             <span className="mut" style={{ fontSize: "15px" }}>
@@ -58,14 +71,19 @@ export function StatStrip({ session }: Props) {
         // No standalone Turns lens exists anymore (folded into Timeline's
         // turn-grouped spine — docs/roadmap.md's "Unified Timeline" Phase 2),
         // so this cell now opens the same place its Claude sibling above does.
-        <Cell label="Turns" href={sessionPath(ref, "timeline")}>
+        <Cell label="Turns" href={sessionPath(ref, "story")}>
           <div className="big mt8">{session.userTurnCount}</div>
           <div className="sub">user turns</div>
         </Cell>
       )}
+      {/* Cache hit is computed from `totalUsage` (ALL threads) here AND in the
+          Evidence › Context & cost lens's tile, both labeled "all threads", so
+          the two surfaces show the identical number (PR4 consistency sweep —
+          the old ContextCost tile scoped this to the main transcript only,
+          which read a few points off from this aggregate). */}
       <Cell label="Cache hit" href={contextHref}>
         <div className="big mt8">{(cacheHitRate(session.totalUsage) * 100).toFixed(0)}%</div>
-        <div className="sub">of input tokens</div>
+        <div className="sub">of input · all threads</div>
       </Cell>
       <Cell label="Output tok" href={contextHref}>
         <div className="big mt8">{formatTokens(session.totalUsage.outputTokens)}</div>

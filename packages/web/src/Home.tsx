@@ -140,7 +140,7 @@ export function Home() {
           <div className="mast-sub fs12 mut">
             {briefing === null
               ? "Analyzing your agents…"
-              : `${String(briefing.summary.sessionCount)} sessions · ${String(briefing.waste.length)} waste findings · ${String(briefing.learnings.open)} open learnings`}
+              : `${String(briefing.summary.sessionCount)} sessions · ${String(briefing.summary.wasteCount)} waste findings · ${String(briefing.learnings.open)} open learnings`}
           </div>
         </div>
         <div className="mast-ctl">

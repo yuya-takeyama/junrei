@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   type AgentJson,
   type AnySessionJson,
@@ -12,6 +12,7 @@ import {
 import { cacheHitRate, formatDuration, formatTime, formatTokens, formatUsd } from "./format.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { ContextGrowthChart } from "./lenses/ContextGrowthChart.js";
+import { EvidenceSubNav } from "./lenses/evidence/EvidenceSubNav.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
 import { FirstPromptPanel } from "./lenses/FirstPromptPanel.js";
 import { Orchestration } from "./lenses/Orchestration.js";
@@ -27,10 +28,13 @@ import { ModelBadges } from "./lenses/orchestration/ModelBadges.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
 import {
+  agentLensesFor,
   agentPath,
   agentRecordPath,
-  LENS_LABEL,
-  LENSES_BY_SOURCE,
+  EVIDENCE_SUBS_AGENT,
+  type EvidenceSub,
+  legacyAgentLensRedirect,
+  normalizeEvidenceSub,
   normalizeLens,
   parseRecordParam,
   type SessionRef,
@@ -172,9 +176,9 @@ function AgentStatStrip({
           {node.returnedChars !== undefined
             ? `${formatTokens(node.returnedChars)} chars returned`
             : node.asyncLaunch === true
-              ? "async · not captured"
+              ? "async · return not captured"
               : capsFor(agent).capturesSubagentReturn
-                ? "not returned yet"
+                ? "return not captured"
                 : "return not in log"}
         </div>
       </div>
@@ -302,7 +306,7 @@ function AgentOverview({
       <div className="hpad fx gap16 mt16">
         <ContextGrowthChart
           session={agent}
-          contextHref={agentPath(sessionRef, agentId, "context")}
+          contextHref={agentPath(sessionRef, agentId, "evidence", "context")}
           bare
         />
         <ReturnToParentPanel node={node} capturesReturn={capsFor(agent).capturesSubagentReturn} />
@@ -339,10 +343,15 @@ export function AgentShell({ source }: Props) {
     id: idParam,
     agentId: agentIdParam,
     lens: lensParam,
-  } = useParams<"id" | "agentId" | "lens">();
+    sub: subParam,
+  } = useParams<"id" | "agentId" | "lens" | "sub">();
   const id = idParam ?? "";
   const agentId = agentIdParam ?? "";
   const lens = normalizeLens(lensParam);
+  const evidenceSub = lens === "evidence" ? normalizeEvidenceSub(subParam) : undefined;
+  // Legacy agent lens redirect (old /overview, /timeline, /context, ... URLs) —
+  // rewrite to the canonical Story/Evidence path (see router.ts).
+  const legacyLensSuffix = legacyAgentLensRedirect(lensParam);
   const [searchParams] = useSearchParams();
   const record = parseRecordParam(searchParams);
   const navigate = useNavigate();
@@ -361,7 +370,7 @@ export function AgentShell({ source }: Props) {
   const [agentError, setAgentError] = useState<string | null>(null);
 
   const recordOpen = record !== undefined;
-  const closeRecordHref = agentPath(sessionRef, agentId, lens);
+  const closeRecordHref = agentPath(sessionRef, agentId, lens, evidenceSub);
 
   useEffect(() => {
     setSession(null);
@@ -412,9 +421,18 @@ export function AgentShell({ source }: Props) {
       : [{ key: "loading", label: "…" }];
   const depth = ancestorChain?.length ?? 1;
 
-  const lensTabs = LENSES_BY_SOURCE[source];
+  const lensTabs = agentLensesFor(source);
   const lensAvailable = (lensTabs as readonly string[]).includes(lens);
   const buildAgentLensPath = (l: typeof lens) => agentPath(sessionRef, agentId, l);
+
+  if (legacyLensSuffix !== undefined) {
+    // Old agent lens URL (/overview, /timeline, /context, /tools, …) — rewrite
+    // to its canonical Story/Evidence path, preserving any open-record query.
+    const base = agentPath(sessionRef, agentId);
+    const target = legacyLensSuffix === "" ? base : `${base}/${legacyLensSuffix}`;
+    const search = searchParams.toString();
+    return <Navigate replace to={search === "" ? target : `${target}?${search}`} />;
+  }
 
   return (
     <div className="posrel">
@@ -454,72 +472,73 @@ export function AgentShell({ source }: Props) {
             <div className="pan tile mut">This lens isn&apos;t available for this agent.</div>
           </div>
         )}
-        {session !== null && agent !== null && node !== undefined && lens === "overview" && (
-          <div className="hpad mt16">
-            <AgentOverview
-              sessionRef={sessionRef}
-              agentScopedRef={agentScopedRef}
-              agentId={agentId}
-              agentParam={agentParam}
-              agent={agent}
-              node={node}
+        {/* Story (L3) — the agent's launch/return context (AgentOverview) over
+            its own embedded Timeline. Absorbs the old overview + timeline tabs,
+            mirroring the session shell's Story. */}
+        {session !== null && agent !== null && node !== undefined && lens === "story" && (
+          <>
+            <div className="hpad mt16">
+              <AgentOverview
+                sessionRef={sessionRef}
+                agentScopedRef={agentScopedRef}
+                agentId={agentId}
+                agentParam={agentParam}
+                agent={agent}
+                node={node}
+              />
+            </div>
+            <Timeline
+              sessionRef={agentScopedRef}
+              {...(agentParam !== undefined && { agent: agentParam })}
+              onOpenRecord={(line) => {
+                navigate(agentRecordPath(sessionRef, agentId, lens, line));
+              }}
             />
-          </div>
+          </>
         )}
-        {ready && lens === "timeline" && (
-          <Timeline
-            sessionRef={agentScopedRef}
-            {...(agentParam !== undefined && { agent: agentParam })}
-            onOpenRecord={(line) => {
-              navigate(agentRecordPath(sessionRef, agentId, lens, line));
-            }}
-          />
-        )}
-        {session !== null && agent !== null && node !== undefined && lens === "context" && (
-          <div className="hpad mt16">
-            <ContextCost session={agent} contextHref={agentPath(sessionRef, agentId, "context")} />
-          </div>
-        )}
-        {session !== null && agent !== null && node !== undefined && lens === "files" && (
-          <FilesSkills
-            session={agent}
-            onOpenRecord={(line) => {
-              navigate(agentRecordPath(sessionRef, agentId, lens, line));
-            }}
-          />
-        )}
+        {/* Orchestration (L3) — Codex only: a Codex sub-agent's own analysis
+            carries its own subagent forest (see `getCodexSession`), so nested
+            delegation stays visible at any depth. A Claude subagent has no such
+            forest, so `agentLensesFor` omits this tab for it entirely (PR4
+            removed the "coming in a later PR" placeholder). */}
         {session !== null &&
           agent !== null &&
           node !== undefined &&
           lens === "orchestration" &&
-          (agent.source === "codex" ? (
-            // A Codex sub-agent's own analysis carries its own `subagents`
-            // forest (see `getCodexSession` on the server), so the real lens
-            // renders here — nested delegation stays visible at any depth.
-            <Orchestration session={agent} />
-          ) : (
-            <div className="hpad mt16">
-              <div className="pan tile mut">
-                {LENS_LABEL[lens]} isn&apos;t built yet — coming in a later PR.
+          agent.source === "codex" && <Orchestration session={agent} />}
+        {/* Evidence (L3) — Context & cost / Files & skills sub-tabs only (no
+            cross-thread Tools ranking at the agent level). */}
+        {session !== null &&
+          agent !== null &&
+          node !== undefined &&
+          lens === "evidence" &&
+          evidenceSub !== undefined && (
+            <>
+              <div className="hpad mt16">
+                <EvidenceSubNav
+                  subs={EVIDENCE_SUBS_AGENT}
+                  active={evidenceSub}
+                  buildHref={(s: EvidenceSub) => agentPath(sessionRef, agentId, "evidence", s)}
+                />
               </div>
-            </div>
-          ))}
-        {ready && lens === "tools" && (
-          // `tools` is in both `CLAUDE_LENSES` and `CODEX_LENSES` (see
-          // `LENSES_BY_SOURCE`), so `lensAvailable` is true for either
-          // source's agent — but this shell has no agent-SCOPED Tools view for
-          // either one yet (the Tools lens ranks calls across a whole
-          // session's threads jointly, see `ToolHeavyHittersTable`'s doc
-          // comment; a single-agent slice of that ranking isn't a
-          // straightforward "just filter" and hasn't been built). Same
-          // "not built yet" placeholder the orchestration branch above uses
-          // for a Claude agent, now unconditional on source.
-          <div className="hpad mt16">
-            <div className="pan tile mut">
-              {LENS_LABEL[lens]} isn&apos;t built yet for subagent detail — coming in a later PR.
-            </div>
-          </div>
-        )}
+              {evidenceSub === "context" && (
+                <div className="hpad mt16">
+                  <ContextCost
+                    session={agent}
+                    contextHref={agentPath(sessionRef, agentId, "evidence", "context")}
+                  />
+                </div>
+              )}
+              {evidenceSub === "files" && (
+                <FilesSkills
+                  session={agent}
+                  onOpenRecord={(line) => {
+                    navigate(agentRecordPath(sessionRef, agentId, lens, line, evidenceSub));
+                  }}
+                />
+              )}
+            </>
+          )}
       </div>
       {record !== undefined && (
         <RecordDetail

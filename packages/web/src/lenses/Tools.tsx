@@ -46,13 +46,13 @@ function ToolsSubNav({
       </span>
       <Link
         className={sub === "all" ? "subtab on" : "subtab"}
-        to={sessionPath(sessionRef, "tools", "all")}
+        to={sessionPath(sessionRef, "evidence", "tools", "all")}
       >
         All
       </Link>
       <Link
         className={sub === "bash" ? "subtab on" : "subtab"}
-        to={sessionPath(sessionRef, "tools", "bash")}
+        to={sessionPath(sessionRef, "evidence", "tools", "bash")}
       >
         Bash
       </Link>

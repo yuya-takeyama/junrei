@@ -3,16 +3,15 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { type AnySessionJson, fetchSessionDetail, type SessionRef } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
-import { ContextCost } from "./lenses/ContextCost.js";
-import { FilesSkills } from "./lenses/FilesSkills.js";
+import { Evidence } from "./lenses/Evidence.js";
 import { Orchestration } from "./lenses/Orchestration.js";
-import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
-import { Timeline } from "./lenses/Timeline.js";
-import { Tools } from "./lenses/Tools.js";
+import { Story } from "./lenses/Story.js";
 import {
   isLegacyClaudeProjectScopedUrl,
   LENSES_BY_SOURCE,
+  legacySessionLensRedirect,
+  normalizeEvidenceSub,
   normalizeLens,
   normalizeToolsSub,
   parseRecordAgentParam,
@@ -176,7 +175,12 @@ interface Props {
  * URL's `:sub?` segment.
  */
 export function SessionShell({ source }: Props) {
-  const { id: idParam, lens: lensParam, sub: subParam } = useParams<"id" | "lens" | "sub">();
+  const {
+    id: idParam,
+    lens: lensParam,
+    sub: subParam,
+    sub2: sub2Param,
+  } = useParams<"id" | "lens" | "sub" | "sub2">();
   const isCodex = source === "codex";
   const [searchParams] = useSearchParams();
 
@@ -185,13 +189,22 @@ export function SessionShell({ source }: Props) {
   // had a `:project` segment, so this is always false for that source.
   const isLegacyProjectScopedUrl = !isCodex && isLegacyClaudeProjectScopedUrl(idParam, lensParam);
 
+  // Legacy LENS redirect (current-shape URL, but an old lens segment like
+  // /timeline or /tools/bash) — rewrite it to the canonical Story/Evidence
+  // path so old bookmarks land on the right tab (see router.ts). Skipped for
+  // the project-scoped shape above, which is handled by its own redirect.
+  const legacyLensSuffix = isLegacyProjectScopedUrl
+    ? undefined
+    : legacySessionLensRedirect(lensParam, subParam, sub2Param);
+
   const id = isLegacyProjectScopedUrl ? "" : (idParam ?? "");
   const ref: SessionRef = isCodex ? { source: "codex", id } : { source: "claude-code", id };
   const lens = normalizeLens(isLegacyProjectScopedUrl ? undefined : lensParam);
-  // Tools sub-tab (only meaningful for the "tools" lens) — resolves the
-  // legacy `/bash` URL (lensParam === "bash"), an explicit `/tools/<sub>`
-  // segment, or the default "all" (see `normalizeToolsSub`).
-  const toolsSub = lens === "tools" ? normalizeToolsSub(lensParam, subParam) : undefined;
+  // Evidence sub-tab (Context/Files/Tools) + the Tools All|Bash sub — only
+  // meaningful for the "evidence" lens.
+  const evidenceSub = lens === "evidence" ? normalizeEvidenceSub(subParam) : undefined;
+  const toolsSub =
+    lens === "evidence" && evidenceSub === "tools" ? normalizeToolsSub(sub2Param) : undefined;
   const record = parseRecordParam(searchParams);
   const recordAgent = parseRecordAgentParam(searchParams);
   const navigate = useNavigate();
@@ -200,7 +213,7 @@ export function SessionShell({ source }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const recordOpen = record !== undefined;
-  const closeRecordHref = sessionPath(ref, lens, toolsSub);
+  const closeRecordHref = sessionPath(ref, lens, evidenceSub, toolsSub);
 
   // Where the open record actually gets fetched from — mirrors AgentShell's
   // `agentScopedRef`/`agentParam` split (see its doc comment), but keyed off
@@ -221,24 +234,39 @@ export function SessionShell({ source }: Props) {
   // this effect doesn't re-fire every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: depend on ref's primitive parts (see comment above), not the object itself.
   useEffect(() => {
-    if (isLegacyProjectScopedUrl) return;
+    // Don't fetch when we're about to redirect (either legacy shape).
+    if (isLegacyProjectScopedUrl || legacyLensSuffix !== undefined) return;
     setSession(null);
     setError(null);
     fetchSessionDetail(ref)
       .then(setSession)
       .catch((e: unknown) => setError(String(e)));
-  }, [source, id, isLegacyProjectScopedUrl]);
+  }, [source, id, isLegacyProjectScopedUrl, legacyLensSuffix]);
 
   if (isLegacyProjectScopedUrl) {
-    // For this legacy shape the real UUID sits in `lensParam` and the real
-    // (old) lens — when present — sits in `subParam` (`/<project>/<uuid>/<lens>`
-    // now matches `CLAUDE_SESSION_ROUTE_PATH`'s `:sub?`; see its doc comment).
-    // Carry that lens through so a bookmarked project-scoped deep link keeps
-    // its tab instead of dropping to overview.
-    const target = sessionPath(
-      { source: "claude-code", id: lensParam as string },
-      normalizeLens(subParam),
-    );
+    // For this legacy shape the real UUID sits in `lensParam`, with the old
+    // trailing segments in `subParam`/`sub2Param`
+    // (`/<project>/<uuid>[/<a>[/<b>]]` matches `:lens?/:sub?/:sub2?`). Strip the
+    // stale project segment and preserve the trailing path VERBATIM, then let it
+    // re-resolve: a legacy lens (`…/timeline`) re-mounts here and gets
+    // normalized to Story/Evidence by `legacySessionLensRedirect` below, while a
+    // short agent-drilldown (`…/agent/<id>`) re-matches the agent route instead
+    // (its static `agent` segment outranks the session route). Rebuilding via
+    // `canonicalLensSuffix` here would misread `agent`/`<id>` as a lens/sub and
+    // drop the drilldown, so we intentionally do NOT map lenses at this hop.
+    const rest = [subParam, sub2Param].filter((s) => s !== undefined).join("/");
+    const base = sessionPath({ source: "claude-code", id: lensParam as string });
+    const target = rest === "" ? base : `${base}/${rest}`;
+    const search = searchParams.toString();
+    return <Navigate replace to={search === "" ? target : `${target}?${search}`} />;
+  }
+
+  if (legacyLensSuffix !== undefined) {
+    // Current-shape URL with a legacy lens segment (e.g. `/timeline`,
+    // `/tools/bash`) — rewrite to its canonical Story/Evidence path, preserving
+    // any `?record=`/`?agent=` query so an open record survives the redirect.
+    const base = sessionPath(ref);
+    const target = legacyLensSuffix === "" ? base : `${base}/${legacyLensSuffix}`;
     const search = searchParams.toString();
     return <Navigate replace to={search === "" ? target : `${target}?${search}`} />;
   }
@@ -299,13 +327,10 @@ export function SessionShell({ source }: Props) {
             <div className="pan tile mut">This lens isn&apos;t available for this session.</div>
           </div>
         )}
-        {error === null && session !== null && lens === "overview" && (
-          <Overview session={session} sessionRef={ref} />
-        )}
-        {error === null && session !== null && lens === "timeline" && (
-          <Timeline
-            sessionRef={ref}
+        {error === null && session !== null && lens === "story" && (
+          <Story
             session={session}
+            sessionRef={ref}
             onOpenRecord={(line) => {
               navigate(recordPath(ref, lens, line));
             }}
@@ -314,34 +339,27 @@ export function SessionShell({ source }: Props) {
         {error === null && session !== null && lens === "orchestration" && (
           <Orchestration session={session} />
         )}
-        {error === null && session !== null && lens === "context" && (
-          <ContextCost session={session} />
-        )}
-        {error === null && session !== null && lens === "files" && (
-          <FilesSkills
-            session={session}
-            onOpenRecord={(line) => {
-              navigate(recordPath(ref, lens, line));
-            }}
-          />
-        )}
-        {error === null && session !== null && lens === "tools" && (
-          <Tools
+        {error === null && session !== null && lens === "evidence" && evidenceSub !== undefined && (
+          <Evidence
             session={session}
             sessionRef={ref}
-            sub={toolsSub ?? "all"}
+            sub={evidenceSub}
+            toolsSub={toolsSub ?? "all"}
             onOpenRecord={(line, agentId) => {
-              // Heavy hitters rank tool/Bash calls across every thread (see
-              // `HeavyHittersTable`/`ToolHeavyHittersTable`'s doc comments),
-              // so most rows belong to a subagent. Opening those used to
-              // navigate to the agent shell (`agentRecordPath`), which lost
-              // whatever context the click came from. `recordPath`'s optional
-              // agent argument carries the subagent id as a query param
-              // instead, so we stay on THIS page — see `recordSessionRef`/
-              // `recordAgentParam` above for how that param gets resolved
-              // back into the right fetch per source. `toolsSub` keeps the
-              // record's URL/close href on the right sub-tab.
-              navigate(recordPath(ref, lens, line, agentId, toolsSub));
+              // The Evidence › Tools heavy hitters rank tool/Bash calls across
+              // every thread (see `HeavyHittersTable`/`ToolHeavyHittersTable`),
+              // so most rows belong to a subagent. `recordPath`'s optional agent
+              // argument carries the subagent id as a query param so we stay on
+              // THIS page (see `recordSessionRef`/`recordAgentParam` above), and
+              // `evidenceSub`/`toolsSub` keep the record's URL/close href on the
+              // right sub-tab.
+              navigate(
+                recordPath(ref, lens, line, {
+                  ...(agentId !== undefined && { agentId }),
+                  ...(evidenceSub !== undefined && { sub: evidenceSub }),
+                  ...(toolsSub !== undefined && { toolsSub }),
+                }),
+              );
             }}
           />
         )}
