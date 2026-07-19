@@ -112,18 +112,19 @@ export function TreeView({ session, selected, onSelect }: Props) {
               <div className="tn phase-hdr" key={`ph-${entry.runId}-${phaseKey}`}>
                 <span className="tree-cell">
                   <span className="tree-connectors" aria-hidden="true">
-                    {entry.guides.map((guideIsLast, index) => {
-                      const lineage = entry.guides
+                    {entry.ancestorIsLast.map((ancestorIsLast, index) => {
+                      const lineage = entry.ancestorIsLast
                         .slice(0, index + 1)
                         .map((isLast) => (isLast ? "last" : "more"))
                         .join("-");
                       return (
                         <span
-                          className={guideIsLast ? "tree-guide" : "tree-guide has-line"}
+                          className={ancestorIsLast ? "tree-guide" : "tree-guide has-line"}
                           key={`${entry.runId}-${phaseKey}-${lineage}`}
                         />
                       );
                     })}
+                    <span className={entry.isLast ? "tree-branch last" : "tree-branch"} />
                   </span>
                   <span className="nowrap">
                     {entry.phaseTitle ?? "untracked"} · {entry.agentCount}{" "}

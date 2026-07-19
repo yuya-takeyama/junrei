@@ -543,7 +543,7 @@ describe("groupedTreeRows", () => {
     ]);
   });
 
-  it("flattens phase members at depth 2 on one shared spine — a phase's local last keeps ├, only the run's overall last member gets └", () => {
+  it("nests phase members at depth 3 under their band — each phase closes its own spine, bands are the run's depth-2 children", () => {
     const imp: SubagentNodeJson = {
       ...node("imp", 0.2),
       workflowRunId: "wf_run1",
@@ -569,16 +569,26 @@ describe("groupedTreeRows", () => {
       "ship",
     ]);
 
+    const bands = rows.filter((r) => r.kind === "phase-header");
+    // Bands are siblings on the run's spine: only the final one closes it.
+    expect(bands.map((band) => [band.phaseTitle, band.isLast])).toEqual([
+      ["Implement", false],
+      ["Ship", true],
+    ]);
+
     const impRow = rows[2];
     const shipRow = rows[4];
     if (impRow?.kind !== "agent" || shipRow?.kind !== "agent") {
       throw new Error("expected agent rows at indexes 2 and 4");
     }
-    expect(impRow.row.depth).toBe(2);
-    expect(impRow.row.ancestorIsLast).toEqual([true]);
-    // The Ship group follows on the same spine, so Implement's last member
-    // keeps ├ — the vertical line runs through the Ship band.
-    expect(impRow.row.isLast).toBe(false);
+    // Members sit one level under their band: depth 3, ancestor spine
+    // [runIsLast, phaseIsLast], and each phase's last member gets └ of its
+    // own — no cross-phase member spine anymore.
+    expect(impRow.row.depth).toBe(3);
+    expect(impRow.row.ancestorIsLast).toEqual([true, false]);
+    expect(impRow.row.isLast).toBe(true);
+    expect(shipRow.row.depth).toBe(3);
+    expect(shipRow.row.ancestorIsLast).toEqual([true, true]);
     expect(shipRow.row.isLast).toBe(true);
   });
 
@@ -619,12 +629,16 @@ describe("groupedTreeRows", () => {
     ];
     const rows = groupedTreeRows([a, b], runs);
     const bands = rows.filter((r) => r.kind === "phase-header");
-    expect(bands.map((band) => band.guides)).toEqual([
-      [false, false],
-      [true, false],
+    expect(bands.map((band) => [band.ancestorIsLast, band.isLast])).toEqual([
+      [[false], true],
+      [[true], true],
     ]);
+    // Members inherit both spines: [runIsLast, phaseIsLast].
     const agents = rows.filter((r) => r.kind === "agent");
-    expect(agents.map((r) => r.row.ancestorIsLast)).toEqual([[false], [true]]);
+    expect(agents.map((r) => r.row.ancestorIsLast)).toEqual([
+      [false, true],
+      [true, true],
+    ]);
   });
 });
 
