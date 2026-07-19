@@ -644,6 +644,8 @@ const ANALYZE_SESSION_DESCRIPTION =
   "threads/models spent the money), the same dollar-ranked `waste[]` shape briefing uses, a `delegation` " +
   "health read (turnBudget + opusMessageShare), a `contextLifetime` read, and `recommendations[]` — " +
   "each carrying a ready-to-submit `logLearningCall` object so acting on it is a single log_learning call. " +
+  "With `detail: 'full'` it also returns `whatIf[]`: model-based counterfactual savings from compacting " +
+  "at a context threshold or evicting heavy tool results (projections, never billed amounts). " +
   "Use it after briefing flags a session, or on any session id you want to understand. Works for both " +
   "harnesses (Codex marks repetitions/taskExecutions `notAvailable`). Follow up with get_evidence to quote " +
   "the underlying tool call, or log_learning to record a fix.";

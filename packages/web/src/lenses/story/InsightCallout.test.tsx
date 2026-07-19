@@ -151,4 +151,44 @@ describe("InsightCallout", () => {
     expect(warned).toContain("context ran to 480,000 tokens with 0");
     expect(warned).toMatch(/class="abadge marathon"[^>]*>marathon</);
   });
+
+  it("renders the What-if card only when whatIf is present, with server values", () => {
+    const without = render(<InsightCallout insight={insight()} sessionRef={ref} />);
+    expect(without).not.toContain("whatif-card");
+
+    const withWhatIf = render(
+      <InsightCallout
+        insight={insight({
+          whatIf: [
+            {
+              scenario: "compaction-policy",
+              basis: "counterfactual-model",
+              thresholdTokens: 200_000,
+              baselineTokens: 30_000,
+              resetCount: 2,
+              estSavedTokens: 1_200_000,
+              estSavedUsd: 1.8,
+              baselineModelCostUsd: 4,
+              estSavedPct: 0.45,
+              pricingComplete: true,
+              assumptions: [
+                "Counterfactual compaction resets context to baseline B=30,000 tokens.",
+              ],
+            },
+            {
+              scenario: "evict-heavy-results",
+              skipped: true,
+              reason: "no tool result larger than 100,000 chars to evict",
+            },
+          ],
+        } as Partial<SessionInsight>)}
+        sessionRef={ref}
+      />,
+    );
+    expect(withWhatIf).toContain("whatif-card");
+    expect(withWhatIf).toContain("Compact at threshold");
+    expect(withWhatIf).toContain("(45%)"); // estSavedPct from the payload
+    expect(withWhatIf).toContain("Evict heavy results");
+    expect(withWhatIf).toContain("no tool result larger"); // skipped reason surfaced
+  });
 });

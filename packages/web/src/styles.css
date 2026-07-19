@@ -2587,3 +2587,40 @@ button.fb {
   border-top: 1px dotted var(--bd);
   padding-top: 10px;
 }
+.whatif-card {
+  margin-top: 12px;
+  border-top: 1px dotted var(--bd);
+  padding-top: 10px;
+}
+.whatif-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.whatif-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.whatif-row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+.whatif-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .whatif-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

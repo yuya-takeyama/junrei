@@ -47,7 +47,9 @@ export function Story({ session, sessionRef, onOpenRecord }: Props) {
     setLoggedKeys(new Set());
     const ref: SessionRef =
       source === "codex" ? { source: "codex", id } : { source: "claude-code", id };
-    fetchSessionInsight(ref)
+    // `detail: "full"` so the response carries the what-if simulations (D1/D5)
+    // the callout's "What if" card renders — a full-only field.
+    fetchSessionInsight(ref, "full")
       .then((result) => {
         if (!stale) setInsight(result);
       })

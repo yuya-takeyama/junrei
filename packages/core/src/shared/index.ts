@@ -70,11 +70,18 @@ export type {
   TokenTotals,
   UsageSummary,
 } from "./metrics.js";
-export { cacheHitRate, foldFileAccess, mergeFileAccess, mergeUsageByModel } from "./metrics.js";
+export {
+  cacheHitRate,
+  dominantModelByInputTokens,
+  foldFileAccess,
+  mergeFileAccess,
+  mergeUsageByModel,
+} from "./metrics.js";
 export { isOpusClassModel } from "./model-class.js";
 export { percentileRank } from "./percentile.js";
 export type { CostComponents } from "./pricing/pricing.js";
 export {
+  cacheReadRatePerToken,
   estimateCostComponents,
   estimateCostUsd,
   findModelPricing,

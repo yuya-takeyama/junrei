@@ -25,6 +25,7 @@ import {
   type ClaudeSessionAnalysis,
   computeTrends,
   type Detail,
+  dominantModelByInputTokens,
   type FindPatternsResult,
   findPatterns,
   type InsightSubagent,
@@ -45,6 +46,8 @@ import {
   type SubagentNode,
   type TrendsReport,
   type TrendWindowTotals,
+  type WhatIfHeavyResult,
+  type WhatIfTimelinePoint,
 } from "@junrei/core";
 import { repoKeyOf } from "./overview.js";
 import { searchSessions } from "./search.js";
@@ -246,10 +249,49 @@ function toPatternSessionInput(a: AnyAnalysis): PatternSessionInput {
   };
 }
 
+/**
+ * The what-if simulator's context series (study D1/D5) — `contextTokens` +
+ * source `line` per message. A `ContextPoint` carries no model, so the builder
+ * prices every point at the session's dominant model (see `whatIfFallbackModel`
+ * below); this is exact for the study's single-model target sessions.
+ */
+function whatIfTimelineOf(a: AnyAnalysis): WhatIfTimelinePoint[] {
+  return a.contextTimeline.map((p) => ({ contextTokens: p.contextTokens, line: p.line }));
+}
+
+/**
+ * Heavy tool results eligible for the eviction scenario — reusing the already
+ * computed `toolUsageStats.heavyHitters` (top result calls, with their source
+ * line) rather than re-parsing. Synthesized placeholders are excluded (they
+ * carry no real captured bytes, so evicting them would save nothing real). The
+ * core builder applies the `> 100_000` char threshold itself.
+ */
+function whatIfHeavyResultsOf(a: AnyAnalysis): WhatIfHeavyResult[] {
+  return a.toolUsageStats.heavyHitters
+    .filter((h) => h.resultIsPlaceholder !== true)
+    .map((h) => ({
+      id: h.id,
+      ...(h.tool !== undefined && { tool: h.tool }),
+      resultChars: h.resultChars,
+      line: h.line,
+    }));
+}
+
 /** Map one loaded analysis into `buildSessionInsight`'s input subset. */
 function toSessionInsightInput(a: AnyAnalysis, detail: Detail): SessionInsightInput {
   const flat = flattenSubagents(a.subagents ?? []);
   const notAvailable = notAvailableFor(a.source);
+  // What-if material is a FULL-only enrichment (concise responses must not
+  // grow) — the dominant model prices the counterfactual context series.
+  const fallbackModel = dominantModelByInputTokens(a.totalUsageByModel);
+  const whatIf =
+    detail === "full"
+      ? {
+          whatIfTimeline: whatIfTimelineOf(a),
+          whatIfHeavyResults: whatIfHeavyResultsOf(a),
+          ...(fallbackModel !== undefined && { whatIfFallbackModel: fallbackModel }),
+        }
+      : undefined;
   return {
     source: a.source,
     sessionId: a.sessionId,
@@ -268,6 +310,7 @@ function toSessionInsightInput(a: AnyAnalysis, detail: Detail): SessionInsightIn
     // builder pure) — the biggest single cost lever (study R1/A1).
     ctxMaxTokens: ctxMaxTokensOf(a),
     compactionCount: a.compactions.length,
+    ...(whatIf !== undefined && whatIf),
     ...(notAvailable !== undefined && { notAvailable }),
   };
 }

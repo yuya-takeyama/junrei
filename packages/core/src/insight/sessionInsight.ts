@@ -30,6 +30,12 @@ import {
   oversizedReturnsToWaste,
   rankWaste,
 } from "./waste.js";
+import {
+  buildWhatIf,
+  type WhatIfHeavyResult,
+  type WhatIfResult,
+  type WhatIfTimelinePoint,
+} from "./whatIf.js";
 
 /**
  * One subagent's turn-budget material — the minimum a session insight needs
@@ -77,6 +83,17 @@ export interface SessionInsightInput {
    */
   ctxMaxTokens?: number;
   compactionCount?: number;
+  /**
+   * What-if simulator material (study D1/D5 — full detail ONLY). The per-message
+   * context series, the model to price unattributed points at (the session's
+   * dominant model), and the heavy tool results eligible for eviction. Kept as
+   * the already-reduced `whatIf.ts` shapes (not the raw `contextTimeline`/
+   * `toolUsageStats`) so this builder stays pure over pre-reduced inputs. Absent
+   * on a concise request — `whatIf` is a full-only field (concise must not grow).
+   */
+  whatIfTimeline?: WhatIfTimelinePoint[];
+  whatIfFallbackModel?: string;
+  whatIfHeavyResults?: WhatIfHeavyResult[];
   /** Features this harness doesn't expose (e.g. Codex: repetitions/taskExecutions). */
   notAvailable?: string[];
 }
@@ -191,6 +208,13 @@ export interface SessionInsight {
   /** Context-lifetime read (study R1/A1) — the biggest single cost lever. */
   contextLifetime: ContextLifetime;
   recommendations: Recommendation[];
+  /**
+   * What-if cost simulations (study D1/D5) — FULL detail only, present only when
+   * the caller supplied a context series. Each entry is a model-based
+   * counterfactual (`basis: "counterfactual-model"`) carrying its assumptions;
+   * these are projections, never blended into the measured cost fields above.
+   */
+  whatIf?: WhatIfResult[];
   notAvailable?: string[];
   _meta: InsightMeta;
 }
@@ -418,6 +442,21 @@ export function buildSessionInsight(input: SessionInsightInput): SessionInsight 
   const delegation = buildDelegationHealth(input);
   const contextLifetime = buildContextLifetime(input);
 
+  // What-if simulations (D1/D5) are a FULL-only enrichment — concise responses
+  // must not grow — and only computable when a context series was supplied.
+  const whatIf =
+    input.detail === "full" && input.whatIfTimeline !== undefined
+      ? buildWhatIf({
+          timeline: input.whatIfTimeline,
+          ...(input.whatIfFallbackModel !== undefined && {
+            fallbackModel: input.whatIfFallbackModel,
+          }),
+          ...(input.whatIfHeavyResults !== undefined && {
+            heavyResults: input.whatIfHeavyResults,
+          }),
+        })
+      : undefined;
+
   // Structural archetype levers rank ahead of the per-finding waste fixes:
   // splitting a never-compacted marathon or capping a runaway subagent is a
   // bigger lever than any single Bash/return finding.
@@ -455,6 +494,7 @@ export function buildSessionInsight(input: SessionInsightInput): SessionInsight 
     delegation,
     contextLifetime,
     recommendations,
+    ...(whatIf !== undefined && { whatIf }),
     ...(input.notAvailable !== undefined &&
       input.notAvailable.length > 0 && {
         notAvailable: input.notAvailable,

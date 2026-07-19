@@ -271,11 +271,23 @@ export type SessionInsightWaste = SessionInsight["waste"][number];
  * can render nothing rather than an error banner — it's an enhancement over the
  * Timeline below it, not a load the Story tab depends on.
  */
-export async function fetchSessionInsight(ref: SessionRef): Promise<SessionInsight | undefined> {
+export async function fetchSessionInsight(
+  ref: SessionRef,
+  detail?: "full",
+): Promise<SessionInsight | undefined> {
+  // Conditional spread (not an inline `query` prop) so TS doesn't excess-check
+  // it against the validator-less route type — the same shape `fetchTimeline`
+  // uses for its `agent` query. `detail: 'full'` opts into the `whatIf[]` field.
   const res =
     ref.source === "codex"
-      ? await client.api.sessions.codex[":id"].insight.$get({ param: { id: ref.id } })
-      : await client.api.sessions["claude-code"][":id"].insight.$get({ param: { id: ref.id } });
+      ? await client.api.sessions.codex[":id"].insight.$get({
+          param: { id: ref.id },
+          ...(detail !== undefined && { query: { detail } }),
+        })
+      : await client.api.sessions["claude-code"][":id"].insight.$get({
+          param: { id: ref.id },
+          ...(detail !== undefined && { query: { detail } }),
+        });
   if (res.status === 404) return undefined;
   if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
   return (await res.json()) as SessionInsight;
