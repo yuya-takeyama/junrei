@@ -94,6 +94,37 @@ describe("Claude Code timeline + record routes", () => {
     expect(await res.json()).toEqual({ error: "session not found" });
   });
 
+  it("GET /api/sessions/claude-code/:id/insight returns the conclusion-first SessionInsight (Story callout)", async () => {
+    const app = createApp();
+    const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/insight`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      sessionId: string;
+      source: string;
+      summary: { headline: string; costUsd: number };
+      recommendations: Array<{ finding: string; change: string; logLearningCall: unknown }>;
+      waste: Array<{ class: string }>;
+      delegation: { subagentCount: number };
+      _meta: { approxTokens: number };
+    };
+    expect(body.sessionId).toBe(SESSION_ID);
+    expect(body.source).toBe("claude-code");
+    expect(typeof body.summary.headline).toBe("string");
+    // Recommendations carry a ready-to-submit log_learning template (the Log
+    // learning button's payload).
+    if (body.recommendations.length > 0) {
+      expect(body.recommendations[0]?.logLearningCall).toBeDefined();
+    }
+    expect(body._meta.approxTokens).toBeGreaterThan(0);
+  });
+
+  it("GET .../insight 404s for an unknown session", async () => {
+    const app = createApp();
+    const res = await app.request("/api/sessions/claude-code/does-not-exist/insight");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "session not found" });
+  });
+
   it("GET /api/sessions/claude-code/:id/record/:line returns full tool-call detail", async () => {
     const app = createApp();
     const res = await app.request(`/api/sessions/claude-code/${SESSION_ID}/record/3`);

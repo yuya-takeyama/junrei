@@ -2494,3 +2494,67 @@ button.fb {
   outline: 2px solid var(--amb);
   outline-offset: -2px;
 }
+
+/* ---------------------------------------------------------------------------
+   FROM-THIS-SESSION insight callout (Story tab, PR4). Reuses the Briefing
+   WASTE section's grid vocabulary (.wrank/.west/.ghost) so a recommendation row
+   reads the same as a waste row one screen over.
+   --------------------------------------------------------------------------- */
+.insight-callout {
+  padding: 16px 20px 14px;
+}
+.insight-headline {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+.insight-metaline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: baseline;
+  margin-top: 8px;
+}
+.insight-recs {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.insight-rec {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 11px 2px;
+  border-bottom: 1px dotted var(--bd);
+}
+.insight-rec:last-child {
+  border-bottom: none;
+}
+.insight-rec-main {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.insight-rec-finding {
+  line-height: 1.4;
+}
+.insight-rec-change {
+  color: var(--mut);
+}
+.insight-rec-effect {
+  opacity: 0.9;
+}
+.insight-rec-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+}
+.insight-foot {
+  margin-top: 12px;
+  border-top: 1px dotted var(--bd);
+  padding-top: 10px;
+}

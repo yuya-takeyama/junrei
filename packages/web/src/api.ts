@@ -248,6 +248,39 @@ export async function fetchBriefing(params: { repo?: string; days: number }): Pr
   return (await res.json()) as Briefing;
 }
 
+/**
+ * The conclusion-first single-session insight (`GET
+ * /api/sessions/<source>/:id/insight`) — the Story tab's FROM-THIS-SESSION
+ * callout's data source (PR4). Typed via `InferResponseType` off the Claude
+ * route (the two source routes serve the identical `SessionInsight` shape), so
+ * the callout reads the wire shape the server actually serves
+ * (`buildSessionInsightFor` → `buildSessionInsight` in `@junrei/core`), never a
+ * hand-maintained DTO. Narrowed to the success shape (the route also has a 404
+ * `{ error }` branch).
+ */
+export type SessionInsight = Extract<
+  InferResponseType<(typeof client.api.sessions)["claude-code"][":id"]["insight"]["$get"]>,
+  { summary: unknown }
+>;
+export type SessionInsightRecommendation = SessionInsight["recommendations"][number];
+export type SessionInsightWaste = SessionInsight["waste"][number];
+
+/**
+ * Fetch one session's insight, dispatching to that source's own route. Returns
+ * `undefined` for a 404 (the session's analysis didn't resolve) so the callout
+ * can render nothing rather than an error banner — it's an enhancement over the
+ * Timeline below it, not a load the Story tab depends on.
+ */
+export async function fetchSessionInsight(ref: SessionRef): Promise<SessionInsight | undefined> {
+  const res =
+    ref.source === "codex"
+      ? await client.api.sessions.codex[":id"].insight.$get({ param: { id: ref.id } })
+      : await client.api.sessions["claude-code"][":id"].insight.$get({ param: { id: ref.id } });
+  if (res.status === 404) return undefined;
+  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  return (await res.json()) as SessionInsight;
+}
+
 type LearningsResponse = InferResponseType<typeof client.api.learnings.$get>;
 /** One repo-local learning as the ledger serves it (`@junrei/core`'s `Learning`). Backs the Learnings loop board. */
 export type Learning = LearningsResponse["learnings"][number];

@@ -104,6 +104,13 @@ export interface BriefingSummary {
    * than re-summing `waste[]` client-side (concept G5: no client recompute).
    */
   wasteUsd: number | null;
+  /**
+   * Total number of ranked waste findings this window — the length of the FULL
+   * ranked list, NOT the (≤5) `concise` slice returned in `waste[]`. The web
+   * masthead shows this true total ("N waste findings") rather than counting the
+   * shown slice (PR3 leftover: the masthead undercounted to the slice size).
+   */
+  wasteCount: number;
   /** `wasteUsd` as a fraction (0-1) of `costUsd`, or null when either is unavailable. */
   wasteShareOfCost: number | null;
   /** 0-1, null when the window had no effective-input token volume. */
@@ -159,6 +166,7 @@ function summarize(input: BuildBriefingInput, allWaste: readonly WasteItem[]): B
     costUsd: current.totalCostUsd,
     sessionCount: current.sessionCount,
     wasteUsd,
+    wasteCount: allWaste.length,
     wasteShareOfCost,
     cacheHitRate: current.cacheHitRate,
     delegationShare: current.subagentCostShare,

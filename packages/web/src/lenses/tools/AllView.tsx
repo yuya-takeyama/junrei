@@ -163,7 +163,7 @@ export function AllView({ session, sessionRef, onOpenRecord }: Props) {
   const decision = buildDecisionStrip(stats);
   const sourceSplit = buildSourceSplit(stats);
   const errorMatrix = buildErrorMatrix(stats);
-  const bashHref = sessionPath(sessionRef, "tools", "bash");
+  const bashHref = sessionPath(sessionRef, "evidence", "tools", "bash");
   const heavyTotal = stats.heavyHitters.length;
   const visibleCount = heavyOpen ? heavyTotal : Math.min(HEAVY_HITTER_PREVIEW, heavyTotal);
   const hiddenCount = heavyTotal - Math.min(HEAVY_HITTER_PREVIEW, heavyTotal);

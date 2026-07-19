@@ -33,14 +33,15 @@ function StatTile({ label, big, sub }: { label: string; big: ReactNode; sub: Rea
 }
 
 /**
- * Context & cost lens (L2) — see design-spec/14-context-cost.md. Scoped
- * entirely to the MAIN transcript: row 1's tiles read `session.usage.total`
- * (not `session.totalUsage`, which folds in subagents) so they line up with
- * the per-turn breakdown below, which — like `turnUsage` itself — can only
- * ever describe the main transcript's own user turns. This intentionally
- * diverges from `StatStrip`'s aggregate "Cache hit" cell one screen up; only
- * row 3's cost-by-model table uses the merged `totalUsageByModel`, matching
- * the Overview lens's existing `CostByModelChart`.
+ * Context & cost lens (L2, the Evidence lens's Context sub-tab in PR4) — see
+ * design-spec/14-context-cost.md. Row 1's cache-writes / fresh-input tiles read
+ * `session.usage.total` (the MAIN transcript) so they line up with the per-turn
+ * breakdown below, which — like `turnUsage` itself — only ever describes the
+ * main transcript's own user turns. The Cache-hit tile is the deliberate
+ * exception: it reads `session.totalUsage` (ALL threads) and is labeled
+ * accordingly, so its number matches the session stat strip's "Cache hit" cell
+ * exactly (PR4 consistency sweep — these two used to diverge by a couple of
+ * points). Row 3's cost-by-model table uses the merged `totalUsageByModel`.
  *
  * Reused as-is by the agent detail shell (L3) — every field here comes from
  * whichever `ClaudeSessionAnalysis` JSON is passed in, main session or a
@@ -58,9 +59,17 @@ function StatTile({ label, big, sub }: { label: string; big: ReactNode; sub: Rea
  */
 export function ContextCost({ session, contextHref }: Props) {
   const total = session.usage.total;
-  const hitRate = cacheHitRate(total);
-  const effectiveInput = total.inputTokens + total.cacheReadTokens + total.cacheCreationTokens;
   const claude = session.source === "claude-code" ? session : undefined;
+  // Cache hit is the ONE tile here scoped to ALL threads (`totalUsage`), not the
+  // main transcript (`usage.total`) the cache-writes / fresh-input tiles below
+  // read — so this figure matches the session stat strip's "Cache hit" cell
+  // exactly (PR4 consistency sweep resolved the old ~2pt strip-vs-tile split).
+  // Its sub-label says "all threads" to make that wider scope explicit.
+  const allThreads = session.totalUsage;
+  const hitRate = cacheHitRate(allThreads);
+  const cacheReadAllThreads = allThreads.cacheReadTokens;
+  const effectiveInputAllThreads =
+    allThreads.inputTokens + allThreads.cacheReadTokens + allThreads.cacheCreationTokens;
 
   return (
     <>
@@ -72,9 +81,9 @@ export function ContextCost({ session, contextHref }: Props) {
         />
         <div className="col gap12" style={{ width: "300px", flex: "none" }}>
           <StatTile
-            label="Cache hit"
+            label="Cache hit · all threads"
             big={`${(hitRate * 100).toFixed(0)}%`}
-            sub={`${formatTokens(total.cacheReadTokens)} cache-read / ${formatTokens(effectiveInput)} input`}
+            sub={`${formatTokens(cacheReadAllThreads)} cache-read / ${formatTokens(effectiveInputAllThreads)} input`}
           />
           <StatTile
             label="Cache writes"

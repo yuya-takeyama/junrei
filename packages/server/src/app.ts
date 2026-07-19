@@ -17,6 +17,7 @@ import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import {
   AmbiguousRepoError,
   buildRepoBriefing,
+  buildSessionInsightFor,
   listLearningsForRepo,
   resolveLearningRepoRoot,
 } from "./insight.js";
@@ -411,6 +412,25 @@ export function createApp(options: CreateAppOptions = {}) {
         }
         return c.json(detail);
       })
+      // Conclusion-first single-session insight (the Story tab's FROM-THIS-
+      // SESSION callout in PR4) — `buildSessionInsightFor` loads the session's
+      // forest-inclusive analysis and folds it into the same `SessionInsight`
+      // shape the `analyze_session` MCP tool returns, so the web callout and the
+      // agent tool can't drift. `detail=full` returns every waste/driver row;
+      // the default `concise` trims to the headline set (the callout only shows
+      // the top few). A session that doesn't resolve is a JSON-shaped 404.
+      .get("/api/sessions/claude-code/:id/insight", async (c) => {
+        const detail = c.req.query("detail") === "full" ? "full" : "concise";
+        const insight = await buildSessionInsightFor({
+          source: "claude-code",
+          sessionId: c.req.param("id"),
+          detail,
+        });
+        if (insight === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json(insight);
+      })
       // Goshuin Phase F: the full, UNCAPPED evaluation-trace export (see
       // `evaluation-trace.ts`'s doc comment) — the MCP `export_evaluation_trace`
       // tool serves the same trace but capped/truncated for a chat context;
@@ -470,6 +490,23 @@ export function createApp(options: CreateAppOptions = {}) {
           return c.json({ error: "session not found" } as const, 404);
         }
         return c.json({ entries });
+      })
+      // Codex counterpart of the Claude insight route above — same
+      // `SessionInsight` shape (a Codex analysis carries its own subagent forest
+      // and bash/tool stats, so the insight builder reads it identically), with
+      // `repetitions`/`taskExecutions` reported as unavailable via the payload's
+      // own `notAvailable` field rather than an error.
+      .get("/api/sessions/codex/:id/insight", async (c) => {
+        const detail = c.req.query("detail") === "full" ? "full" : "concise";
+        const insight = await buildSessionInsightFor({
+          source: "codex",
+          sessionId: c.req.param("id"),
+          detail,
+        });
+        if (insight === undefined) {
+          return c.json({ error: "session not found" } as const, 404);
+        }
+        return c.json(insight);
       })
       .get("/api/sessions/codex/:id/record/:line", async (c) => {
         const line = Number.parseInt(c.req.param("line"), 10);

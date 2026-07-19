@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { CLAUDE_LENSES, LENS_LABEL, type Lens, type SessionRef, sessionPath } from "../router.js";
+import { LENS_LABEL, type Lens, SESSION_LENSES, type SessionRef, sessionPath } from "../router.js";
 
 interface LensTabsProps {
   /** Session to link the tabs to — ignored when `buildPath` is given (the agent detail shell). */
@@ -13,16 +13,21 @@ interface LensTabsProps {
    */
   buildPath?: (lens: Lens) => string;
   /**
-   * Which lenses to render as tabs, in order — defaults to `CLAUDE_LENSES`
-   * (the historical five-tab lineup). The Codex session shell passes
-   * `CODEX_LENSES` instead, since Codex sessions have no subagent
-   * tree/files data to back Orchestration/Files & skills.
+   * Which lenses to render as tabs, in order — defaults to `SESSION_LENSES`
+   * (Story / Orchestration / Evidence). The agent shell passes its own
+   * (source-dependent) `agentLensesFor(source)` lineup, which omits the lenses
+   * not built at the subagent level (PR4 removed the placeholder tabs).
    */
   lenses?: readonly Lens[];
 }
 
 /** Persistent lens tab bar — see design-spec/01-shell.md (.b-tabs/.b-tab). */
-export function LensTabs({ sessionRef, active, buildPath, lenses = CLAUDE_LENSES }: LensTabsProps) {
+export function LensTabs({
+  sessionRef,
+  active,
+  buildPath,
+  lenses = SESSION_LENSES,
+}: LensTabsProps) {
   const toPath =
     buildPath ??
     ((lens: Lens) => {

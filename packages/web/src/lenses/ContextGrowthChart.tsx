@@ -160,7 +160,8 @@ function buildGeometry(session: AnySessionJson): Geometry | null {
 export function ContextGrowthChart({ session, contextHref, bare = false }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(session), [session]);
-  const resolvedContextHref = contextHref ?? sessionPath(sessionRefOf(session), "context");
+  const resolvedContextHref =
+    contextHref ?? sessionPath(sessionRefOf(session), "evidence", "context");
   const hovered =
     hoverIndex !== null && geometry !== null ? geometry.hoverNodes[hoverIndex] : undefined;
 
