@@ -85,6 +85,20 @@ export type { SearchableField, SearchFieldKind } from "./search.js";
 export { flattenToSearchText } from "./search.js";
 export type { CompactionEvent, SessionAnalysisCore, SessionSource } from "./session-analysis.js";
 export type { ParsedShellCommand, ShellSegment } from "./shell/parser.js";
+// `ToolErrorCategory` (defined in `./tool-error.ts`) is re-exported at the
+// `@junrei/core` barrel via `claude/index.ts` (through `claude/metrics.ts`),
+// its long-standing export site — NOT re-exported here too, to avoid an
+// ambiguous duplicate `export *` at `index.ts`.
+//
+// `Tool*`/`ToolUsageStats` are the harness-neutral OUTPUT shapes of the
+// cross-tool usage engine (`./tool-usage-stats.ts`) — exported from here only,
+// same "shared data shape, one canonical export site" convention `BashStats`
+// follows above. The engine FUNCTION (`computeToolUsageStats`) and its
+// `NeutralToolCall`/`NeutralToolThread` INPUT types are NOT exported from this
+// barrel: each harness's own adapter (`claude/tool-usage-stats.ts`,
+// `codex/tool-usage-stats.ts`) has a different input signature, so re-exporting
+// the shared engine under the same bare name would collide at the `@junrei/core`
+// barrel level — identical reasoning to `computeBashStats` above.
 export {
   KNOWN_COMMAND_FAMILIES,
   KNOWN_WRAPPER_COMMANDS,
@@ -119,6 +133,12 @@ export type {
   UserRecordDetail,
 } from "./timeline.js";
 export { durationBetween } from "./timeline.js";
+export type {
+  ToolGroup,
+  ToolHeavyHitter,
+  ToolUsageStats,
+  ToolUsageTotals,
+} from "./tool-usage-stats.js";
 export type {
   TrendBashSummary,
   TrendBucket,

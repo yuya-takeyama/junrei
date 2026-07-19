@@ -92,6 +92,14 @@ export {
   getClaudeToolCallDetail,
   summarizeToolInput,
 } from "./timeline.js";
+// The `Tool*`/`ToolUsageStats` DATA TYPES are harness-neutral
+// (`../shared/tool-usage-stats.ts`) and exported from `shared/index.ts` only —
+// same convention as `Bash*` above. `ToolUsageStatsThread` (the Claude
+// adapter's own INPUT contract) and `computeToolUsageStats` (the Claude adapter
+// FUNCTION, a distinct signature from the shared engine of the same name) stay
+// here, genuinely Claude-only.
+export type { ToolUsageStatsThread } from "./tool-usage-stats.js";
+export { computeToolUsageStats } from "./tool-usage-stats.js";
 export type {
   AssistantRecord,
   ClaudeSessionRecord,

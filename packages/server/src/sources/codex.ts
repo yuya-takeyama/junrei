@@ -9,6 +9,8 @@ import {
   type CodexTranscript,
   computeCodexBashEntries,
   computeCodexForestBashStats,
+  computeCodexForestToolUsageStats,
+  computeCodexToolUsageEntries,
   computeDelegationSummary,
   type FileAccessEntry,
   getCodexRecordDetail,
@@ -27,6 +29,7 @@ import {
   type TimelineEntry,
   type TokenTotals,
   type ToolCallDetail,
+  type ToolUsageStats,
 } from "@junrei/core";
 import {
   type ModelMixEntry,
@@ -621,6 +624,13 @@ export async function getCodexSession(
       forest.length === 0
         ? found.analysis.bashStats
         : await computeForestBashStats(found, forest, pool);
+    // `toolUsageStats` gets the SAME main-thread-only-or-forest-joint override
+    // as `bashStats` above (same reason: ranking fields can't be additively
+    // folded) — a forest-less session keeps its own main-only value.
+    const toolUsageStats =
+      forest.length === 0
+        ? found.analysis.toolUsageStats
+        : await computeForestToolUsageStats(found, forest, pool);
     return {
       ...found.analysis,
       ...(repoRoot !== undefined && { repoRoot }),
@@ -633,6 +643,7 @@ export async function getCodexSession(
       fileAccessTruncated,
       ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
       bashStats,
+      toolUsageStats,
     };
   } catch {
     return undefined;
@@ -665,6 +676,35 @@ async function computeForestBashStats(
     ]);
   } catch {
     return found.analysis.bashStats;
+  }
+}
+
+/**
+ * Joint main+forest `ToolUsageStats`, re-parsing the main transcript AND every
+ * descendant's (see `collectForestTranscripts`) — the cross-tool counterpart of
+ * `computeForestBashStats` above, same "ranking fields can't be additively
+ * folded, only recomputed jointly" reasoning. Falls back to `found.analysis`'s
+ * own main-thread-only value if the main transcript can't be re-parsed.
+ */
+async function computeForestToolUsageStats(
+  found: CodexAnalyzedRef,
+  forest: readonly SubagentNode[],
+  pool: readonly CodexAnalyzedRef[],
+): Promise<ToolUsageStats> {
+  const refBySessionId = new Map(pool.map((p) => [p.analysis.sessionId, p.ref] as const));
+  try {
+    const mainTranscript = await codexTranscriptCached(found.ref);
+    if (mainTranscript.format !== "current") return found.analysis.toolUsageStats;
+    const descendants = await collectForestTranscripts(forest, refBySessionId);
+    return computeCodexForestToolUsageStats([
+      { thread: "main", calls: computeCodexToolUsageEntries(mainTranscript) },
+      ...descendants.map(({ thread, transcript }) => ({
+        thread,
+        calls: computeCodexToolUsageEntries(transcript),
+      })),
+    ]);
+  } catch {
+    return found.analysis.toolUsageStats;
   }
 }
 
@@ -761,6 +801,21 @@ export async function getCodexSessionBashStatsMainOnly(
   const pool = await listCodexAnalyzed();
   const found = pool.find((p) => p.analysis.sessionId === sessionId);
   return found?.analysis.bashStats;
+}
+
+/**
+ * This session's own main-thread-only `ToolUsageStats` (`analyzeCodexSession`'s
+ * value, no forest override) — the codex counterpart of the `get_tool_usage_stats`
+ * tool's `includeSubagents: false` recompute (`@junrei/server`'s `mcp.ts`),
+ * which for Codex is a cheap pool lookup: `found.analysis.toolUsageStats` IS
+ * already main-thread-only. `undefined` for an unknown session id.
+ */
+export async function getCodexSessionToolUsageStatsMainOnly(
+  sessionId: string,
+): Promise<ToolUsageStats | undefined> {
+  const pool = await listCodexAnalyzed();
+  const found = pool.find((p) => p.analysis.sessionId === sessionId);
+  return found?.analysis.toolUsageStats;
 }
 
 /**

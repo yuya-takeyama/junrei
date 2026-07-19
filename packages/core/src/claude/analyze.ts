@@ -48,6 +48,7 @@ import {
 } from "./session-data.js";
 import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 import { listSubagentRefs, type SubagentRef } from "./subagents.js";
+import { computeToolUsageStats } from "./tool-usage-stats.js";
 import { listWorkflowRuns, type WorkflowPhase, type WorkflowRun } from "./workflows.js";
 
 /** Sentinel owner id for nodes launched directly from the main transcript. */
@@ -159,10 +160,16 @@ export async function analyzeClaudeSession(
   // weighting — see `BashStatsThread.model`'s doc comment.
   const usage = computeUsage(data);
   const mainModel = dominantModelByInputTokens(usage.byModel);
-  const bashStats = computeBashStats([
+  // One thread list, both engines: `BashStatsThread` and `ToolUsageStatsThread`
+  // are structurally identical ({ thread, data, model? }), so the Bash-command
+  // engine and the cross-tool engine price against the exact same per-thread
+  // models (main's dominant-by-input-tokens model + each subagent's own).
+  const analysisThreads: BashStatsThread[] = [
     { thread: MAIN_OWNER, data, ...(mainModel !== undefined && { model: mainModel }) },
     ...subagentBashThreads,
-  ]);
+  ];
+  const bashStats = computeBashStats(analysisThreads);
+  const toolUsageStats = computeToolUsageStats(analysisThreads);
 
   const totalUsage = {
     inputTokens: usage.total.inputTokens + subagentTotals.inputTokens,
@@ -211,6 +218,7 @@ export async function analyzeClaudeSession(
     exploration: computeExploration(data),
     taskExecutions: computeTaskExecutions(data),
     bashStats,
+    toolUsageStats,
     fileAccess,
     fileAccessTruncated,
     ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),

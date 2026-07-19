@@ -19,6 +19,7 @@ import type {
   CodexTokenUsageRaw,
   CodexTranscript,
 } from "./parser.js";
+import { computeCodexToolUsageStats } from "./tool-usage-stats.js";
 
 export type { CodexRecord } from "./parser.js";
 
@@ -444,6 +445,14 @@ export function analyzeCodexSession(
   // models are a server-side concern (the forest is only known there) and
   // stay out of scope for this main-thread-only recompute.
   const bashStats = computeCodexBashStats(transcript, dominantModelByInputTokens(usage.byModel));
+  // Cross-tool usage — same main-thread-only, "overridden at serve time"
+  // pattern as `bashStats` above (`getCodexSession` re-derives the joint
+  // main+forest value once descendant threads are known), tagged with this
+  // session's own dominant-by-input-tokens model for $ weighting.
+  const toolUsageStats = computeCodexToolUsageStats(
+    transcript,
+    dominantModelByInputTokens(usage.byModel),
+  );
   const userTurnCount =
     eventUserMessageCount > 0 ? eventUserMessageCount : fallbackUserMessageCount;
   if (firstUserPrompt === undefined) {
@@ -523,6 +532,7 @@ export function analyzeCodexSession(
     ...(fileAccessOmittedCount !== undefined && { fileAccessOmittedCount }),
     skillInvocations,
     bashStats,
+    toolUsageStats,
     codex,
     ...(sessionMeta?.cwd !== undefined && { cwd: sessionMeta.cwd }),
     ...(repoRoot !== undefined && { repoRoot }),

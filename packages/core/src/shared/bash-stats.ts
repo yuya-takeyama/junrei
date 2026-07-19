@@ -357,7 +357,13 @@ const ORCHESTRATOR_THREAD = "main";
 
 const READ_LIKE_COMMANDS: ReadonlySet<string> = new Set(["cat", "head", "tail", "less", "more"]);
 
-function estimateTokens(chars: number): number {
+/**
+ * `Math.ceil(chars / 4)` — the rough char→token heuristic this whole module
+ * (and the parallel `./tool-usage-stats.ts` engine, which imports it rather
+ * than re-deriving it) uses; no real tokenizer runs. See the module doc
+ * comment.
+ */
+export function estimateTokens(chars: number): number {
   return Math.ceil(chars / 4);
 }
 

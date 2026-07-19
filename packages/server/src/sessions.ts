@@ -161,5 +161,6 @@ export {
   getCodexSessionBashStatsMainOnly,
   getCodexSessionRecordDetail,
   getCodexSessionToolCallDetail,
+  getCodexSessionToolUsageStatsMainOnly,
   getCodexTimeline,
 } from "./sources/codex.js";

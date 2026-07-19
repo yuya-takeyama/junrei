@@ -5,6 +5,7 @@ import {
   type ClaudeSessionAnalysis,
   type CodexToolCallRecord,
   computeBashStats,
+  computeToolUsageStats,
   computeTrends,
   durationBetween,
   type EvaluationTraceEvent,
@@ -29,6 +30,7 @@ import {
   summarizeToolInput,
   type ToolCall,
   type ToolCallDetail,
+  type ToolUsageStats,
 } from "@junrei/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -49,6 +51,7 @@ import {
   getCodexSessionBashStatsMainOnly,
   getCodexSessionRecordDetail,
   getCodexSessionToolCallDetail,
+  getCodexSessionToolUsageStatsMainOnly,
   getSession,
   getSessionData,
   getSessionRecordDetail,
@@ -896,6 +899,15 @@ const BASH_OPPORTUNITY_TEXT_MAX_CHARS = 2000;
 const GET_TOOL_CALLS_DEFAULT_LIMIT = 50;
 const GET_TOOL_CALLS_MAX_LIMIT = 200;
 
+// get_tool_usage_stats caps — the cross-tool ("Tools / All") sibling of the
+// get_bash_stats caps above. `byThread` reuses the same fixed
+// `BASH_STATS_BY_THREAD_CAP` (one row per thread-model, small by construction).
+const TOOL_USAGE_DEFAULT_TOP_TOOLS = 20;
+const TOOL_USAGE_MAX_TOP_TOOLS = 100;
+/** `heavyHitters` is already a fixed top-10 from `computeToolUsageStats`; this only lets a caller ask for fewer. */
+const TOOL_USAGE_DEFAULT_TOP_HEAVY_HITTERS = 10;
+const TOOL_USAGE_MAX_TOP_HEAVY_HITTERS = 10;
+
 /**
  * A list capped for the MCP response, alongside the exact pre-cap count and
  * an explicit `truncated` flag — the same "capped list must never read as
@@ -991,6 +1003,28 @@ function toBashStatsResponse(
       totalCount: cappedOpportunities.totalCount,
       truncated: cappedOpportunities.truncated,
     },
+  };
+}
+
+/**
+ * Shape one `ToolUsageStats` (the joint main+subagents value on the analysis,
+ * or a main-thread-only recompute) into the `get_tool_usage_stats` response —
+ * every list capped per `CappedList`'s contract. `totals` passes through
+ * unchanged; `byTool` is capped to `topTools`; `byThread` uses the same fixed
+ * `BASH_STATS_BY_THREAD_CAP` as `get_bash_stats` (small by construction);
+ * `heavyHitters` (already a fixed top-10 from the engine) is capped to
+ * `topHeavyHitters`.
+ */
+function toToolUsageStatsResponse(
+  stats: ToolUsageStats,
+  topTools: number,
+  topHeavyHitters: number,
+) {
+  return {
+    totals: stats.totals,
+    byTool: capList(stats.byTool, topTools),
+    byThread: capList(stats.byThread, BASH_STATS_BY_THREAD_CAP),
+    heavyHitters: capList(stats.heavyHitters, topHeavyHitters),
   };
 }
 
@@ -2232,6 +2266,132 @@ export function createMcpServer(): McpServer {
           includeSubagents: false,
           ...toBashStatsResponse(stats, cap, oppCap, wasteCap),
           ...(bashPercentile !== undefined && { bashPercentile }),
+        },
+        ["claude-session-jsonl"],
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_tool_usage_stats",
+    {
+      description:
+        'Cross-tool usage analytics for one session — the session-wide answer to "which TOOL ' +
+        'cost the most context, and who paid for it", complementing get_bash_stats (which drills ' +
+        "into Bash COMMANDS alone). Returns: totals (calls/errors/resultChars/estimatedTokens/" +
+        "estUsd across every tool); byTool[] — one row per tool (Read, Edit, Bash, WebFetch, " +
+        "Grep, a Codex shell/apply_patch/exec, …), each with its call/error counts, an " +
+        "errorCategories tally (file-not-found/string-not-found/command-failed/permission-denied/" +
+        "interrupted/timeout/other — the values sum to that tool's error count), resultChars, " +
+        "estimatedTokens, estUsd, sharePct (share of total result chars), and orchestratorSharePct " +
+        "(share of THIS tool's chars that sat in the main/orchestrator thread vs. a subagent) — " +
+        "SORTED BY estUsd DESC (unknown-price rows last); byThread[] — a per-thread money rollup " +
+        "(main vs. each subagent's own calls/chars/estUsd and its share of session chars vs. " +
+        "session $), the same shape get_bash_stats.byThread uses; and heavyHitters[] — the top 10 " +
+        "single calls by result size across EVERY tool and thread, each carrying its tool name, " +
+        "thread, model, source line, and stable id for drill-down (feed the id to get_tool_call). " +
+        "The Bash tool appears here as ONE aggregate row; get_bash_stats is its per-command " +
+        "drill-down (family/subcommand ranking, waste signals, background tasks, fix opportunities). " +
+        "EVERY dollar figure ($ on totals/byTool/byThread/heavyHitters) is an ESTIMATE from a " +
+        "fixed per-model pricing table applied to result-char counts at each thread's OWN model's " +
+        "INPUT rate (a tool result recurs as input context on every later turn), never a billed " +
+        "amount; estUsd is a PARTIAL sum that silently skips any call whose thread has no priced " +
+        "model, and is absent (never 0) when nothing anywhere could be priced. resultChars is " +
+        "EXACT (read from the record); estimatedTokens is a Math.ceil(resultChars / 4) HEURISTIC " +
+        "(no real tokenizer) — good for relative comparison, not exact accounting. Unlike " +
+        "get_bash_stats there is NO inputChars: a tool's input is its structured parameters, not " +
+        "context chars, so only result chars are summed (byThread carries inputChars: 0 purely to " +
+        "match the Bash byThread shape). These are observations, not judgments — interpretation is " +
+        "the caller's job. Every list beyond its cap reports totalCount and truncated alongside a " +
+        "(possibly shorter) items array, so a capped list never reads as complete. " +
+        "includeSubagents: false does NOT post-hoc filter the joint result (rankings/sharePct are " +
+        "computed jointly across every thread and can't be un-mixed) — it recomputes from the main " +
+        'transcript ALONE. Works for both Claude Code and Codex CLI sessions (source: "codex"). ' +
+        "Per-source limitation: a Codex errored call has no result TEXT to classify, so it tallies " +
+        "under errorCategories.other (its isError flag is still honest); a Codex local_shell_call's " +
+        'resultChars reflects only a synthesized "exited with code N" placeholder (excluded from ' +
+        "every estUsd sum), unlike Claude tool results and Codex function_call/custom_tool_call " +
+        "output, which carry real captured text. Every response includes sourceCompleteness — a " +
+        "machine-readable declaration of what the underlying session source cannot show; treat " +
+        "absent/not-recorded dimensions as unknowable from this data, not as evidence of absence.",
+      inputSchema: {
+        ...sessionRef,
+        includeSubagents: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true (main + every subagent thread, jointly). false recomputes " +
+              "main-transcript-only stats instead of filtering the joint result.",
+          ),
+        topTools: z
+          .number()
+          .int()
+          .min(1)
+          .max(TOOL_USAGE_MAX_TOP_TOOLS)
+          .optional()
+          .describe(
+            "Cap on the byTool list length " +
+              `(default ${TOOL_USAGE_DEFAULT_TOP_TOOLS}, max ${TOOL_USAGE_MAX_TOP_TOOLS})`,
+          ),
+        topHeavyHitters: z
+          .number()
+          .int()
+          .min(1)
+          .max(TOOL_USAGE_MAX_TOP_HEAVY_HITTERS)
+          .optional()
+          .describe(
+            "Cap on the heavyHitters list length " +
+              `(default ${TOOL_USAGE_DEFAULT_TOP_HEAVY_HITTERS}, ` +
+              `max ${TOOL_USAGE_MAX_TOP_HEAVY_HITTERS}; the engine already returns at most 10)`,
+          ),
+      },
+    },
+    async ({ source, sessionId, includeSubagents, topTools, topHeavyHitters }) => {
+      const toolsCap = topTools ?? TOOL_USAGE_DEFAULT_TOP_TOOLS;
+      const hitterCap = topHeavyHitters ?? TOOL_USAGE_DEFAULT_TOP_HEAVY_HITTERS;
+      const includeSub = includeSubagents ?? true;
+
+      if (source === "codex") {
+        const analysis = await getCodexSession(sessionId);
+        if (analysis === undefined) return notFound(sessionId);
+        // `found.analysis.toolUsageStats` IS already main-thread-only (see
+        // `getCodexSessionToolUsageStatsMainOnly`); the joint value is the
+        // forest-overridden `analysis.toolUsageStats`.
+        const stats = includeSub
+          ? analysis.toolUsageStats
+          : await getCodexSessionToolUsageStatsMainOnly(sessionId);
+        if (stats === undefined) return notFound(sessionId);
+        return jsonResult(
+          {
+            sessionId,
+            includeSubagents: includeSub,
+            ...toToolUsageStatsResponse(stats, toolsCap, hitterCap),
+          },
+          ["codex-session-jsonl"],
+        );
+      }
+
+      const analysis = await getSession(sessionId);
+      if (analysis === undefined) return notFound(sessionId);
+      if (includeSub) {
+        return jsonResult(
+          {
+            sessionId,
+            includeSubagents: true,
+            ...toToolUsageStatsResponse(analysis.toolUsageStats, toolsCap, hitterCap),
+          },
+          ["claude-session-jsonl"],
+        );
+      }
+
+      const data = await getSessionData(sessionId);
+      if (data === undefined) return notFound(sessionId);
+      const stats = computeToolUsageStats([{ thread: "main", data }]);
+      return jsonResult(
+        {
+          sessionId,
+          includeSubagents: false,
+          ...toToolUsageStatsResponse(stats, toolsCap, hitterCap),
         },
         ["claude-session-jsonl"],
       );

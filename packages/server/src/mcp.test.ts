@@ -2263,6 +2263,162 @@ describe("MCP tools", () => {
     });
   });
 
+  describe("get_tool_usage_stats", () => {
+    it("returns joint cross-tool rankings (byTool sorted by estUsd, byThread, heavyHitters) by default", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        sessionId: string;
+        includeSubagents: boolean;
+        totals: {
+          calls: number;
+          errors: number;
+          resultChars: number;
+          estimatedTokens: number;
+          estUsd?: number;
+        };
+        byTool: {
+          items: Array<{
+            name: string;
+            calls: number;
+            errors: number;
+            errorCategories: Record<string, number>;
+            estUsd?: number;
+            sharePct: number;
+          }>;
+          totalCount: number;
+          truncated: boolean;
+        };
+        byThread: { items: Array<{ thread: string; model?: string; inputChars: number }> };
+        heavyHitters: {
+          items: Array<{ tool: string; thread: string; id: string; resultChars: number }>;
+        };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+
+      expect(body.includeSubagents).toBe(true);
+      // No inputChars on totals (tool inputs are params, not context chars).
+      expect(body.totals).not.toHaveProperty("inputChars");
+      expect(body.totals.estUsd).toBeGreaterThan(0);
+
+      // The Bash aggregate row matches get_bash_stats' 3 calls / 2 errors, with
+      // the same command-failed classification.
+      const bash = body.byTool.items.find((t) => t.name === "Bash");
+      expect(bash).toMatchObject({ calls: 3, errors: 2 });
+      expect(bash?.errorCategories["command-failed"]).toBe(2);
+
+      // byTool sorted by estUsd desc (priced rows lead).
+      const usds = body.byTool.items
+        .map((t) => t.estUsd)
+        .filter((v): v is number => v !== undefined);
+      expect([...usds]).toEqual([...usds].sort((a, b) => b - a));
+
+      // byThread carries the subagent thread (it issues Read but no Bash), with
+      // inputChars always 0 to match the Bash byThread shape.
+      const threads = body.byThread.items.map((t) => t.thread);
+      expect(threads).toContain("main");
+      expect(threads).toContain("aaaa111122223333f");
+      for (const row of body.byThread.items) expect(row.inputChars).toBe(0);
+
+      expect(body.heavyHitters.items.length).toBeGreaterThan(0);
+      expect(body.heavyHitters.items[0]).toMatchObject({
+        tool: expect.any(String),
+        thread: expect.any(String),
+        id: expect.any(String),
+      });
+
+      expect(body.sourceCompleteness.sources).toEqual([
+        { source: "claude-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+    });
+
+    it("caps byTool to topTools while totalCount/truncated stay accurate", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topTools: 1 },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        byTool: { items: unknown[]; totalCount: number; truncated: boolean };
+      };
+      expect(body.byTool.items).toHaveLength(1);
+      expect(body.byTool.totalCount).toBeGreaterThan(1);
+      expect(body.byTool.truncated).toBe(true);
+    });
+
+    it("caps heavyHitters to topHeavyHitters while totalCount/truncated stay accurate", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topHeavyHitters: 1 },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        heavyHitters: { items: unknown[]; totalCount: number; truncated: boolean };
+      };
+      expect(body.heavyHitters.items).toHaveLength(1);
+      expect(body.heavyHitters.totalCount).toBeGreaterThan(1);
+      expect(body.heavyHitters.truncated).toBe(true);
+    });
+
+    it("includeSubagents: false recomputes main-transcript-only stats (drops the subagent thread)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, includeSubagents: false },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        includeSubagents: boolean;
+        byThread: { items: Array<{ thread: string }> };
+      };
+      expect(body.includeSubagents).toBe(false);
+      // Only the main thread remains — the subagent's Read calls are gone.
+      expect(body.byThread.items.map((t) => t.thread)).toEqual(["main"]);
+    });
+
+    it("works for a Codex session and honors includeSubagents: false", async () => {
+      client = await connect();
+      const joint = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(joint.isError).not.toBe(true);
+      const jointBody = JSON.parse(textOf(joint)) as {
+        byTool: { items: Array<{ name: string }> };
+        heavyHitters: { items: Array<{ thread: string }> };
+        sourceCompleteness: { sources: Array<{ source: string }> };
+      };
+      expect(jointBody.byTool.items.length).toBeGreaterThan(0);
+      expect(jointBody.sourceCompleteness.sources).toEqual([
+        { source: "codex-session-jsonl", dimensions: expect.any(Object) },
+      ]);
+
+      const mainOnly = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID, includeSubagents: false },
+      });
+      expect(mainOnly.isError).not.toBe(true);
+      const mainOnlyBody = JSON.parse(textOf(mainOnly)) as { includeSubagents: boolean };
+      expect(mainOnlyBody.includeSubagents).toBe(false);
+    });
+
+    it("404s clearly for an unknown session id", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_tool_usage_stats",
+        arguments: { source: "claude-code", sessionId: "does-not-exist" },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("Session not found");
+    });
+  });
+
   describe("get_bash_stats / get_tool_calls — isolated fixture with a subagent Bash call", () => {
     // The shared CLAUDE_SESSION_ID fixture's only subagent carries no Bash
     // calls (see the comment on get_bash_stats' first test above), so it
