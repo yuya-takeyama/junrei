@@ -19,8 +19,15 @@ import {
 interface Props {
   sessionRef: SessionRef;
   line: number;
-  /** Subagent id to scope the fetch to, when opened from an agent-scoped timeline (unused today —
-   *  the Timeline lens only ever shows the main session — but the API already supports it). Claude-only. */
+  /** Claude subagent id to scope the fetch to (a Claude subagent is a sidecar
+   *  transcript, resolved via `?agent=` on the parent session's record
+   *  endpoint — see `fetchRecordDetail`). Passed by `AgentShell` (its own
+   *  agent-scoped record slide-over) and by `SessionShell` when a session-page
+   *  link — e.g. the Bash lens's Fix Queue evidence rows — opens a record
+   *  that belongs to a subagent thread (see `router.ts`'s `recordPath` doc
+   *  comment). A Codex subagent is a full sibling session instead, so it's
+   *  addressed by swapping `sessionRef` to that session's own id rather than
+   *  through this prop — see `SessionShell`'s `recordSessionRef`. */
   agent?: string;
   /** Path to navigate to on close (the current session/lens with no `?record=` param). */
   closeHref: string;

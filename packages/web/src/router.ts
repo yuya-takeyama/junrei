@@ -224,8 +224,9 @@ export function legacyClaudeSessionRedirectTarget(
 }
 
 /**
- * Build the path (+ `record` search param) that opens the record slide-over
- * (L3, screen 8) for a given source line — see `RecordDetail.tsx`.
+ * Build the path (+ `record` search param, and an optional `agent` search
+ * param) that opens the record slide-over (L3, screen 8) for a given source
+ * line — see `RecordDetail.tsx`.
  *
  * The record slide-over is addressed with a `?record=<line>` query segment
  * appended to the session path (e.g. `/session/claude-code/id/timeline?record=42`)
@@ -235,9 +236,22 @@ export function legacyClaudeSessionRedirectTarget(
  * Back button closes it; (3) the lens path segment is untouched, so the
  * underlying lens component never unmounts and its scroll position survives
  * open/close, satisfying "without losing place".
+ *
+ * `agentId`, when given, adds a sibling `&agent=<agentId>` param so the
+ * SESSION page (not the agent shell) can open a subagent's own record
+ * in-place — e.g. the Bash lens's Fix Queue evidence rows rank calls across
+ * every thread (see `HeavyHittersTable`'s doc comment), so most of its `L{N}`
+ * links point at a subagent line. Routing those through `agentRecordPath`
+ * (which navigates to the agent shell) used to lose the Fix Queue's own
+ * context; carrying the agent id as a query param instead keeps the user on
+ * the session page while still scoping the record fetch correctly (see
+ * `fetchRecordDetail`'s optional `agent` argument). Distinct from
+ * `agentRecordPath`, which addresses the agent shell's OWN record slide-over
+ * (no `agent` query param needed there — the whole route is already agent-scoped).
  */
-export function recordPath(ref: SessionRef, lens: Lens, line: number): string {
-  return `${sessionPath(ref, lens)}?record=${line}`;
+export function recordPath(ref: SessionRef, lens: Lens, line: number, agentId?: string): string {
+  const base = `${sessionPath(ref, lens)}?record=${line}`;
+  return agentId !== undefined ? `${base}&agent=${encodeURIComponent(agentId)}` : base;
 }
 
 /**
@@ -247,6 +261,20 @@ export function recordPath(ref: SessionRef, lens: Lens, line: number): string {
 export function parseRecordParam(searchParams: URLSearchParams): number | undefined {
   const raw = searchParams.get("record");
   return raw !== null && /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : undefined;
+}
+
+/**
+ * Parses the `agent` search param that rides alongside `record` on the
+ * SESSION page (see `recordPath`'s doc comment) — the subagent id whose
+ * transcript the open record line belongs to. `undefined` when absent, same
+ * "never break on a stale URL" convention every other param parser here
+ * follows (an empty string could theoretically round-trip through
+ * `URLSearchParams`, but `recordPath` never emits one, so this only guards
+ * against a hand-edited URL).
+ */
+export function parseRecordAgentParam(searchParams: URLSearchParams): string | undefined {
+  const raw = searchParams.get("agent");
+  return raw !== null && raw !== "" ? raw : undefined;
 }
 
 /**

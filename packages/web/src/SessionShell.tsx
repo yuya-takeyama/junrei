@@ -11,10 +11,10 @@ import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
 import {
-  agentRecordPath,
   isLegacyClaudeProjectScopedUrl,
   LENSES_BY_SOURCE,
   normalizeLens,
+  parseRecordAgentParam,
   parseRecordParam,
   recordPath,
   sessionPath,
@@ -186,6 +186,7 @@ export function SessionShell({ source }: Props) {
   const ref: SessionRef = isCodex ? { source: "codex", id } : { source: "claude-code", id };
   const lens = normalizeLens(isLegacyProjectScopedUrl ? undefined : lensParam);
   const record = parseRecordParam(searchParams);
+  const recordAgent = parseRecordAgentParam(searchParams);
   const navigate = useNavigate();
 
   const [session, setSession] = useState<AnySessionJson | null>(null);
@@ -193,6 +194,20 @@ export function SessionShell({ source }: Props) {
   const [copied, setCopied] = useState(false);
   const recordOpen = record !== undefined;
   const closeRecordHref = sessionPath(ref, lens);
+
+  // Where the open record actually gets fetched from — mirrors AgentShell's
+  // `agentScopedRef`/`agentParam` split (see its doc comment), but keyed off
+  // the `?agent=` query param (`recordAgent`) instead of a fixed route param,
+  // since here the record can belong to EITHER the main session or a
+  // subagent's own thread while the URL itself stays on this session page. A
+  // Claude subagent is a sidecar scoped by an `?agent=` query param on the
+  // SAME session id (`fetchRecordDetail`'s `agentId` argument); a Codex
+  // subagent is a full sibling session in its own right, so its record can
+  // only be fetched by swapping in ITS session id — the codex record route
+  // takes no `agent` query at all (see `app.ts`).
+  const recordSessionRef: SessionRef =
+    isCodex && recordAgent !== undefined ? { source: "codex", id: recordAgent } : ref;
+  const recordAgentParam = isCodex ? undefined : recordAgent;
 
   // `ref` is rebuilt fresh (a new object) on every render — depend on its
   // primitive parts (`source`/`id`, already plain locals above) instead so
@@ -301,26 +316,25 @@ export function SessionShell({ source }: Props) {
             onOpenRecord={(line, agentId) => {
               // Heavy hitters rank Bash calls across every thread (see
               // `HeavyHittersTable`'s doc comment), so most rows belong to
-              // a subagent — routing every click through the main-session
-              // `recordPath` 404s for those (the server's `/record/:line`
-              // route resolves lines within ONE transcript, scoped by its
-              // `?agent=` query param — see `app.ts`). `agentRecordPath`
-              // targets the agent shell at this same "bash" lens value;
-              // that shell has no bash content of its own yet (shows a
-              // placeholder), but the record slide-over itself renders
-              // unconditionally there regardless of which lens is active
-              // (see `AgentShell.tsx`), so it still opens correctly on top.
-              navigate(
-                agentId !== undefined
-                  ? agentRecordPath(ref, agentId, lens, line)
-                  : recordPath(ref, lens, line),
-              );
+              // a subagent. Opening those used to navigate to the agent
+              // shell (`agentRecordPath`), which lost whatever context the
+              // click came from (e.g. the Fix Queue's evidence list).
+              // `recordPath`'s optional agent argument carries the subagent
+              // id as a query param instead, so we stay on THIS page — see
+              // `recordSessionRef`/`recordAgentParam` above for how that
+              // param gets resolved back into the right fetch per source.
+              navigate(recordPath(ref, lens, line, agentId));
             }}
           />
         )}
       </div>
       {record !== undefined && (
-        <RecordDetail sessionRef={ref} line={record} closeHref={closeRecordHref} />
+        <RecordDetail
+          sessionRef={recordSessionRef}
+          line={record}
+          {...(recordAgentParam !== undefined && { agent: recordAgentParam })}
+          closeHref={closeRecordHref}
+        />
       )}
     </div>
   );

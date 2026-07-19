@@ -16,6 +16,7 @@ import {
   normalizeLens,
   parseDayParam,
   parseListPage,
+  parseRecordAgentParam,
   parseRecordParam,
   parseRepoParam,
   parseSourceTab,
@@ -124,6 +125,24 @@ describe("recordPath", () => {
   it("omits the lens segment for overview but keeps the record param, Codex source", () => {
     expect(recordPath({ source: "codex", id: "abc123" }, "overview", 7)).toBe(
       "/session/codex/abc123?record=7",
+    );
+  });
+
+  it("omits the agent param when absent", () => {
+    expect(recordPath({ source: "claude-code", id: "abc123" }, "bash", 42)).toBe(
+      "/session/claude-code/abc123/bash?record=42",
+    );
+  });
+
+  it("appends an agent param after record, when given — Fix Queue evidence rows for a subagent thread stay on the session page (see the doc comment above)", () => {
+    expect(recordPath({ source: "claude-code", id: "abc123" }, "bash", 42, "agent-a")).toBe(
+      "/session/claude-code/abc123/bash?record=42&agent=agent-a",
+    );
+  });
+
+  it("percent-encodes the agent param", () => {
+    expect(recordPath({ source: "codex", id: "abc123" }, "bash", 7, "sub agent")).toBe(
+      "/session/codex/abc123/bash?record=7&agent=sub%20agent",
     );
   });
 });
@@ -339,6 +358,23 @@ describe("parseRecordParam", () => {
   it("returns undefined when the param is absent or non-numeric", () => {
     expect(parseRecordParam(new URLSearchParams())).toBeUndefined();
     expect(parseRecordParam(new URLSearchParams("record=abc"))).toBeUndefined();
+  });
+});
+
+describe("parseRecordAgentParam", () => {
+  it("parses a bare agent id", () => {
+    expect(parseRecordAgentParam(new URLSearchParams("record=42&agent=agent-a"))).toBe("agent-a");
+  });
+
+  it("returns undefined when the param is absent or empty", () => {
+    expect(parseRecordAgentParam(new URLSearchParams("record=42"))).toBeUndefined();
+    expect(parseRecordAgentParam(new URLSearchParams("record=42&agent="))).toBeUndefined();
+  });
+
+  it("round-trips through recordPath's own agent-id encoding", () => {
+    const path = recordPath({ source: "claude-code", id: "abc123" }, "bash", 42, "sub agent");
+    const search = path.slice(path.indexOf("?"));
+    expect(parseRecordAgentParam(new URLSearchParams(search))).toBe("sub agent");
   });
 });
 
