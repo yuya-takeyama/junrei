@@ -429,9 +429,29 @@ async function analyzeSubagents(
     // leaves them "unresolved". Override from the run-state's own progress
     // entry instead — the ONLY evidence source that exists for these agents.
     if (node.workflowRunId !== undefined) {
-      const progress = workflowRunsById.get(node.workflowRunId)?.agents.get(node.agentId);
+      const run = workflowRunsById.get(node.workflowRunId);
+      const progress = run?.agents.get(node.agentId);
       const resolved = resolveWorkflowAgentStatus(progress?.state);
       if (resolved !== undefined) node.status = resolved;
+      // A run that died (killed/cancelled/errored) takes its still-unfinished
+      // agents down with it: Claude Code doesn't rewrite a killed agent's own
+      // progress `state` when the run dies (observed: agents left at
+      // "progress" in a run whose own `status` is "killed"), so
+      // `resolveWorkflowAgentStatus` above leaves those nodes "unresolved" —
+      // and the tree would otherwise render a perpetual bogus "run" chip for
+      // them for as long as the SESSION stays live, even though the run
+      // itself is dead. An agent that DID resolve to "completed" (it finished
+      // right before the kill) is left alone — only unfinished agents inherit
+      // the run's fate. A run that finished normally ("completed") never
+      // matches this regex, so a stale "progress" entry under a completed run
+      // keeps today's "unresolved" fallback unchanged.
+      if (
+        node.status !== "completed" &&
+        run?.status !== undefined &&
+        /error|fail|cancel|kill/i.test(run.status)
+      ) {
+        node.status = "failed";
+      }
     }
   }
   const byStart = (a: SubagentNode, b: SubagentNode) =>
@@ -562,30 +582,50 @@ function findWorkflowLaunch(
  * `<workflowName>-<runId>.js` (see `findWorkflowLaunch`'s doc comment for a
  * real example), so the script's own basename is the one surviving trace of
  * the name while the run is in flight. `runId` is regex-escaped before being
- * spliced into the pattern — run ids aren't guaranteed regex-safe. Returns
- * `undefined` (never a guess from the run id itself) when the launch's result
- * text doesn't contain that pattern at all — an older harness version, or a
- * launch that couldn't be matched.
+ * spliced into the pattern — run ids aren't guaranteed regex-safe.
+ *
+ * A `resumeFromRunId` resume complicates the exact match: it launches under a
+ * NEW runId but REUSES the original run's already-generated script file
+ * unchanged, so the resumed launch's `tool_result` embeds the ORIGINAL run's
+ * id in the "Script file:" line's basename, never the new one (observed: a
+ * launch whose "Transcript dir:" line carries the new run `wf_9bbab5e3-d95`
+ * but whose "Script file:" line carries
+ * `pr1-core-mcp-wf_9b53e6c0-ddb.js` — the ORIGINAL run's basename). The exact
+ * `<name>-<runId>.js` match below misses this case entirely (the current
+ * `runId` never appears in the script filename), so a fallback strips ANY
+ * trailing `-wf_...js` run-id suffix instead of requiring it to match this
+ * `runId` specifically. This is safe here because `findWorkflowLaunch` (the
+ * only caller) already matched `resultText` to `runId` some OTHER way (the
+ * new run's own transcript dir / "Run ID:" line appearing elsewhere in the
+ * same text) — the single `.js` mention left in that text is always the
+ * reused script, so taking its name is correct even though its own suffix is
+ * a different run id.
+ *
+ * Returns `undefined` (never a guess from the run id itself) when NEITHER
+ * pattern matches at all — an older harness version, or a launch that
+ * couldn't be matched.
  */
 function extractWorkflowScriptName(resultText: string, runId: string): string | undefined {
   const escapedRunId = runId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = new RegExp(`([\\w-]+)-${escapedRunId}\\.js`).exec(resultText);
-  return match?.[1];
+  const exact = new RegExp(`([\\w-]+)-${escapedRunId}\\.js`).exec(resultText);
+  if (exact !== null) return exact[1];
+  return /([\w-]+)-wf_[a-z0-9-]+\.js/.exec(resultText)?.[1];
 }
 
 /**
  * Map a workflow run-state `workflow_agent` progress entry's `state` to
  * `SubagentStatus` — the only status evidence that exists for a
  * Workflow-spawned agent (see the override site in `analyzeSubagents`
- * above). `"done"` -> completed; anything error/failure/cancellation-shaped
- * -> failed; every other value (queued, running, ...) -> `undefined`, which
- * leaves the node's existing "unresolved" status untouched rather than
- * guessing.
+ * above). `"done"` -> completed; anything
+ * error/failure/cancellation/kill-shaped -> failed (observed run-state
+ * values so far: "completed", "killed"); every other value (queued,
+ * running, ...) -> `undefined`, which leaves the node's existing
+ * "unresolved" status untouched rather than guessing.
  */
 function resolveWorkflowAgentStatus(state: string | undefined): SubagentStatus | undefined {
   if (state === undefined) return undefined;
   if (state === "done") return "completed";
-  if (/error|fail|cancel/i.test(state)) return "failed";
+  if (/error|fail|cancel|kill/i.test(state)) return "failed";
   return undefined;
 }
 
