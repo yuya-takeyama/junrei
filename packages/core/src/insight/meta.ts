@@ -3,7 +3,7 @@
  * dependency-free so both the pure builders (`briefing`/`sessionInsight`/…)
  * and the fs-backed store can attach the same envelope.
  */
-import type { InsightMeta } from "./types.js";
+import type { InsightMeta, TruncatedField } from "./types.js";
 
 /**
  * Rough token estimate: `JSON.stringify(value).length / 4`. Deliberately the
@@ -26,16 +26,21 @@ export function approxTokens(value: unknown): number {
  * `payload` as passed (i.e. BEFORE `_meta` is attached — attach the returned
  * value to a copy that does not include it, or accept that the figure omits
  * `_meta`'s own small size, which is the convention here). Optional
- * `truncated`/`nextSteps` are included only when meaningful, honoring
- * `exactOptionalPropertyTypes` (omitted, never set to `undefined`).
+ * `truncated`/`truncatedFields`/`nextSteps` are included only when
+ * meaningful, honoring `exactOptionalPropertyTypes` (omitted, never set to
+ * `undefined`). A non-empty `truncatedFields` always forces `truncated: true`
+ * — the coarse flag and the detailed list can never disagree — even if the
+ * caller didn't separately pass `opts.truncated`.
  */
 export function buildMeta(
   payload: unknown,
-  opts: { truncated?: boolean; nextSteps?: string[] } = {},
+  opts: { truncated?: boolean; truncatedFields?: TruncatedField[]; nextSteps?: string[] } = {},
 ): InsightMeta {
+  const hasTruncatedFields = opts.truncatedFields !== undefined && opts.truncatedFields.length > 0;
   return {
     approxTokens: approxTokens(payload),
-    ...(opts.truncated === true && { truncated: true }),
+    ...((opts.truncated === true || hasTruncatedFields) && { truncated: true }),
+    ...(hasTruncatedFields && { truncatedFields: opts.truncatedFields }),
     ...(opts.nextSteps !== undefined && opts.nextSteps.length > 0 && { nextSteps: opts.nextSteps }),
   };
 }

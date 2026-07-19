@@ -61,6 +61,7 @@ export type {
   LearningSource,
   LearningStatus,
   LearningVerification,
+  TruncatedField,
   WasteItem,
 } from "./types.js";
 export type { OversizedReturn, WasteProvenance } from "./waste.js";

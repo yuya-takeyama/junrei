@@ -15,12 +15,14 @@ describe("findPatterns text", () => {
     expect(result.query).toBe("foo");
     expect(result.textHits).toHaveLength(10);
     expect(result._meta.truncated).toBe(true);
+    expect(result._meta.truncatedFields).toEqual([{ path: "textHits", shown: 10, total: 15 }]);
   });
 
   it("returns all hits in full detail", () => {
     const result = findPatterns({ kind: "text", detail: "full", hits });
     expect(result.textHits).toHaveLength(15);
     expect("truncated" in result._meta).toBe(false);
+    expect("truncatedFields" in result._meta).toBe(false);
   });
 
   it("supplies nextSteps when there are no hits", () => {

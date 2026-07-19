@@ -265,6 +265,32 @@ describe("buildBriefing", () => {
     });
     expect(briefing.waste).toHaveLength(5);
     expect(briefing._meta.truncated).toBe(true);
+    expect(briefing._meta.truncatedFields).toContainEqual({
+      path: "waste",
+      shown: 5,
+      total: 8,
+    });
+  });
+
+  it("reports a truncatedFields entry for a full-detail cap (waste beyond the 50-item full-detail limit)", () => {
+    const report = trends([makeItem({ sessionId: "s1" })]);
+    const opportunities = Array.from({ length: 55 }, (_, i) =>
+      makeOpportunity({ title: `op-${i}`, estUsdSaved: 55 - i }),
+    );
+    const briefing = buildBriefing({
+      days: 7,
+      detail: "full",
+      trends: report,
+      sessions: [{ source: "claude-code", sessionId: "s1", opportunities }],
+      learnings: [],
+    });
+    expect(briefing.waste).toHaveLength(50);
+    expect(briefing._meta.truncated).toBe(true);
+    expect(briefing._meta.truncatedFields).toContainEqual({
+      path: "waste",
+      shown: 50,
+      total: 55,
+    });
   });
 
   it("gives 'no sessions' nextSteps when the window is empty", () => {
