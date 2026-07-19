@@ -3,6 +3,7 @@ import type { CodexSessionAnalysis } from "./codex/analyze.js";
 
 export * from "./claude/index.js";
 export * from "./codex/index.js";
+export * from "./insight/index.js";
 export * from "./shared/index.js";
 
 /** Either harness's analysis, discriminated on `source`. */
