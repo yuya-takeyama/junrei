@@ -1,0 +1,16 @@
+{
+  "id": "L-20260719-6-git-diff-head-path-path-repeated-acros",
+  "createdAt": "2026-07-19T17:05:27.909Z",
+  "repo": "junrei",
+  "sourceSessions": [
+    {
+      "source": "claude-code",
+      "sessionId": "77bd3b76-fa3a-4ad2-b3e4-d05e375c7ad2"
+    }
+  ],
+  "finding": "6× \"git diff HEAD -- <PATH> <PATH>\" repeated across 3 threads",
+  "change": "Batch or cache `git diff HEAD -- <PATH> <PATH>` in 3 threads — it ran 6 times with the same shape; combine the calls into one, or reuse the first result instead of re-running it.",
+  "status": "open",
+  "proposedBy": "agent",
+  "expectedEffect": "Save ~$0.04 of avoidable spend."
+}

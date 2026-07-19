@@ -1,169 +1,215 @@
 ---
 name: junrei-session-analysis
-description: Evidence-grade methodology for analyzing, auditing, or retrospecting a Claude Code or Codex agent session over Junrei's MCP tools. Use whenever asked to analyze/review/retrospect an agent session, investigate cost/behavior/looping/delegation, or produce an evaluation report grounded in Junrei data. Encodes the tool order, provenance-citation rule, confidence-class trust order, and truncation handling proven by the Goshuin milestone's fresh-context MCP-only acceptance test — load it before drafting any report.
+description: Evidence-grade methodology for analyzing, auditing, or retrospecting a Claude Code or Codex agent session over Junrei's MCP tools, and for closing the self-improvement loop (record a fix, check whether it helped). Use whenever asked to analyze/review/retrospect an agent session, investigate cost/behavior/looping/delegation, propose or record a learning, or produce an evaluation grounded in Junrei data. Encodes the six-tool loop order, the provenance-citation rule, the confidence-class trust order, and truncation handling. Load it before drafting any analysis or logging any learning.
 ---
 
 # Junrei Session Analysis
 
-Junrei's MCP tools return quantitative data and explicit completeness
-declarations — never judgments. This skill is the operational playbook for
-turning that data into an evidence-grade analysis: what order to call tools
-in, how to cite evidence, and how to avoid the specific mistakes the Goshuin
-milestone's blind-spot metadata (`sourceCompleteness`) and confidence classes
-(`get_reconstructed_request`) exist to prevent.
+Junrei's MCP surface is a six-tool **self-improvement loop**, not a data dump.
+Every tool returns conclusion-first, quantitative data plus an explicit `_meta`
+envelope (`approxTokens`, optional `truncated`, and `nextSteps` that never
+dead-end) — never a judgment. This skill is the operational playbook for
+turning that data into an evidence-grade analysis and for driving the loop:
+what order to call the tools in, how to cite evidence, and how to avoid the
+mistakes the truncation flags, `notAvailable` markers, and diagnostic
+confidence classes exist to prevent.
+
+The loop the surface is built around:
+
+```
+briefing  ──▶  analyze_session  ──▶  log_learning  ──▶  review_learnings
+(what's       (why, for one       (record the       (did the change
+ wrong)        session)            fix as a          help — before/after)
+                                   learning)
+      find_patterns ─ generalize a single finding to a pattern
+      get_evidence  ─ quote the ground-truth behind any claim
+```
 
 ## When to use
 
 Any time you are asked to analyze, audit, review, retrospect, or "grade" an
-agent session (yours or another agent's) using Junrei — cost breakdowns,
-"did it follow instructions", "why did it loop", "where did the budget go",
-delegation quality, or a structured report for a human or another system.
-Not needed for a single quick lookup (e.g. "what's this session's cost")
-that doesn't produce a written analysis.
+agent session (yours or another agent's) using Junrei — cost breakdowns, "did
+it follow instructions", "why did it loop", "where did the budget go",
+delegation quality — OR to propose/record a fix and later check whether it
+worked. Not needed for a single quick lookup (e.g. "what's this session's
+cost") that produces no written analysis and no learning.
 
 ## Tool order
 
 Work top-down; stop as soon as you have enough evidence for the question
-asked. Each step's output tells you whether the next step is worth calling.
+asked. Each tool's `_meta.nextSteps` tells you what to call next, and each
+tool's payload tells you whether the next step is worth it.
 
-1. **`get_session_summary`** — cost/tokens per model, delegation split, tool
-   error categories, exploration profile. The overview everything else
-   refines.
-2. **`get_first_prompt`** — the original task. Read this before judging
-   whether anything the session did was "correct" — quantitative data has no
-   opinion on intent.
-3. **`get_subagent_tree`** — delegation structure, per-agent cost/tokens,
-   `workflowRuns`. Skip if `subagentCount` is 0.
-4. **`get_context_timeline`** / **`find_repetitions`** / **`get_task_executions`**
-   — pick based on the question: context growth and compactions; loop/
-   duplicate-call detection; the Background-tasks-panel view of every Bash
-   and Agent run. These are observations, not verdicts — a repetition may be
-   intentional (e.g. polling); say so rather than asserting "wasteful".
-5. **Drill down** with **`get_records`** (bulk, by line number — up to 50 at
-   once) or **`get_tool_call`** (one `toolUseId`, call + result as a unit,
-   with full tool-result text recovery past the log's own capture cap) —
-   this is where a claim earns its provenance citation (see below). Never
-   assert what a tool call did or returned without having actually fetched
-   it through one of these two.
-6. **`get_reconstructed_request`** — the action space (system prompt, tool
-   schemas, generation params) for one main-loop request, when the question
-   is about what the model could see/do, not just what it did. Read the
-   confidence-class rules below before trusting any field here.
-7. **`get_session_observability`** / **`get_actual_request`** /
-   **`get_hidden_calls`** — the opt-in OTel and wire-capture channels.
-   ALWAYS check the tool's own declared availability first
-   (`otelAvailable`/`captureAvailable`) — a `false` here is a normal,
-   expected outcome for most sessions (both channels are off by default),
-   not a fetch failure. Don't ask "why is this false" — just fall back to
-   the pricing-table estimate / log-only evidence and say so.
-8. **`export_evaluation_trace`** — once findings are settled and the target
-   is an external eval pipeline or LLM-judge rather than a chat response:
-   the merged, provenance-carrying event stream (`gen_ai.*`/`junrei.*`),
-   with `enrichment.otel`/`enrichment.captures` declaring what did and
-   didn't contribute. Prefer the narrower tools above for an interactive
-   analysis — this is the "hand the whole thing to another system" step.
+1. **`briefing`** — START HERE. The morning paper for a repo (or all repos):
+   a conclusion-first roll-up of the last `days` days (default 7). Returns a
+   period `summary` (`costUsd`, `sessionCount`, `wasteUsd`, `wasteCount`,
+   `wasteShareOfCost`, `cacheHitRate`, `delegationShare`, each with a
+   previous-window `delta`), a dollar-ranked `waste[]` (each item has a
+   `class`, `title`, copy-ready `fix`, optional `impactUsd`, and
+   `provenance.sessionId`), `wins[]` (delegation patterns that are working),
+   the learning-ledger standing (`learnings.open/applied/verified/rejected`
+   plus `recent[]`), a `dailyCosts[]` series, and `topSessions` by cost.
+   Params: `repo?` (a bare repo name like `junrei`, an absolute repoRoot, or a
+   fallback bucket key — omit for all repos; a bare name matching several repos
+   comes back as an error listing the candidates), `days?`, `detail?`
+   (`concise` default | `full`).
+2. **`analyze_session`** — the why, for ONE session. Params: `source`
+   (`claude-code` | `codex`), `sessionId`, `detail?` (`concise` | `full`).
+   Returns a `summary` (`headline`, `costUsd`, `costIsComplete`, `models`,
+   `delegationShare`), `costDrivers[]` (per-thread `{thread, model?, estUsd?,
+   resultChars, charsSharePct}`, priced-desc), the same `waste[]` shape briefing
+   uses, a `delegation` health read (`mainCostShare`, `subagentCostShare`,
+   `subagentCount`, `models`, `oversizedReturnCount`), and
+   `recommendations[]` — each carrying a ready-to-submit `logLearningCall`
+   object (`finding`, `change`, `expectedEffect?`, `sourceSessions[]`) so
+   acting on it is a single `log_learning` call. Read `briefing`'s top waste
+   session's `firstPrompt` context in mind: quantitative data has no opinion on
+   intent, so know the task before judging any behavior "wrong".
+3. **`get_evidence`** — the drill-down, ONLY for a claim that needs
+   ground-truth. Params: `source`, `sessionId`, a single `select` shape, an
+   optional `agentId` (Claude only — scope into one subagent's own transcript,
+   from a `tool_calls` `thread`), and `detail?` (`full` raises the per-field
+   truncation cap). `select.type` is one of:
+   - `record` — one 1-based JSONL `line`'s full detail.
+   - `tool_call` — one call+result by `toolUseId` (call and result as a unit,
+     with full tool-result text recovery past the log's own capture cap).
+   - `tool_calls` — a filterable listing (`toolName?`, `limit?`) to DISCOVER a
+     `toolUseId`; each row carries `toolUseId`, `line`, `thread`, `status`,
+     `inputChars`, `resultChars`, `inputSummary` (and `family`/`subcommand`
+     for Bash).
+   - `first_prompt` — the original task (`firstUserPrompt`, `title`,
+     `userTurnCount`).
+   - `task_executions` — every Bash/Agent run (**Claude only**).
+   The result wraps the underlying getter's own payload under `data`; a kind a
+   harness can't provide comes back with `notAvailable: true` (never an error).
+4. **`log_learning`** — record (or update) a learning in the repo-local ledger
+   under `<repoRoot>/.junrei/learnings/<id>.json`. This is the ONLY tool that
+   WRITES a learning, and it is an **upsert**:
+   - **Create** — omit `id`, pass `finding` + `change` (an
+     `analyze_session` recommendation's `logLearningCall` fills these; add
+     `expectedEffect?`). The repoRoot is `repoPath` if given, else derived from
+     the `source` + `sessionId` session's cwd. Pass `source` + `sessionId` to
+     attach provenance. `proposedBy` defaults to `agent`.
+   - **Update** — pass the `id` plus a `status` transition
+     (`open` → `applied` → `verified`/`rejected`; `applied` stamps `appliedAt`,
+     `verified`/`rejected` stamps `resolvedAt`) and/or a `verification`
+     measurement (`{metric, before, after, windowDays, note?}`).
+   Returns the saved `learning`, its `path`, `created`, and `nextSteps` for
+   closing the loop.
+5. **`review_learnings`** — the did-it-help step. Read-only: it NEVER writes a
+   status. Params: `repoPath?` (absolute repoRoot; omit to scan every known
+   repo's ledger), `repo?`, `status?`, `windowDays?` (default 14). Returns the
+   repo's `open` + `applied` learnings, and for each APPLIED learning a
+   COMPUTED `comparison` (`before`/`after` window metrics — `costPerDayUsd`,
+   `delegationShare`, `cacheHitRate`, `bashEstUsd` — over the `windowDays`
+   window on each side of its `appliedAt`, from the repo's cost trend) plus a
+   `suggestedVerification` candidate. You judge that candidate and record the
+   outcome by calling `log_learning` (status: `verified`/`rejected`).
+
+`find_patterns` is the cross-session generalizer, called from step 2 when a
+single-session finding looks like a repo-wide pattern before you log it:
+`kind: 'text'` (full-text search — pass `query`, returns `textHits[]`),
+`kind: 'delegation'` (group sessions by delegation SHAPE — subagent-count
+bucket × model mix — with each shape's avg cost / return size in
+`delegationPatterns[]`), `kind: 'waste'` (roll up waste findings by `class`
+across sessions in `wastePatterns[]`). Params also take `repo?`, `days?`
+(default 14), `detail?`.
 
 ## Hard rules
 
 ### Every claim cites provenance
 
-Every factual sentence in an analysis report is traceable to a specific
-`sessionId` plus a source anchor: a line number in `[Lnnn]` format (e.g.
-"the Bash call at `[L23]` failed with exit code 1") or, for a main-loop
-request, its `requestId` (e.g. "request `req_4`'s reconstructed system
-prompt..."). If you cannot point at the line/request that backs a claim, the
-claim doesn't go in the report — go fetch it with `get_records`/
-`get_tool_call` first.
+Every factual sentence in an analysis is traceable to a specific `sessionId`
+plus a source anchor. A waste finding or a recommendation cites its
+`provenance.sessionId` (and `title` when present). A claim about what a
+specific call did or returned cites the JSONL line in `[Lnnn]` format (e.g.
+"the Bash call at `[L23]` failed") — and you only earn that citation by
+actually fetching it: `get_evidence` with `select.type: 'tool_calls'` to find
+the `toolUseId`/`line`, then `select.type: 'tool_call'` or `'record'` to read
+it. If you cannot point at the finding's `provenance` or the line that backs a
+claim, the claim doesn't go in the analysis — go fetch it first. Never assert
+what a call did without having fetched it through `get_evidence`.
 
-### Absence is not evidence of absence
+### Recommendations are template synthesis, not judgment
 
-`sourceCompleteness` marks a dimension `absent` (never recorded by this
-source) or `not-recorded` (happens outside what this source observes) —
-both mean "this data cannot tell you," never "this didn't happen." The
-canonical example: `hiddenApiCalls` is `not-recorded` on the session log
-(and STILL `not-recorded` on OTel — the background task-state classifier is
-invisible there too, per its own dimension table). A session showing no
-hidden calls in the data available to you is not proof none occurred; say
-"not observable from this source" instead of "did not happen."
+`analyze_session`'s `recommendations[]` and briefing's `waste[]` are
+deterministic, provenance-carrying observations with **templated** fix text —
+they are NOT LLM evaluations of the session. Present them as "the data ranks
+this as the costliest recoverable item, and here is the mechanical fix for its
+class", never as "Junrei judged this session inefficient". Junrei never scores
+or grades; interpretation is yours to add on top, clearly labeled as your own.
 
-### Maintain a "what this data cannot tell us" section
+### A repetition or a waste item is not automatically "wasteful"
 
-Every report ends with an explicit list of blind spots, named by their
-`sourceCompleteness` dimension — not vague hedging like "data may be
-incomplete." Pull the dimension names and their `note` straight from the
-tool responses you actually called: e.g. "systemPrompt: absent (not in
-session log) — see get_reconstructed_request for a template-confidence
-reconstruction, if a template exists for this CLI version" or "latency:
-absent (session log) / partial (OTel — only when Claude Code exports
-duration_ms) / authoritative (wire capture — measured at the proxy, but
-only opt-in)." Every response you touch carries this block; read it, don't
-skip past it to the payload.
+`waste[]` items (`near-duplicate`, `rerun-after-error`, `bash-as-read`,
+`large-result`, `oversized-return`) are observations, not verdicts. A
+near-duplicate may be intentional (polling, a retry after a real state change);
+an oversized return may be the point of the delegation. Read the session's
+intent (`get_evidence` → `first_prompt`) before asserting a finding was
+avoidable, and say so when it might not be.
 
-### Confidence-class trust order (get_reconstructed_request)
+### `notAvailable` / absence is not evidence of absence
 
-Every block/section from `get_reconstructed_request` carries a `confidence`
-field. Trust order: **`exact`** (from the session log/attachments alone) >
-**`template`** or **`disk-contingent`** (derived, may be stale — for
-`disk-contingent`, check the block's `provenance.driftDetected` flag before
-using it) > **`unknown`** (never invented; `value`/`text` is absent). Never
-present a `template`-confidence value as if it were a verified actual.
+Codex sessions mark `repetitions` and `taskExecutions` as `notAvailable`
+(surfaced in `analyze_session`'s / briefing's `notAvailable[]`, and as
+`notAvailable: true` on a `get_evidence` result). A kind coming back
+`notAvailable` means "this harness cannot tell you," never "this didn't
+happen." Say "not observable for `codex` sessions", never "did not occur".
+Likewise a `wasteUsd`/`impactUsd` of `null`/`undefined` means "could not be
+priced," never `0` — unpriced items still rank above nothing and must be shown
+as `unpriced`, not dropped or treated as free.
 
-**Worked example — model id.** `params.entries.model` is special: when the
-log records the target assistant record's own `model` field, that value
-overlays the template's captured default with confidence `exact` — so a
-session that ran on a different model than the template capture still
-reports its REAL model, never a stale default. But every OTHER params key
-(`max_tokens`, `thinking`, `stream`, ...) stays `template`-confidence, and
-`params.confidence` (section-level) is `unknown` when no template exists at
-all for the session's CLI version. Concretely: if you're asked "what model
-ran this request", read `params.entries.model.confidence` — if `exact`, cite
-it as fact; if `unknown` (no log value and no template default), say so
-explicitly rather than guessing from context. Never read a `template`
-default as the actual for a field where an `exact` overlay could exist —
-`model` is the one field that always tries the log first.
+### Cost is a lower bound
 
-### Cost: prefer OTel-authoritative, always caveat the lower bound
-
-Cost has (up to) two bases, never conflated: `pricing-table-estimate`
-(token counts × Junrei's pricing snapshot — what `get_session_summary`/
-`get_subagent_tree`/`get_repo_overview` always report) and `otel`
-(Claude Code's own billing-computed `cost_usd`, from
-`get_session_observability`, authoritative — not derived from token
-counts). When `get_session_observability` reports `cost.otel` (i.e.
-`otelAvailable: true` and an OTel cost figure exists), prefer it over the
-pricing-table estimate and note the `cost.deltaUsd` between them — a
-persistently large delta usually signals hidden/background API calls the
-session log structurally undercounts. Regardless of which basis you cite,
-**always call the total a lower bound** when `hiddenApiCalls` is
-`not-recorded` for every source you checked (true by default — it's
-`not-recorded` on both the session log and OTel; only wire capture can
-improve it, and even then only to `partial`, "visible only when routed
-through the proxy" — never a hard guarantee of completeness for the whole
-session). Phrase it as: "total cost across observed calls: $X (pricing-table
-estimate | OTel-authoritative) — a LOWER BOUND; hidden auxiliary calls are
-not recorded by this session's available sources."
+Junrei's `costUsd`/`estUsd` figures are pricing-table estimates (token counts ×
+a bundled pricing snapshot), and the session log structurally undercounts
+hidden/background API calls. When `analyze_session` reports
+`summary.costIsComplete: false`, say so. Phrase totals as "≈$X (pricing-table
+estimate) — a lower bound; hidden auxiliary calls are not counted by the
+session log." (The opt-in wire-capture diagnostic below can tighten this, but
+only when it's been enabled.)
 
 ### Explicit-truncation awareness
 
-Every capped field in Junrei's MCP responses says so explicitly — a
-`*Truncated: true` flag alongside a `*FullCharCount` (or equivalent). Never
-quote a truncated string as if it were the complete value, and never
-silently drop the fact that it was cut. If the truncated text matters to
-your analysis, re-call the same tool with a larger `maxChars`/
-`maxCharsPerRecord`/`maxCharsPerField`/`maxCharsPerBlock` parameter instead
-of working around the cap (e.g. by inferring the rest) — every drill-down
-tool in this playbook accepts one. A `resultText`/`returnedText` that is
-STILL short of `resultTextFullCharCount`/`returnedTextFullCharCount` even
-after raising the cap means the underlying recovery itself couldn't
-complete (rare — e.g. the source line became unreadable); say so rather
-than treating the shorter text as complete.
+Every capped field in Junrei's responses says so: a `*Truncated: true` flag
+alongside a `*FullCharCount` (e.g. `resultText` → `textTruncated` +
+`textFullCharCount`; a record's `contentTruncated` + `originalCharCount`), and
+`_meta.truncated: true` when `detail: 'concise'` dropped list entries. Never
+quote a truncated string as if it were complete, and never silently drop the
+fact it was cut. If the cut text matters, re-call with `detail: 'full'` (raises
+`get_evidence`'s per-field cap) rather than inferring the rest. A field still
+short of its `*FullCharCount` even after `detail: 'full'` means the underlying
+recovery itself couldn't complete (rare) — say so rather than treating the
+shorter text as whole.
+
+### Closing the loop honestly
+
+When you `log_learning`, record what you actually observed and what you
+actually changed — not an aspiration. When you `review_learnings`, the
+`comparison`/`suggestedVerification` is a CANDIDATE computed from the repo's
+cost trend around `appliedAt`; a cost delta over that window is correlational,
+not proof the learning caused it. Judge it as such before recording
+`verified`/`rejected`, and put your caveat in the `verification.note`.
+
+## Diagnostics (normally unused)
+
+Two extra tools — `inspect_wire` (modes `reconstructed` / `actual` / `hidden`)
+and `export_trace` — are registered ONLY when the server runs with
+`JUNREI_DIAGNOSTICS=1`, and only for Claude Code sessions. They expose the
+request-reconstruction and opt-in wire-capture layers (real `/v1/messages`
+payloads, measured latency, structurally-undercounted hidden calls) and a
+normalized `junrei-evaluation-trace/v1` export for external eval pipelines /
+LLM-judges. Most loops never need them; reach for them only when the question
+is specifically "what did the model actually see on the wire" or "hand this
+whole session to another eval system", and when they've been enabled.
 
 ## Report shape
 
-A finished analysis should let a skeptical reader verify every claim without
-re-running your tool calls: state the finding, cite `[Lnnn]`/`requestId`
-evidence inline, and close with the blind-spots section. When the audience
-is another system rather than a person, export via
-`export_evaluation_trace` instead of writing prose — its `provenance` field
-on every event carries the same citation discipline this playbook requires
-of a written report.
+A finished analysis lets a skeptical reader verify every claim without
+re-running your tool calls: state the finding, cite its `provenance.sessionId`
+(and `[Lnnn]` for a specific call), label estimates as lower bounds and
+unpriced items as unpriced, and name what the data cannot tell you
+(`notAvailable` dimensions, truncated fields you couldn't fully recover). When
+the analysis ends in an action, `log_learning` it so the finding becomes a
+tracked change the next `review_learnings` can measure — that persistence, not
+the prose, is what makes the loop improve over time.

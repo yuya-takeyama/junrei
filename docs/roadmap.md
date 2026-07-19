@@ -7,6 +7,36 @@ file tracks only what is in progress or ahead.
 
 ## In progress
 
+### Renewal: insight layer & learnings loop (2026-07-19)
+
+The pivot from an agent-statistics analyzer to self-improvement-loop
+infrastructure (see [design.md → Concept (v3)](./design.md#concept-v3)): a
+conclusion-first MCP surface (6 loop tools + 2 diagnostics, replacing the
+≈20 `get_*` tools), a repo-local learnings ledger, and a Briefing/Sessions/
+Learnings web IA. Shipped as five sequential, unstacked PRs.
+
+- ✅ Core (PR1): `@junrei/core`'s `insight/` layer —
+  `buildBriefing` / `buildSessionInsight` / `findPatterns` / `selectEvidence`,
+  each pure over injected inputs and carrying a `_meta` envelope
+  (`approxTokens` / `truncated` / `nextSteps`) — plus the repo-local learnings
+  ledger (`insight/learningsStore.ts`, one JSON file per learning under
+  `<repoRoot>/.junrei/learnings/`, atomic tmp+rename, id `L-YYYYMMDD-<slug>`).
+- ✅ Server (PR2): MCP surface rewritten to the six loop tools
+  (`briefing` / `analyze_session` / `find_patterns` / `get_evidence` /
+  `log_learning` / `review_learnings`) + two `JUNREI_DIAGNOSTICS=1`-gated
+  diagnostics (`inspect_wire` / `export_trace`), a schema-token guard test,
+  and REST routes (`GET /api/briefing`, `GET|POST /api/learnings`,
+  `GET /api/sessions/:source/:id/insight`). Bare-name `repo` resolution added.
+- ✅ Web (PR3): Briefing home (`/`), `/sessions` (session list re-homed),
+  `/learnings` loop board; `/trends` → `/` redirect, OverviewBand removed;
+  every KPI reads straight off `GET /api/briefing` (G5).
+- ✅ Web (PR4): session detail restructured to Story / Orchestration / Evidence
+  (six lenses → three), the FROM-THIS-SESSION insight callout with Log-learning
+  wiring, consistency sweep, AgentShell placeholder tabs removed.
+- 🚧 Docs + skill (PR5): `junrei-session-analysis` skill rewritten for the
+  six-tool loop; design.md Concept (v3); this roadmap; README; the first
+  committed learnings-ledger entry; Log-button post-write feedback.
+
 ### Cross-session aggregates & trends (2026-07-19)
 
 Repo-level and multi-day cost/usage retrospectives across every session
@@ -206,6 +236,23 @@ under a "Bash" sub-tab. Delivered as two sequential PRs (never stacked).
   forked. All figures keep `~`/"(est)" labels; no scoring/judgment language.
 
 ## Open items
+
+### Renewal loop follow-ups
+
+- ⬜ Cost→outcome hooks: connect a learning (and an expensive day) back to what
+  it actually produced — commit / PR linkage — so `review_learnings`' before/
+  after is anchored to a real change, not just a time window around `appliedAt`.
+- ⬜ `find_patterns` (kind: `delegation`) mining depth: today it buckets by
+  subagent-count × model mix and reports avg cost / return size; deepen it toward
+  which delegation shapes actually pay off (success-weighted, return-size-aware).
+- ⬜ Automatic learning-application detection: infer when a proposed `change`
+  was actually applied (config/CLAUDE.md/skill diffs) instead of relying on a
+  manual `status: applied` transition.
+- ⬜ Log-button post-write feedback, deeper: PR5 turns a logged button into a
+  "Logged ✓ → View in Learnings" link (undo = Dismiss on the board); a later
+  pass could inline-preview the created learning or offer one-click Accept.
+
+### Pre-renewal backlog
 
 - ⬜ Docs refreshed; README quick start (v1 M4)
 - ⬜ Transcript API (ordered event stream per session / per subagent)

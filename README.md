@@ -1,16 +1,22 @@
 # Junrei
 
-**Zero-config agent statistics analyzer for Claude Code and Codex** — a
-local-first tool that turns your existing session logs into quantitative,
-reproducible metrics.
+**Zero-config self-improvement-loop infrastructure for Claude Code and Codex**
+— a local-first tool that turns your existing session logs into quantitative,
+reproducible observations, and closes the loop between what the agents cost and
+what you change about it.
 
 Junrei (巡礼, "pilgrimage") walks a session's route again after the fact and
-shows where the tokens, dollars, and time actually went. It parses session
-logs from Claude Code and Codex CLI and computes **logic-derived quantitative
-data only** — token/cost accounting, context growth, tool success rates,
-subagent orchestration, repetition detection, and more. There is no LLM
-judgment or scoring anywhere in the pipeline; interpreting the numbers is left
-to humans, or to agents consuming them over MCP.
+shows where the tokens, dollars, and time actually went. It parses session logs
+from Claude Code and Codex CLI and computes **logic-derived quantitative data
+only** — token/cost accounting, context growth, tool success rates, subagent
+orchestration, repetition detection, and more — then drives an
+agent-runnable improvement loop over it: **Measure** (a conclusion-first
+briefing) → **Learn** (record a fix as a committable *learning*) → **Change**
+(apply it) → **Verify** (a computed before/after). There is no LLM judgment or
+scoring anywhere in the pipeline; even the ranked `waste` and `recommendations`
+are deterministic, provenance-attached, templated fixes, not evaluations.
+Interpreting the numbers — and deciding what to change — is left to humans, or
+to the agents consuming them over MCP.
 
 ![Orchestration lens for a live Junrei session, showing the delegation tree from a main agent to six subagents with per-agent model, cost, and duration](docs/images/session-orchestration.png)
 
@@ -31,13 +37,18 @@ down cost and delegation across a main agent and its subagents.*
   file reads, repeated failing calls (Claude Code sessions).
 - **Files & skills** — file access tree, skill invocations, tool stats, and
   task executions.
-- **Web UI** — a session list with search/filters and a per-session detail
-  view with multiple lenses.
-- **MCP server** — the same data exposed as tools so a coding agent can query
-  its own (or another session's) history directly.
+- **Briefing & the learnings loop** — a conclusion-first "morning paper" per
+  repo (dollar-ranked waste, wins, deltas) and a repo-local, git-committable
+  **learnings ledger** (`.junrei/learnings/`) driving a Measure → Learn →
+  Change → Verify loop with a computed before/after check.
+- **Web UI** — three views (Briefing / Sessions / Learnings) plus a per-session
+  detail with Story / Orchestration / Evidence lenses.
+- **MCP server** — a six-tool self-improvement loop (plus two opt-in
+  diagnostics) so a coding agent can diagnose its own (or another session's)
+  activity and record fixes directly.
 - **Evaluation trace export** — merge the session log with OTel/wire-capture
   (when enabled) into one normalized, provenance-carrying event trace for
-  external eval pipelines or LLM-judges (`export_evaluation_trace` /
+  external eval pipelines or LLM-judges (the opt-in `export_trace` diagnostic /
   `GET .../evaluation-trace`), plus a bundled skill encoding an evidence-grade
   session-analysis methodology.
 
@@ -69,50 +80,55 @@ with hot reload enabled.
 
 ## Web UI
 
-**Session list** — every session from either source in one table, with tabs
-to filter by source (all / Claude Code / Codex), a title search box, a repo
-filter, and a date filter (last 7/14/30 days, or all time; last 7 days by
-default). An always-on overview band above the table summarizes total cost,
-session count, delegated share, and top model for whatever the current
-filters leave visible. Results are paginated.
+Three top-level views, plus a per-session detail. Every number the UI shows
+traces to one server response — the client never re-aggregates.
 
-**Trends** (`/trends`) — a multi-day cost/usage retrospective across every
-session, globally or scoped to one repo: a 7/14/30-day window with KPI deltas
-against the prior window, daily cost-by-model and delegation-split charts,
-efficiency small multiples (incl. subagent return size vs. the ~1-2k token
-benchmark), a cadence panel, and an anomalies panel (spike days, top
-sessions).
+**Briefing** (`/`) — the home: a conclusion-first "morning paper" for a repo
+(or all repos) over a 1/7/30-day window. A KPI delta strip (cost, waste $ and %,
+delegation share, cache hit, learnings open/applied/verified), a dollar-ranked
+WASTE feed (each item with a copy-ready fix, a provenance session link, and a
+Log-learning button), a LEARNINGS panel, a WINS panel, and a footer cost
+sparkbar — all straight off `GET /api/briefing`. `/trends` now redirects here.
 
-**Session detail** opens into a set of lenses:
+**Sessions** (`/sessions`) — every session from either source in one table,
+with tabs to filter by source (all / Claude Code / Codex), a title search box,
+a repo filter, and a date filter (last 7/14/30 days, or all time; last 7 days by
+default). Results are paginated.
 
-- **Overview** — top-line usage, cost, and delegation numbers for the session.
-- **Timeline** — the record-by-record transcript with filters and a turn-aware
-  mini-map; the main session view groups events into a per-turn table (model,
-  duration, tokens, per-step breakdown) that expands in place, eliding a long
-  turn's middle behind a "show more" summary.
-- **Orchestration** — the subagent tree, as a tree, waterfall, or flame view.
-- **Context & cost** — context growth over time, compactions, and per-model
-  cost breakdown.
-- **Files & skills** — file access, skill invocations, tool stats, repetition
-  findings, and task executions.
-- **Tools** — cross-tool usage and context-cost analysis, with two sub-tabs:
-  **All** (every tool the session called — Read, Edit, Bash, WebFetch, … —
-  ranked by estimated cost, with a source split, an errors-by-tool × category
-  matrix, money attribution, and heavy hitters) and **Bash** (per-command Bash
-  detail: rankings, a fix queue, and heavy hitters). The Bash sub-tab is where
-  the old standalone `/bash` links now land.
+**Learnings** (`/learnings`) — the loop board: a MEASURE (briefing's waste feed)
+→ LEARN (open learnings) → CHANGE (applied, awaiting data) → VERIFY (verified /
+rejected, with before/after) pipeline over the repo-local ledger, with a
+loop-health strip. Accept / Dismiss / Log-learning all POST the same upsert the
+`log_learning` MCP tool runs.
+
+**Session detail** opens into three lenses:
+
+- **Story** — a conclusion-first FROM-THIS-SESSION insight callout (headline
+  cost/delegation read plus ranked recommendations, each with a Log-learning
+  button) above the record-by-record Timeline (filters, a turn-aware mini-map,
+  and a per-turn table that expands in place).
+- **Orchestration** — the subagent tree, as a tree, waterfall, or flame view,
+  with a per-model cost × return-size delegation summary.
+- **Evidence** — the drill-down, in three sub-tabs: **Context** (context growth,
+  compactions, per-model cost), **Files & skills** (file access, skill
+  invocations, tool stats, repetitions, task executions), and **Tools**
+  (cross-tool usage — **All** ranks every tool by estimated cost with a source
+  split, an errors-by-tool × category matrix, money attribution, and heavy
+  hitters; **Bash** is per-command Bash detail: rankings, a fix queue, and heavy
+  hitters, and where the old standalone `/bash` links land). Internal ids (line
+  numbers, `tool_use_id`) are exposed only here.
 
 Subagents are drillable: opening one reuses the same lens set, scoped to that
 subagent's own transcript.
 
 ![Overview lens showing total cost, turns, cache hit rate, output tokens, and a context-growth chart for a session](docs/images/session-overview.png)
 
-*Overview lens — top-line cost, cache hit rate, and context growth at a
-glance.*
+*Top-line cost, cache hit rate, and context growth at a glance — the numbers
+the Story lens headlines and the Evidence › Context sub-tab charts.*
 
-![Context and cost lens showing a context-growth chart, cache hit/write stats, and per-turn token composition](docs/images/session-context.png)
+![Context growth chart with cache hit/write stats and per-turn token composition](docs/images/session-context.png)
 
-*Context & cost lens — context growth over time plus cache economics and
+*Evidence › Context — context growth over time plus cache economics and
 per-turn token composition.*
 
 ## MCP server
@@ -123,30 +139,29 @@ Register Junrei's MCP endpoint in Claude Code with:
 claude mcp add --transport http junrei http://localhost:7867/mcp
 ```
 
-Table order matches registration order in `packages/server/src/mcp.ts`.
+The surface is a six-tool self-improvement loop plus two opt-in diagnostics
+(not a 1:1 dump of the data model). Table order matches registration order in
+`packages/server/src/mcp.ts`. The bundled
+[`junrei-session-analysis` skill](.claude/skills/junrei-session-analysis/SKILL.md)
+encodes the loop order, the provenance-citation rule, and truncation handling.
+
+**Core loop** — always registered:
 
 | Tool | Purpose | Source support |
 | --- | --- | --- |
-| `list_sessions` | List recent sessions with a quantitative overview (turns, tool calls, tokens, cost, delegation). | Claude Code + Codex |
-| `search_sessions` | Substring search across session transcripts, returning snippets and source line numbers. | Claude Code + Codex |
-| `get_session_summary` | Full per-session summary: usage/cost per model, delegation split, tool stats, counts. | Claude Code + Codex |
-| `get_context_timeline` | Effective context size per API message, plus compaction events. | Claude Code + Codex |
-| `find_repetitions` | Repeated tool calls, re-reads, and repeated failures. | Claude Code only |
-| `get_subagent_tree` | Subagent/sub-agent execution tree with per-node usage and cost. | Claude Code + Codex |
-| `get_task_executions` | Every Bash command and Agent run, with duration and outcome. | Claude Code only |
-| `get_first_prompt` | The first user prompt of a session. | Claude Code + Codex |
-| `get_repo_overview` | Repo-level rollup across every session in a repo: cost timeline, per-model breakdown, top sessions. | Claude Code + Codex |
-| `get_trends` | Multi-day trend report (7/14/30 days, global or per-repo): daily cost/token/delegation buckets, a current-vs-previous-window summary with deltas, spike-day detection, and top sessions. | Claude Code + Codex |
-| `get_records` | Full record text (bulk, by 1-based JSONL line number) for a session — the same detail the record-detail view shows, with full tool-result text recovery past the log's own capture cap. | Claude Code + Codex |
-| `get_tool_call` | One tool call and its result as a single evidence unit, resolved by `toolUseId`, with any records the parser already links to it (e.g. background-task notifications). | Claude Code + Codex |
-| `get_reconstructed_request` | Reconstructs the actual Anthropic `/v1/messages` request payload (system prompt, tool schemas, generation params) for one main-loop turn, with an explicit confidence class (`exact`/`template`/`disk-contingent`/`unknown`) per block. | Claude Code only |
-| `get_session_observability` | Claude Code's own OTel export for a session, parsed: authoritative cost, api-request latency, tool-decision/health events. Opt-in — see [OTel ingestion](#otel-ingestion-opt-in). | Claude Code only |
-| `get_bash_stats` | Bash-command analytics: rankings by command family, per-thread rollup (`byThread`), program frequency, heavy hitters, background task outcomes, waste signals (near-duplicates, reruns after error, oversized results), a ranked `opportunities` list of templated fix suggestions (copy-ready `fixText`, `estUsdSaved`), and (when the repo has enough history) a `bashPercentile` ranking this session against its repo. | Claude Code + Codex |
-| `get_tool_usage_stats` | Cross-tool usage analytics: every tool (Read, Edit, Bash, WebFetch, …) ranked by context-cost contribution (`byTool`, sorted by `estUsd`, with per-tool error-category tallies), a per-thread money rollup (`byThread`, same shape as `get_bash_stats`), and the top calls by result size across all tools (`heavyHitters`). The Bash tool appears as one aggregate row; `get_bash_stats` is its per-command drill-down. | Claude Code + Codex |
-| `get_tool_calls` | Paginated, filterable listing of tool calls in a session, for discovering a `toolUseId` to drill into. | Claude Code + Codex |
-| `get_actual_request` | The actual captured wire request/response for a `requestId` (opt-in wire capture): request body, response meta, measured latency, `isSubagent`. | Claude Code only |
-| `get_hidden_calls` | Captured API calls whose `requestId` never appears in the session log — the structural cost-undercount evidence (opt-in wire capture). | Claude Code only |
-| `export_evaluation_trace` | Exports a session as one normalized, provenance-carrying evaluation trace (`gen_ai.*`/`junrei.*` events; OTel/wire-capture enrichment when opted in) for external eval pipelines or LLM-judges. `GET /api/sessions/claude-code/:id/evaluation-trace` returns the same trace uncapped. | Claude Code only |
+| `briefing` | START HERE. Conclusion-first roll-up of a repo (or all repos) over `days`: a period `summary` with previous-window deltas, a dollar-ranked `waste[]` (each with a copy-ready `fix` + provenance), `wins[]`, the learning-ledger standing, `dailyCosts[]`, and `topSessions`. | Claude Code + Codex |
+| `analyze_session` | The why for one session: `summary`, `costDrivers[]`, the same `waste[]` shape, a `delegation` health read, and `recommendations[]` (each with a ready-to-submit `logLearningCall`). | Claude Code + Codex (Codex marks `repetitions`/`taskExecutions` `notAvailable`) |
+| `find_patterns` | Cross-session search — `kind: 'text'` (full-text), `'delegation'` (group by subagent-count × model-mix shape, with each shape's avg cost / return size), or `'waste'` (roll up waste findings by class). | Claude Code + Codex |
+| `get_evidence` | The drill-down through one `select` shape: `record` (a JSONL line), `tool_call` (call+result by `toolUseId`), `tool_calls` (a filterable listing to discover an id), `first_prompt`, or `task_executions`. An unsupported kind returns `notAvailable`, never an error. | Claude Code + Codex (`task_executions` Claude only) |
+| `log_learning` | Upsert a learning into the repo-local ledger (`<repoRoot>/.junrei/learnings/`) — create (`finding` + `change`) or update (`id` + `status`/`verification`). The only tool that writes a learning. | Claude Code + Codex |
+| `review_learnings` | Read-only listing of a repo's `open` + `applied` learnings, each applied one carrying a COMPUTED before/after comparison (cost/day, delegation share, cache hit, Bash spend) around its `appliedAt` — never persisted. | Claude Code + Codex |
+
+**Diagnostics** — registered only under `JUNREI_DIAGNOSTICS=1`, Claude Code only:
+
+| Tool | Purpose | Source support |
+| --- | --- | --- |
+| `inspect_wire` | `mode: 'reconstructed'` (rebuild a `/v1/messages` payload from the log with per-block confidence classes), `'actual'` (the captured wire request/response for a `requestId` — opt-in wire capture, measured latency), or `'hidden'` (captured calls whose `requestId` never appears in the log — structural cost-undercount evidence). | Claude Code only |
+| `export_trace` | Export a session as one normalized `junrei-evaluation-trace/v1` document (`gen_ai.*`/`junrei.*` events; OTel/wire-capture enrichment when opted in) for external eval pipelines or LLM-judges. `GET /api/sessions/claude-code/:id/evaluation-trace` returns the same trace uncapped. | Claude Code only |
 
 ## How it works
 
@@ -304,9 +319,11 @@ using the launcher scripts above. Linting/formatting is via Biome; tests run
 each package's vitest suite plus a launcher `node --test` suite and skill
 validation. CI runs the same gates.
 
-See [docs/design.md](docs/design.md) (v1 technical design),
-[docs/concept.md](docs/concept.md) (v2 concept & signal model), and
-[docs/roadmap.md](docs/roadmap.md) (feature history/status) for more.
+See [docs/design.md](docs/design.md) (technical design + the v3 concept: the
+agent self-improvement loop, MCP-first principles, the learnings ledger, and the
+G1–G5 gates), [docs/concept.md](docs/concept.md) (the earlier v2 concept &
+signal model), and [docs/roadmap.md](docs/roadmap.md) (feature history/status)
+for more.
 
 ## License
 

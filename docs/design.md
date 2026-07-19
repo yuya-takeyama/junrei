@@ -1,12 +1,95 @@
 # Junrei — Design
 
-Junrei is an **Agent Statistics Analyzer**: a local-first tool that parses coding-agent
-session logs and turns them into quantitative, reproducible metrics — visualized in a
-web UI and exposed to coding agents via MCP.
+Junrei is **self-improvement-loop infrastructure for coding agents**: a
+local-first tool that parses coding-agent session logs into quantitative,
+reproducible observations and closes the loop between "what did the agents cost
+and do" and "what did we change about it". The observations are visualized in a
+web UI and — the primary surface — exposed to the agents themselves via MCP.
 
-Junrei computes and presents **logic-derived, quantitative data only**. Qualitative
-judgment ("this session was inefficient") is deliberately left to humans or to coding
-agents consuming the data through MCP. Junrei never scores, grades, or evaluates.
+Junrei computes and presents **logic-derived, quantitative data only**.
+Qualitative judgment ("this session was inefficient") is deliberately left to
+humans or to the agents consuming the data through MCP. Junrei never scores,
+grades, or evaluates — see [Concept (v3)](#concept-v3) for how that principle
+survives even the `recommendations`/`waste` fix suggestions.
+
+## Concept (v3)
+
+### North star: the agent self-improvement loop
+
+The product is not a dashboard; the dashboard is a peephole. The north star is
+an **autonomous improvement loop the agents run on their own activity**:
+
+```
+Measure  ──▶  Learn  ──▶  Change  ──▶  Verify
+(briefing/    (log a       (apply the   (review_learnings:
+ analyze:      learning,    fix in the   before/after around
+ what cost     open)        repo/config) the change)
+ what)                                         │
+   ▲───────────────────────────────────────────┘
+```
+
+An agent (or a human) calls `briefing` to see the week's waste, `analyze_session`
+to understand one session, records the fix as a **learning**, applies it, and
+later calls `review_learnings` to see whether the metrics moved. The web UI
+(Briefing / Sessions / Learnings) is a human-facing window onto the same loop —
+useful, but not where the leverage is.
+
+### MCP-first: few, high-leverage, self-describing tools
+
+The MCP surface is the product's primary interface, so it is designed for an
+agent's context budget, not for completeness:
+
+- **Few tools, conclusion-first.** Six loop tools (plus two opt-in
+  diagnostics), each returning the answer ranked first, not a raw data dump.
+- **`_meta` on every response.** `approxTokens` (a cheap size estimate so a
+  caller can budget context before spending it), optional `truncated`, and
+  `nextSteps` that are ALWAYS populated on empty/error paths — a response never
+  dead-ends; it always says what to call next.
+- **`detail` staging.** Every composition tool takes `detail: 'concise' | 'full'`
+  so a caller controls response size in two steps rather than paying for
+  everything up front.
+- **A schema-size guard.** A test caps the total MCP schema token estimate,
+  because schema bloat is a permanent per-call cost on every session.
+
+### The learnings ledger: repo-local, committable, team-shared
+
+A learning is a durable record — `<repoRoot>/.junrei/learnings/<id>.json`, one
+file per learning — of "what did we learn about how this repo's agents behave,
+and did changing it help". Storing it **in the repo** (not in a private DB)
+makes it git-committable, reviewable in a PR, and shared across a team and
+across every worktree of the same checkout (the repoRoot is normalized to strip
+`.claude/worktrees/<name>` suffixes). `log_learning` is the only writer (an
+upsert over status transitions and verification); `review_learnings` reads it
+and computes — never persists — a before/after comparison. See
+[the ledger types](#learnings-ledger) below.
+
+### Acceptance gates (G1–G5)
+
+The loop is considered real when:
+
+- **G1 — three calls to the next action.** An agent reaches a concrete next
+  action within three MCP calls. *Measured:* `briefing → analyze_session →
+  log_learning` is exactly three calls, and each response's
+  `_meta.nextSteps` names the following one — G1 is met at 3 calls.
+- **G2 — persistence.** A recorded learning survives as a committable file the
+  next session can read (`.junrei/learnings/`).
+- **G3 — before/after.** `review_learnings` attaches a computed
+  before/after comparison to every applied learning.
+- **G4 — five-second read.** The Briefing home surfaces learnings, waste, and
+  wins visibly within about five seconds of opening it.
+- **G5 — no number drift.** Every figure the web UI shows traces to one server
+  response (`GET /api/briefing` etc.); the client never re-aggregates, so two
+  panels can't disagree.
+
+### "Junrei doesn't evaluate" — restated for the loop
+
+The no-judgment principle is unchanged but sharper now that the tools emit
+`recommendations` and ranked `waste`: those are **deterministic, provenance-
+attached observations with templated fix text**, mechanically derived from the
+same quantitative signals (Bash opportunities, oversized returns) — NOT LLM
+judgments of a session. Junrei ranks the costliest recoverable item and states
+the mechanical fix for its class; deciding whether that finding was actually
+avoidable, and acting on it, stays with the human or the consuming agent.
 
 ## Positioning
 
@@ -191,16 +274,87 @@ the same resolved API port.
   legacy-log compatibility; on current logs CLAUDE.md legitimately never
   appears in the Files & skills lens (data absence, not a Junrei bug).
 
-## MCP interface (v1)
+## MCP interface (6 + 2)
 
-Few, high-leverage tools (not a 1:1 dump of the data model):
+The surface is the six-tool self-improvement loop (see [Concept (v3)](#concept-v3)),
+plus two opt-in diagnostics. The earlier `get_*`-per-metric lineup (≈20 tools)
+was retired: the underlying analysis functions in `@junrei/core` remain, but the
+MCP layer now exposes them only through these conclusion-first composers. Every
+tool is a thin binder over the `@junrei/core` `insight/` layer and returns a
+`_meta` envelope.
 
-- `list_sessions` — recent sessions with project, title, time range, turns, cost.
-- `get_session_summary` — full quantitative summary for one session.
-- `get_context_timeline` — context-size series + compaction events.
-- `get_tool_stats` — per-tool histogram, error rates, error categories.
-- `find_repetitions` — loop/repetition findings with source event references.
-- `get_subagent_tree` — subagent tree with per-node prompt/model/cost.
+**Core loop (always registered, both harnesses unless noted):**
+
+- `briefing` — conclusion-first roll-up of a repo (or all repos) over `days`:
+  period summary with previous-window deltas, dollar-ranked `waste[]`, `wins[]`,
+  learning-ledger standing, `dailyCosts[]`, `topSessions`.
+- `analyze_session` — the why for one session: `summary`, `costDrivers[]`,
+  `waste[]`, `delegation` health, and `recommendations[]` (each with a
+  ready-to-submit `logLearningCall`). Codex marks `repetitions`/`taskExecutions`
+  `notAvailable`.
+- `find_patterns` — cross-session search: `kind: 'text' | 'delegation' | 'waste'`.
+- `get_evidence` — the drill-down through one `select` shape (`record`,
+  `tool_call`, `tool_calls`, `first_prompt`, `task_executions` [Claude only]);
+  an unsupported kind returns `notAvailable`, never an error.
+- `log_learning` — upsert a learning into the repo-local ledger (the only
+  writer).
+- `review_learnings` — read-only listing of `open` + `applied` learnings, each
+  applied one carrying a computed before/after comparison (never persisted).
+
+**Diagnostics (registered only under `JUNREI_DIAGNOSTICS=1`, Claude Code only):**
+
+- `inspect_wire` — `mode: 'reconstructed' | 'actual' | 'hidden'` over the
+  request-reconstruction and opt-in wire-capture layers.
+- `export_trace` — a normalized `junrei-evaluation-trace/v1` document for
+  external eval pipelines / LLM-judges.
+
+Parameter vocabulary is disambiguated in the tool descriptions: `repo` is a
+normalized repo key (a bare name, an absolute repoRoot, or a fallback bucket
+key), while `repoPath` is always an absolute repoRoot.
+
+### Web lenses
+
+The web UI is three top-level views — **Briefing** (`/`, the loop's Measure
+face), **Sessions** (`/sessions`, the filterable session list), and
+**Learnings** (`/learnings`, the Measure→Learn→Change→Verify board) — and a
+per-session detail restructured into three lenses: **Story** (conclusion-first
+read + embedded timeline), **Orchestration** (delegation tree/waterfall/flame),
+and **Evidence** (Context, Files & skills, and Tools sub-tabs — the only place
+internal ids like line numbers and `tool_use_id` are exposed). This replaces the
+earlier six-lens layout (Overview / Timeline / Orchestration / Context & cost /
+Files & skills / Tools).
+
+## Learnings ledger
+
+A `Learning` (in `@junrei/core`'s `insight/types.ts`) is stored one file per
+learning under `<repoRoot>/.junrei/learnings/<id>.json`, written atomically
+(tmp + rename), with an id of `L-YYYYMMDD-<slug>` (UTC date, `-2`/`-3` suffix on
+a same-day slug collision):
+
+```ts
+type LearningStatus = "open" | "applied" | "verified" | "rejected";
+
+interface Learning {
+  id: string;                 // L-YYYYMMDD-<slug>
+  createdAt: string;          // ISO 8601
+  repo: string;               // normalized repo name
+  sourceSessions: { source: "claude-code" | "codex"; sessionId: string; title?: string }[];
+  finding: string;            // what was observed
+  change: string;             // what to change in response
+  expectedEffect?: string;
+  status: LearningStatus;     // open -> applied -> (verified | rejected)
+  proposedBy: "agent" | "human";
+  appliedAt?: string;         // stamped on -> applied
+  resolvedAt?: string;        // stamped on -> verified | rejected
+  verification?: { metric: string; before: number; after: number; windowDays: number; note?: string };
+}
+```
+
+The lifecycle is not enforced in code (a human can move a learning anywhere);
+`log_learning` only timestamps the two structural boundaries and records a
+`verification`. The ledger is committed with the repo, so the very first entry
+(`.junrei/learnings/L-20260719-6-git-diff-head-path-path-repeated-acros.json`)
+is a real, agent-proposed learning that Junrei found in its own sessions.
 
 ## License note
 

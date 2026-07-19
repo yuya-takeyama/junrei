@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { SessionInsight, SessionInsightRecommendation, SessionRef } from "../../api.js";
 import { formatRate } from "../../briefing/briefingFormat.js";
+import { LoggedLink } from "../../briefing/LoggedLink.js";
 import { ProvenanceBadge } from "../../briefing/ProvenanceBadge.js";
 import { formatUsd } from "../../format.js";
 import { sessionPath } from "../../router.js";
@@ -113,18 +114,21 @@ export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedK
                     <span className="west mono">
                       {rec.impactUsd === undefined ? "unpriced" : formatUsd(rec.impactUsd)}
                     </span>
-                    {onLog !== undefined && (
-                      <button
-                        type="button"
-                        className="ghost"
-                        disabled={logging || logged}
-                        onClick={() => {
-                          onLog(rec);
-                        }}
-                      >
-                        {logged ? "logged ✓" : logging ? "logging…" : "Log learning"}
-                      </button>
-                    )}
+                    {onLog !== undefined &&
+                      (logged ? (
+                        <LoggedLink />
+                      ) : (
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={logging}
+                          onClick={() => {
+                            onLog(rec);
+                          }}
+                        >
+                          {logging ? "logging…" : "Log learning"}
+                        </button>
+                      ))}
                   </div>
                 </li>
               );
