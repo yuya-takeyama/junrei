@@ -14,6 +14,7 @@ import {
   LENSES_BY_SOURCE,
   legacyClaudeSessionRedirectTarget,
   normalizeLens,
+  normalizeToolsSub,
   parseDayParam,
   parseListPage,
   parseRecordAgentParam,
@@ -27,14 +28,14 @@ import {
 } from "./router.js";
 
 describe("CODEX_LENSES", () => {
-  it("offers overview/timeline/orchestration/context/files/bash, in that order", () => {
+  it("offers overview/timeline/orchestration/context/files/tools, in that order", () => {
     expect(CODEX_LENSES).toEqual([
       "overview",
       "timeline",
       "orchestration",
       "context",
       "files",
-      "bash",
+      "tools",
     ]);
   });
 
@@ -44,8 +45,8 @@ describe("CODEX_LENSES", () => {
     expect(CODEX_LENSES).toContain("files");
   });
 
-  it("includes 'bash' — codex/bash-stats.ts (@junrei/core) feeds SessionAnalysisCore.bashStats for Codex sessions too", () => {
-    expect(CODEX_LENSES).toContain("bash");
+  it("includes 'tools' — codex/tool-usage-stats.ts (@junrei/core) feeds SessionAnalysisCore.toolUsageStats for Codex sessions too", () => {
+    expect(CODEX_LENSES).toContain("tools");
   });
 });
 
@@ -57,16 +58,16 @@ describe("CLAUDE_LENSES", () => {
       "orchestration",
       "context",
       "files",
-      "bash",
+      "tools",
     ]);
     expect(CLAUDE_LENSES).toEqual(CODEX_LENSES);
   });
 });
 
 describe("LENSES_BY_SOURCE", () => {
-  it("gives both sources the 'bash' tab", () => {
-    expect(LENSES_BY_SOURCE["claude-code"]).toContain("bash");
-    expect(LENSES_BY_SOURCE.codex).toContain("bash");
+  it("gives both sources the 'tools' tab", () => {
+    expect(LENSES_BY_SOURCE["claude-code"]).toContain("tools");
+    expect(LENSES_BY_SOURCE.codex).toContain("tools");
   });
 });
 
@@ -96,6 +97,30 @@ describe("sessionPath", () => {
 
   it("percent-encodes id for Codex source", () => {
     expect(sessionPath({ source: "codex", id: "c d" })).toBe("/session/codex/c%20d");
+  });
+
+  it("omits the sub segment for the default 'all' tools sub-tab", () => {
+    expect(sessionPath({ source: "claude-code", id: "abc123" }, "tools")).toBe(
+      "/session/claude-code/abc123/tools",
+    );
+    expect(sessionPath({ source: "claude-code", id: "abc123" }, "tools", "all")).toBe(
+      "/session/claude-code/abc123/tools",
+    );
+  });
+
+  it("includes the sub segment for the 'bash' tools sub-tab", () => {
+    expect(sessionPath({ source: "claude-code", id: "abc123" }, "tools", "bash")).toBe(
+      "/session/claude-code/abc123/tools/bash",
+    );
+    expect(sessionPath({ source: "codex", id: "abc123" }, "tools", "bash")).toBe(
+      "/session/codex/abc123/tools/bash",
+    );
+  });
+
+  it("ignores the sub argument for a non-tools lens", () => {
+    expect(sessionPath({ source: "claude-code", id: "abc123" }, "files", "bash")).toBe(
+      "/session/claude-code/abc123/files",
+    );
   });
 });
 
@@ -129,21 +154,30 @@ describe("recordPath", () => {
   });
 
   it("omits the agent param when absent", () => {
-    expect(recordPath({ source: "claude-code", id: "abc123" }, "bash", 42)).toBe(
-      "/session/claude-code/abc123/bash?record=42",
+    expect(recordPath({ source: "claude-code", id: "abc123" }, "tools", 42)).toBe(
+      "/session/claude-code/abc123/tools?record=42",
     );
   });
 
   it("appends an agent param after record, when given — Fix Queue evidence rows for a subagent thread stay on the session page (see the doc comment above)", () => {
-    expect(recordPath({ source: "claude-code", id: "abc123" }, "bash", 42, "agent-a")).toBe(
-      "/session/claude-code/abc123/bash?record=42&agent=agent-a",
+    expect(recordPath({ source: "claude-code", id: "abc123" }, "tools", 42, "agent-a")).toBe(
+      "/session/claude-code/abc123/tools?record=42&agent=agent-a",
     );
   });
 
   it("percent-encodes the agent param", () => {
-    expect(recordPath({ source: "codex", id: "abc123" }, "bash", 7, "sub agent")).toBe(
-      "/session/codex/abc123/bash?record=7&agent=sub%20agent",
+    expect(recordPath({ source: "codex", id: "abc123" }, "tools", 7, "sub agent")).toBe(
+      "/session/codex/abc123/tools?record=7&agent=sub%20agent",
     );
+  });
+
+  it("keeps the tools Bash sub-tab in the record's path when sub is given", () => {
+    expect(
+      recordPath({ source: "claude-code", id: "abc123" }, "tools", 42, undefined, "bash"),
+    ).toBe("/session/claude-code/abc123/tools/bash?record=42");
+    expect(
+      recordPath({ source: "claude-code", id: "abc123" }, "tools", 42, "agent-a", "bash"),
+    ).toBe("/session/claude-code/abc123/tools/bash?record=42&agent=agent-a");
   });
 });
 
@@ -223,9 +257,15 @@ describe("route ranking: agent routes vs session routes", () => {
     expect(matchedRouteId("/session/claude-code/id/timeline")).toBe("claude-session");
   });
 
+  it("matches the tools lens's sub-tab URL (:lens?/:sub?) to CLAUDE_SESSION_ROUTE_PATH", () => {
+    expect(matchedRouteId("/session/claude-code/id/tools")).toBe("claude-session");
+    expect(matchedRouteId("/session/claude-code/id/tools/bash")).toBe("claude-session");
+  });
+
   it("matches plain Codex session paths (with or without a lens) to CODEX_SESSION_ROUTE_PATH", () => {
     expect(matchedRouteId("/session/codex/id")).toBe("codex-session");
     expect(matchedRouteId("/session/codex/id/turns")).toBe("codex-session");
+    expect(matchedRouteId("/session/codex/id/tools/bash")).toBe("codex-session");
   });
 
   it("matches agent paths to CLAUDE_AGENT_ROUTE_PATH, not CLAUDE_SESSION_ROUTE_PATH with lens='agent'", () => {
@@ -244,12 +284,12 @@ describe("route ranking: agent routes vs session routes", () => {
     ).toBe("claude-session");
   });
 
-  it("a legacy 3-segment URL (project/uuid/lens) falls through to the catch-all", () => {
+  it("a legacy 3-segment URL (project/uuid/lens) now matches CLAUDE_SESSION_ROUTE_PATH via its :sub? segment — SessionShell's own UUID guard redirects it (preserving the trailing lens), see isLegacyClaudeProjectScopedUrl", () => {
     expect(
       matchedRouteId(
         "/session/claude-code/-Users-proj/11111111-1111-1111-1111-111111111111/timeline",
       ),
-    ).toBe("catchall");
+    ).toBe("claude-session");
   });
 
   it("a legacy agent-drilldown URL (project/uuid/agent/agentId) falls through to the catch-all", () => {
@@ -330,14 +370,14 @@ describe("normalizeLens", () => {
       "orchestration",
       "context",
       "files",
-      "bash",
+      "tools",
     ] as const) {
       expect(normalizeLens(lens)).toBe(lens);
     }
   });
 
-  it("passes through 'bash' regardless of source — per-source availability is SessionShell/AgentShell's job (lensAvailable), not normalizeLens's", () => {
-    expect(normalizeLens("bash")).toBe("bash");
+  it("redirects the legacy standalone 'bash' lens to 'tools' — the Bash lens is now the tools lens's Bash sub-tab (normalizeToolsSub reads the same 'bash' param to land on it)", () => {
+    expect(normalizeLens("bash")).toBe("tools");
   });
 
   it("redirects the removed 'turns' lens to 'timeline' — old Codex Turns-tab bookmarks must not 404 or fall to a broken state", () => {
@@ -347,6 +387,22 @@ describe("normalizeLens", () => {
   it("falls back to overview for unknown or missing values", () => {
     expect(normalizeLens(undefined)).toBe("overview");
     expect(normalizeLens("bogus")).toBe("overview");
+  });
+});
+
+describe("normalizeToolsSub", () => {
+  it("lands the legacy standalone /bash URL (lensParam='bash') on the Bash sub-tab", () => {
+    expect(normalizeToolsSub("bash", undefined)).toBe("bash");
+  });
+
+  it("reads an explicit /tools/<sub> segment", () => {
+    expect(normalizeToolsSub("tools", "bash")).toBe("bash");
+    expect(normalizeToolsSub("tools", "all")).toBe("all");
+  });
+
+  it("defaults to 'all' for a bare /tools URL or an unknown sub segment", () => {
+    expect(normalizeToolsSub("tools", undefined)).toBe("all");
+    expect(normalizeToolsSub("tools", "bogus")).toBe("all");
   });
 });
 
@@ -372,7 +428,7 @@ describe("parseRecordAgentParam", () => {
   });
 
   it("round-trips through recordPath's own agent-id encoding", () => {
-    const path = recordPath({ source: "claude-code", id: "abc123" }, "bash", 42, "sub agent");
+    const path = recordPath({ source: "claude-code", id: "abc123" }, "tools", 42, "sub agent");
     const search = path.slice(path.indexOf("?"));
     expect(parseRecordAgentParam(new URLSearchParams(search))).toBe("sub agent");
   });

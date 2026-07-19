@@ -3,17 +3,18 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { type AnySessionJson, fetchSessionDetail, type SessionRef } from "./api.js";
 import { formatDuration, formatTime } from "./format.js";
-import { Bash } from "./lenses/Bash.js";
 import { ContextCost } from "./lenses/ContextCost.js";
 import { FilesSkills } from "./lenses/FilesSkills.js";
 import { Orchestration } from "./lenses/Orchestration.js";
 import { Overview } from "./lenses/Overview.js";
 import { RecordDetail } from "./lenses/RecordDetail.js";
 import { Timeline } from "./lenses/Timeline.js";
+import { Tools } from "./lenses/Tools.js";
 import {
   isLegacyClaudeProjectScopedUrl,
   LENSES_BY_SOURCE,
   normalizeLens,
+  normalizeToolsSub,
   parseRecordAgentParam,
   parseRecordParam,
   recordPath,
@@ -164,16 +165,18 @@ interface Props {
  * redirects the old `"turns"` URL segment to `"timeline"` so bookmarks keep
  * working.
  *
- * "bash" renders the same way for both sources now — `SessionAnalysisCore.
- * bashStats` (see `@junrei/core`'s `shared/session-analysis.ts`) is populated
- * by both `analyzeClaudeSession` and `analyzeCodexSession`/`getCodexSession`
- * (the latter overriding it with a forest-joint recompute once a session's
- * sub-agent forest is known, mirroring how `fileAccess` is already handled —
- * see `sources/codex.ts`), so `Bash` takes the `AnySessionJson` union like
- * every other source-uniform lens here.
+ * "tools" renders the same way for both sources now — `SessionAnalysisCore.
+ * bashStats`/`.toolUsageStats` (see `@junrei/core`'s
+ * `shared/session-analysis.ts`) are populated by both `analyzeClaudeSession`
+ * and `analyzeCodexSession`/`getCodexSession` (the latter overriding them
+ * with a forest-joint recompute once a session's sub-agent forest is known,
+ * mirroring how `fileAccess` is already handled — see `sources/codex.ts`), so
+ * `Tools` takes the `AnySessionJson` union like every other source-uniform
+ * lens here. Its `sub` (`toolsSub`) picks the All vs Bash sub-tab from the
+ * URL's `:sub?` segment.
  */
 export function SessionShell({ source }: Props) {
-  const { id: idParam, lens: lensParam } = useParams<"id" | "lens">();
+  const { id: idParam, lens: lensParam, sub: subParam } = useParams<"id" | "lens" | "sub">();
   const isCodex = source === "codex";
   const [searchParams] = useSearchParams();
 
@@ -185,6 +188,10 @@ export function SessionShell({ source }: Props) {
   const id = isLegacyProjectScopedUrl ? "" : (idParam ?? "");
   const ref: SessionRef = isCodex ? { source: "codex", id } : { source: "claude-code", id };
   const lens = normalizeLens(isLegacyProjectScopedUrl ? undefined : lensParam);
+  // Tools sub-tab (only meaningful for the "tools" lens) — resolves the
+  // legacy `/bash` URL (lensParam === "bash"), an explicit `/tools/<sub>`
+  // segment, or the default "all" (see `normalizeToolsSub`).
+  const toolsSub = lens === "tools" ? normalizeToolsSub(lensParam, subParam) : undefined;
   const record = parseRecordParam(searchParams);
   const recordAgent = parseRecordAgentParam(searchParams);
   const navigate = useNavigate();
@@ -193,7 +200,7 @@ export function SessionShell({ source }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const recordOpen = record !== undefined;
-  const closeRecordHref = sessionPath(ref, lens);
+  const closeRecordHref = sessionPath(ref, lens, toolsSub);
 
   // Where the open record actually gets fetched from — mirrors AgentShell's
   // `agentScopedRef`/`agentParam` split (see its doc comment), but keyed off
@@ -223,7 +230,15 @@ export function SessionShell({ source }: Props) {
   }, [source, id, isLegacyProjectScopedUrl]);
 
   if (isLegacyProjectScopedUrl) {
-    const target = sessionPath({ source: "claude-code", id: lensParam as string });
+    // For this legacy shape the real UUID sits in `lensParam` and the real
+    // (old) lens — when present — sits in `subParam` (`/<project>/<uuid>/<lens>`
+    // now matches `CLAUDE_SESSION_ROUTE_PATH`'s `:sub?`; see its doc comment).
+    // Carry that lens through so a bookmarked project-scoped deep link keeps
+    // its tab instead of dropping to overview.
+    const target = sessionPath(
+      { source: "claude-code", id: lensParam as string },
+      normalizeLens(subParam),
+    );
     const search = searchParams.toString();
     return <Navigate replace to={search === "" ? target : `${target}?${search}`} />;
   }
@@ -310,20 +325,23 @@ export function SessionShell({ source }: Props) {
             }}
           />
         )}
-        {error === null && session !== null && lens === "bash" && (
-          <Bash
+        {error === null && session !== null && lens === "tools" && (
+          <Tools
             session={session}
+            sessionRef={ref}
+            sub={toolsSub ?? "all"}
             onOpenRecord={(line, agentId) => {
-              // Heavy hitters rank Bash calls across every thread (see
-              // `HeavyHittersTable`'s doc comment), so most rows belong to
-              // a subagent. Opening those used to navigate to the agent
-              // shell (`agentRecordPath`), which lost whatever context the
-              // click came from (e.g. the Fix Queue's evidence list).
-              // `recordPath`'s optional agent argument carries the subagent
-              // id as a query param instead, so we stay on THIS page — see
-              // `recordSessionRef`/`recordAgentParam` above for how that
-              // param gets resolved back into the right fetch per source.
-              navigate(recordPath(ref, lens, line, agentId));
+              // Heavy hitters rank tool/Bash calls across every thread (see
+              // `HeavyHittersTable`/`ToolHeavyHittersTable`'s doc comments),
+              // so most rows belong to a subagent. Opening those used to
+              // navigate to the agent shell (`agentRecordPath`), which lost
+              // whatever context the click came from. `recordPath`'s optional
+              // agent argument carries the subagent id as a query param
+              // instead, so we stay on THIS page — see `recordSessionRef`/
+              // `recordAgentParam` above for how that param gets resolved
+              // back into the right fetch per source. `toolsSub` keeps the
+              // record's URL/close href on the right sub-tab.
+              navigate(recordPath(ref, lens, line, agentId, toolsSub));
             }}
           />
         )}

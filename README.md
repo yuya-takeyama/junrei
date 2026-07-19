@@ -95,6 +95,12 @@ sessions).
   cost breakdown.
 - **Files & skills** — file access, skill invocations, tool stats, repetition
   findings, and task executions.
+- **Tools** — cross-tool usage and context-cost analysis, with two sub-tabs:
+  **All** (every tool the session called — Read, Edit, Bash, WebFetch, … —
+  ranked by estimated cost, with a source split, an errors-by-tool × category
+  matrix, money attribution, and heavy hitters) and **Bash** (per-command Bash
+  detail: rankings, a fix queue, and heavy hitters). The Bash sub-tab is where
+  the old standalone `/bash` links now land.
 
 Subagents are drillable: opening one reuses the same lens set, scoped to that
 subagent's own transcript.

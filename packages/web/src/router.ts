@@ -16,16 +16,21 @@
  * working — that redirect is what lets it be dropped from the `Lens` union
  * itself rather than kept as a dead tab value.
  *
- * "bash" (command ranking / context consumption / waste detection, backed by
- * `SessionAnalysisCore.bashStats` — see `Bash.tsx`) used to be Claude-only
- * (no Codex shell-call source fed it) — that gap closed once
- * `codex/bash-stats.ts` (`@junrei/core`) started extracting shell calls from
+ * "tools" (cross-thread per-tool usage/context-cost analysis, backed by
+ * `SessionAnalysisCore.toolUsageStats` — see `Tools.tsx`) hosts two sub-tabs:
+ * "All" (every tool a session called, ranked by est $) and "Bash" (the
+ * former standalone Bash lens's command-level detail, backed by
+ * `SessionAnalysisCore.bashStats` — see `Bash.tsx`, re-homed under this lens).
+ * Both sub-tabs are source-uniform: `bashStats`/`toolUsageStats` are each
+ * populated for Claude AND Codex (`codex/bash-stats.ts`/
+ * `codex/tool-usage-stats.ts` in `@junrei/core` extract shell/tool calls from
  * `function_call`/`local_shell_call`/the 0.144+ unified-exec
- * `custom_tool_call`, so `CLAUDE_LENSES`/`CODEX_LENSES` are now identical
- * again (kept as separate exports anyway — see `CODEX_LENSES`'s own doc
- * comment).
+ * `custom_tool_call`), so `CLAUDE_LENSES`/`CODEX_LENSES` are identical (kept
+ * as separate exports anyway — see `CODEX_LENSES`'s own doc comment). The
+ * old standalone `/bash` URL redirects to this lens's Bash sub-tab (see
+ * `LEGACY_LENS_ALIASES`/`normalizeToolsSub`).
  */
-export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "bash";
+export type Lens = "overview" | "timeline" | "orchestration" | "context" | "files" | "tools";
 
 const LENSES: readonly Lens[] = [
   "overview",
@@ -33,7 +38,7 @@ const LENSES: readonly Lens[] = [
   "orchestration",
   "context",
   "files",
-  "bash",
+  "tools",
 ];
 
 /** Human label per lens — shared by SessionShell (L1) and AgentShell (L3) for the tab bar and placeholders. */
@@ -43,22 +48,22 @@ export const LENS_LABEL: Record<Lens, string> = {
   orchestration: "Orchestration",
   context: "Context & cost",
   files: "Files & skills",
-  bash: "Bash",
+  tools: "Tools",
 };
 
-/** Tab bar for a Claude Code session shell — includes "bash" (Claude-only, see `Lens`'s doc comment). */
+/** Tab bar for a Claude Code session shell — includes "tools" (see `Lens`'s doc comment). */
 export const CLAUDE_LENSES: readonly Lens[] = [
   "overview",
   "timeline",
   "orchestration",
   "context",
   "files",
-  "bash",
+  "tools",
 ];
 
 /**
  * Tab bar for a Codex session shell — identical to `CLAUDE_LENSES` (see
- * `Lens`'s doc comment on "bash" for why it's included now). Kept as its own
+ * `Lens`'s doc comment on "tools" for why it's included now). Kept as its own
  * export, rather than collapsed into a single constant, since the two
  * lineups are independent facts that happen to fully overlap today — a
  * future Codex-only (or Claude-only) lens should be free to diverge without
@@ -70,8 +75,41 @@ export const CODEX_LENSES: readonly Lens[] = [
   "orchestration",
   "context",
   "files",
-  "bash",
+  "tools",
 ];
+
+/**
+ * The two sub-tabs the "tools" lens hosts: "all" (cross-tool ranking, the
+ * default) and "bash" (the re-homed Bash command-level detail). Addressed as
+ * a `:sub?` URL segment beneath the lens (`/session/.../tools/bash`); the
+ * default "all" is omitted from the URL, the same way "overview" is omitted
+ * as a lens (see `sessionPath`).
+ */
+export type ToolsSubTab = "all" | "bash";
+
+const TOOLS_SUBTABS: readonly ToolsSubTab[] = ["all", "bash"];
+
+function isToolsSubTab(value: string | undefined): value is ToolsSubTab {
+  return value !== undefined && (TOOLS_SUBTABS as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve the active `ToolsSubTab` for a `tools`-lens route from its raw URL
+ * params. Three inputs converge here: (1) the legacy standalone `/bash` URL,
+ * where `lensParam` is literally `"bash"` (normalized to the `tools` lens by
+ * `normalizeLens`, but its Bash intent survives only in `lensParam`) →
+ * `"bash"`; (2) an explicit `:sub` segment (`/tools/bash`) → that sub; (3) no
+ * sub segment (`/tools`) → the default `"all"`. Only meaningful once the
+ * resolved lens is `"tools"` — callers (SessionShell) gate on that.
+ */
+export function normalizeToolsSub(
+  lensParam: string | undefined,
+  subParam: string | undefined,
+): ToolsSubTab {
+  if (lensParam === "bash") return "bash";
+  if (isToolsSubTab(subParam)) return subParam;
+  return "all";
+}
 
 /**
  * Lens lineup per source — a lookup, so the shells (SessionShell/AgentShell)
@@ -91,12 +129,15 @@ function isLens(value: string | undefined): value is Lens {
  * where that content now lives — checked by `normalizeLens` before the
  * `isLens` union check, so the alias can resolve even though the target
  * string was deliberately dropped from `Lens` itself (see its doc comment).
- * "turns" is the only entry today: the Codex-only Turns tab folded into
- * Timeline's own turn-grouped spine in docs/roadmap.md's "Unified Timeline"
- * Phase 2.
+ * "turns" folded into Timeline's own turn-grouped spine in docs/roadmap.md's
+ * "Unified Timeline" Phase 2; "bash" became a sub-tab of the "tools" lens
+ * (the standalone Bash lens was re-homed there) — an old `/bash` bookmark
+ * resolves to the tools lens here, and `normalizeToolsSub` reads the same
+ * `"bash"` `lensParam` to land it on the Bash sub-tab specifically.
  */
 const LEGACY_LENS_ALIASES: Record<string, Lens> = {
   turns: "timeline",
+  bash: "tools",
 };
 
 /**
@@ -137,11 +178,23 @@ export function sessionRefOf(item: {
  * registered with `createBrowserRouter` — bare session id, no `:project`
  * segment (dropped once bare-id server lookup made it unnecessary — see
  * `SessionRef`'s doc comment). Symmetric with `CODEX_SESSION_ROUTE_PATH`.
+ *
+ * The trailing optional `:sub?` segment addresses the "tools" lens's
+ * sub-tabs (`/tools/bash`; see `ToolsSubTab`/`sessionPath`) — it stays
+ * dynamic (not a static `tools/:sub`) so no extra route is needed, and is
+ * parsed only when the resolved lens is "tools" (SessionShell). A legacy
+ * project-scoped URL WITH an explicit lens (`/<project>/<uuid>/<lens>`) now
+ * matches this pattern too (`:id=<project>`, `:lens=<uuid>`, `:sub=<lens>`)
+ * rather than the catch-all — SessionShell's own UUID guard
+ * (`isLegacyClaudeProjectScopedUrl`) still catches it and redirects, now
+ * preserving the trailing lens from `:sub` (see SessionShell). The 4-segment
+ * legacy agent-drilldown shape is still too long to match and falls through
+ * to the catch-all as before (see `legacyClaudeSessionRedirectTarget`).
  */
-export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:id/:lens?";
+export const CLAUDE_SESSION_ROUTE_PATH = "session/claude-code/:id/:lens?/:sub?";
 
-/** react-router path pattern for the Codex session shell route — no `:project` segment (Codex has none). */
-export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?";
+/** react-router path pattern for the Codex session shell route — no `:project` segment (Codex has none). Trailing `:sub?` addresses the tools lens's sub-tabs, same as `CLAUDE_SESSION_ROUTE_PATH`. */
+export const CODEX_SESSION_ROUTE_PATH = "session/codex/:id/:lens?/:sub?";
 
 /**
  * UUID (v4-shaped) matcher used by the legacy-URL guards below — a
@@ -157,11 +210,19 @@ export const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
  * segment for "overview" to match the app's historical URL shape (formerly
  * `#/session/.../id` under the hash router, now `/session/.../id` — rather
  * than `/session/.../id/overview`). Both sources share the same shape now
- * (`/session/<source>/<id>[/<lens>]`) — see `SessionRef`'s doc comment.
+ * (`/session/<source>/<id>[/<lens>[/<sub>]]`) — see `SessionRef`'s doc comment.
+ *
+ * `sub` only applies to the "tools" lens (its `ToolsSubTab`); like the
+ * default "overview" lens, the default "all" sub is omitted from the URL, so
+ * `sessionPath(ref, "tools")` and `sessionPath(ref, "tools", "all")` both
+ * yield `/session/.../tools`, while `sessionPath(ref, "tools", "bash")`
+ * yields `/session/.../tools/bash`. `sub` is ignored for any other lens.
  */
-export function sessionPath(ref: SessionRef, lens: Lens = "overview"): string {
+export function sessionPath(ref: SessionRef, lens: Lens = "overview", sub?: ToolsSubTab): string {
   const base = `/session/${ref.source}/${encodeURIComponent(ref.id)}`;
-  return lens === "overview" ? base : `${base}/${lens}`;
+  if (lens === "overview") return base;
+  const withLens = `${base}/${lens}`;
+  return lens === "tools" && sub !== undefined && sub !== "all" ? `${withLens}/${sub}` : withLens;
 }
 
 /**
@@ -248,9 +309,19 @@ export function legacyClaudeSessionRedirectTarget(
  * `fetchRecordDetail`'s optional `agent` argument). Distinct from
  * `agentRecordPath`, which addresses the agent shell's OWN record slide-over
  * (no `agent` query param needed there — the whole route is already agent-scoped).
+ *
+ * `sub` threads through to `sessionPath` so a record opened from the tools
+ * lens's Bash sub-tab keeps the `/tools/bash` path in its URL (and thus in
+ * the record's close href); ignored for any non-tools lens.
  */
-export function recordPath(ref: SessionRef, lens: Lens, line: number, agentId?: string): string {
-  const base = `${sessionPath(ref, lens)}?record=${line}`;
+export function recordPath(
+  ref: SessionRef,
+  lens: Lens,
+  line: number,
+  agentId?: string,
+  sub?: ToolsSubTab,
+): string {
+  const base = `${sessionPath(ref, lens, sub)}?record=${line}`;
   return agentId !== undefined ? `${base}&agent=${encodeURIComponent(agentId)}` : base;
 }
 

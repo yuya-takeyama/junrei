@@ -188,10 +188,22 @@ under a "Bash" sub-tab. Delivered as two sequential PRs (never stacked).
   `topHeavyHitters` caps with `{items,totalCount,truncated}` markers,
   main-only recompute when `includeSubagents: false`); the Bash tool appears
   as one aggregate row and `get_bash_stats` remains its per-command drill-down.
-- ⬜ Web (PR2) — the "Tools" lens with All/Bash sub-tabs, `/tools` +
-  `/tools/bash` routes (legacy `/bash` aliased), the All view (reused
-  `WhoPaidPanel` + new tool ranking / heavy-hitters tables + errors-by-tool
-  matrix), and docs.
+- ✅ Web (PR2) — the "Tools" lens replaces the standalone "Bash" lens in the
+  `Lens` union / `CLAUDE_LENSES`/`CODEX_LENSES`, with a two-level sub-nav
+  (`Tools.tsx`) dispatching to an "All" sub-tab (`tools/AllView.tsx`) and the
+  existing Bash lens re-homed under a "Bash" sub-tab (mounted unchanged).
+  Routing (`router.ts`): the session route gains a `:sub?` segment, `/tools`
+  (default "all") + `/tools/bash` parse via `normalizeToolsSub`, and the legacy
+  `/bash` URL redirects onto the Bash sub-tab (`LEGACY_LENS_ALIASES`);
+  `sessionPath`/`recordPath` thread the optional sub. The All view derives the
+  decision strip, cross-tool ranking (`ToolRankingTable`, inline $-share bars,
+  Bash row drills into the Bash sub-tab), built-in-vs-MCP source split,
+  errors-by-tool × category matrix, and cross-tool heavy hitters
+  (`ToolHeavyHittersTable`) from `toolUsageStats` in plain view code
+  (`tools/toolsLensFormat.ts`), reusing `WhoPaidPanel` unchanged. Approved
+  deviation: the re-homed Bash "Cost by command" table adopts the same shared
+  `.bcmd`/`.shcell` treatment (inline $-share bars) in place rather than being
+  forked. All figures keep `~`/"(est)" labels; no scoring/judgment language.
 
 ## Open items
 

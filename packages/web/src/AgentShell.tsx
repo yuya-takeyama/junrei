@@ -504,12 +504,12 @@ export function AgentShell({ source }: Props) {
               </div>
             </div>
           ))}
-        {ready && lens === "bash" && (
-          // `bash` is in both `CLAUDE_LENSES` and `CODEX_LENSES` (see
+        {ready && lens === "tools" && (
+          // `tools` is in both `CLAUDE_LENSES` and `CODEX_LENSES` (see
           // `LENSES_BY_SOURCE`), so `lensAvailable` is true for either
-          // source's agent — but this shell has no agent-SCOPED Bash view for
-          // either one yet (the Bash lens ranks calls across a whole
-          // session's threads jointly, see `HeavyHittersTable`'s doc
+          // source's agent — but this shell has no agent-SCOPED Tools view for
+          // either one yet (the Tools lens ranks calls across a whole
+          // session's threads jointly, see `ToolHeavyHittersTable`'s doc
           // comment; a single-agent slice of that ranking isn't a
           // straightforward "just filter" and hasn't been built). Same
           // "not built yet" placeholder the orchestration branch above uses

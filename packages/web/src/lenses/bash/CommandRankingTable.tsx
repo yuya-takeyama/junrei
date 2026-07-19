@@ -94,6 +94,11 @@ export function CommandRankingTable({
   showChars,
 }: Props) {
   const rows = sortRows(buildCommandRankingRows(byCommand, totals), sortSpec, COLUMNS);
+  // Largest $ share across the (sorted) rows — the inline `$ share` bar scales
+  // to it so the biggest contributor fills its track and the rest read
+  // relative to it (the shared `.shcell` treatment the Tools "All" ranking
+  // uses; approved deviation to re-anchor this column on a bar, not a bare %).
+  const maxUsdShare = rows.reduce((m, r) => Math.max(m, r.usdSharePct ?? 0), 0);
 
   const header = (key: CommandRankingSortKey, label: string, align?: "right") => (
     <SortableHeaderCell
@@ -118,11 +123,17 @@ export function CommandRankingTable({
         {header("calls", "Calls", "right")}
         {header("errors", "Err", "right")}
         {header("estUsd", "~Est $", "right")}
-        {header("usdSharePct", "$ share", "right")}
+        {header("usdSharePct", "$ share")}
         {header("orchSharePct", "Orch %", "right")}
         {header("estTokens", "Est. tokens", "right")}
-        {showChars && header("totalChars", "Total chars", "right")}
-        {showChars && header("avgChars", "Avg chars", "right")}
+        {showChars ? (
+          <>
+            {header("totalChars", "Total chars", "right")}
+            {header("avgChars", "Avg chars", "right")}
+          </>
+        ) : (
+          <span className="lbl" />
+        )}
       </div>
       {rows.length === 0 ? (
         // biome-ignore lint/a11y/useSemanticElements: same as the header row above
@@ -150,15 +161,29 @@ export function CommandRankingTable({
             <span className={row.estUsd === undefined ? "num fs12 cellr mut" : "num fs12 cellr"}>
               {row.estUsdText}
             </span>
-            <span
-              className={row.usdSharePct === undefined ? "num fs12 cellr mut" : "num fs12 cellr"}
-            >
-              {row.usdShareText}
+            <span className="shcell">
+              <span className="shtrk">
+                <span
+                  className="shfill"
+                  style={{
+                    width: `${maxUsdShare > 0 ? ((row.usdSharePct ?? 0) / maxUsdShare) * 100 : 0}%`,
+                  }}
+                />
+              </span>
+              <span className={row.usdSharePct === undefined ? "shpct mut" : "shpct"}>
+                {row.usdShareText}
+              </span>
             </span>
             <span className="num fs12 cellr">{row.orchShareText}</span>
             <span className="num fs12 cellr approx">{row.estTokensText}</span>
-            {showChars && <span className="num fs12 cellr">{row.totalCharsText}</span>}
-            {showChars && <span className="num fs12 cellr">{row.avgCharsText}</span>}
+            {showChars ? (
+              <>
+                <span className="num fs12 cellr">{row.totalCharsText}</span>
+                <span className="num fs12 cellr">{row.avgCharsText}</span>
+              </>
+            ) : (
+              <span />
+            )}
           </div>
         ))
       )}
