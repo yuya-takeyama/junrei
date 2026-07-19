@@ -41,22 +41,49 @@ export function recommendationKey(rec: SessionInsightRecommendation): string {
  * `analyze_session()` provenance badge (Pattern C) traces every number to one
  * server call and shows its `_meta.approxTokens` context cost.
  */
+/** Archetype → chip class + tooltip (study §1 cost-share axis). */
+const ARCHETYPE_CHIP: Record<
+  SessionInsight["summary"]["archetype"],
+  { cls: string; title: string }
+> = {
+  marathon: {
+    cls: "abadge marathon",
+    title: "main ≥85% of cost — orchestrator-context-dominated (levers R1/R2)",
+  },
+  "fan-out": {
+    cls: "abadge fanout",
+    title: "main ≤55% of cost — subagent-tier/turn-dominated (levers R3/R4)",
+  },
+  mixed: { cls: "abadge mixed", title: "in between — both levers apply" },
+};
+
 export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedKeys }: Props) {
-  const { summary, recommendations, waste, delegation } = insight;
+  const { summary, recommendations, waste, delegation, contextLifetime } = insight;
   const badge = (
     <ProvenanceBadge call="analyze_session()" approxTokens={insight._meta.approxTokens} />
   );
+  const archetype = ARCHETYPE_CHIP[summary.archetype];
 
   return (
     <div className="hpad mt16">
       <section className="pan insight-callout">
         <div className="sec-head">
           <span className="sec-title">From this session</span>
+          <span className={archetype.cls} title={archetype.title}>
+            {summary.archetype}
+          </span>
           <span className="sec-rule" />
           {badge}
         </div>
 
         <p className="insight-headline fs13">{summary.headline}</p>
+
+        {contextLifetime.warning && (
+          <p className="insight-ctxwarn mono fs11 t-rd">
+            ⚠ context ran to {contextLifetime.ctxMaxTokens.toLocaleString()} tokens with 0
+            compactions — cap the orchestrator's context lifetime (R1).
+          </p>
+        )}
 
         <div className="insight-metaline mono fs11 mut">
           <span>

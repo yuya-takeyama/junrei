@@ -631,16 +631,18 @@ function cappedTraceEvent(event: EvaluationTraceEvent, maxChars: number): Evalua
 
 const BRIEFING_DESCRIPTION =
   "START HERE. The morning paper for a repo (or all repos): a conclusion-first roll-up of the last " +
-  "`days` days. Returns a period `summary` (cost, sessions, cacheHitRate, delegationShare, each with a " +
-  "previous-window delta), a dollar-ranked `waste[]` of things to fix (each with a copy-ready `fix` and " +
+  "`days` days. Returns a period `summary` (cost, sessions, cacheHitRate, delegationShare — each with a " +
+  "previous-window delta — plus an archetypeDistribution and contextLifetimeWarnings count), a " +
+  "dollar-ranked `waste[]` of things to fix (each with a copy-ready `fix` and " +
   "`provenance.sessionId`), `wins[]` (delegation patterns that are working), the current learning-ledger " +
   "standing, and `topSessions` by cost. Typical loop: briefing -> analyze_session on the top waste item's " +
   "session -> log_learning. `_meta.nextSteps` always says what to call next. `repo` is a normalized repo " +
   "key (a repoRoot path from a session, or a fallback bucket key); omit for all repos.";
 
 const ANALYZE_SESSION_DESCRIPTION =
-  "The why, for ONE session: a headline summary, `costDrivers` (which threads/models spent the money), the " +
-  "same dollar-ranked `waste[]` shape briefing uses, a `delegation` health read, and `recommendations[]` — " +
+  "The why, for ONE session: a headline `summary` (with its cost-share `archetype`), `costDrivers` (which " +
+  "threads/models spent the money), the same dollar-ranked `waste[]` shape briefing uses, a `delegation` " +
+  "health read (turnBudget + opusMessageShare), a `contextLifetime` read, and `recommendations[]` — " +
   "each carrying a ready-to-submit `logLearningCall` object so acting on it is a single log_learning call. " +
   "Use it after briefing flags a session, or on any session id you want to understand. Works for both " +
   "harnesses (Codex marks repetitions/taskExecutions `notAvailable`). Follow up with get_evidence to quote " +

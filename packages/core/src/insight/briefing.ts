@@ -15,6 +15,7 @@
 import type { BashOpportunity } from "../shared/bash-opportunities.js";
 import type { SessionSource } from "../shared/session-analysis.js";
 import type { TrendsReport } from "../shared/trends.js";
+import { classifyArchetype, isContextLifetimeWarning } from "./archetype.js";
 import { buildMeta } from "./meta.js";
 import type {
   Detail,
@@ -41,6 +42,13 @@ export interface BriefingSubagentLaunch {
   status?: "completed" | "failed" | "unresolved";
 }
 
+/** One subagent past the turn-budget outlier bar (>150 tc) — the material a fan-out waste entry's fix text names. */
+export interface BriefingTurnOutlier {
+  agentId: string;
+  label?: string;
+  toolCallCount: number;
+}
+
 /** Per-session material `buildBriefing` folds into waste/wins. */
 export interface BriefingSessionInput {
   source: SessionSource;
@@ -49,6 +57,23 @@ export interface BriefingSessionInput {
   opportunities: BashOpportunity[];
   oversizedReturns?: OversizedReturn[];
   subagentLaunches?: BriefingSubagentLaunch[];
+  /**
+   * Archetype/context-lifetime primitives (same inputs `buildSessionInsight`
+   * classifies from) — the window aggregates archetype distribution + the
+   * context-lifetime warning count from these, and surfaces the worst marathon/
+   * fan-out offenders into `waste[]`. All optional so a source that can't
+   * supply one (a Codex list item with no priced main share) simply doesn't
+   * contribute to that tally.
+   */
+  totalCostUsd?: number;
+  /** `delegation.main.costUsd / totalCostUsd`, 0-1, null when unpriced — the archetype axis. */
+  mainCostShare?: number | null;
+  /** Max effective request context over the session's timeline. */
+  ctxMaxTokens?: number;
+  /** How many compactions fired (0 is the never-compacted marathon signal). */
+  compactionCount?: number;
+  /** Subagents past 150 tool calls — feeds the fan-out turn-budget waste entry. */
+  turnOutliers?: BriefingTurnOutlier[];
   /** Features this session's harness doesn't expose (e.g. Codex: repetitions). */
   notAvailable?: string[];
 }
@@ -99,10 +124,29 @@ export interface BriefingLearnings {
   recent: { id: string; finding: string; status: LearningStatus }[];
 }
 
+/** Count of window sessions in each cost-share archetype (study §1) — the briefing KPI. */
+export interface BriefingArchetypeDistribution {
+  marathon: number;
+  fanOut: number;
+  mixed: number;
+}
+
 export interface BriefingSummary {
   window: { days: number; startDate: string; endDate: string };
   costUsd: number;
   sessionCount: number;
+  /**
+   * How the window's sessions split across the cost-share archetypes (study
+   * §1). Only sessions that supplied a `mainCostShare` are classified; an
+   * unpriced one lands in `mixed` (see `classifyArchetype`).
+   */
+  archetypeDistribution: BriefingArchetypeDistribution;
+  /**
+   * How many window sessions tripped the context-lifetime warning (ran past
+   * 200K context with 0 compactions — study R1/A1, the biggest lever). The KPI
+   * that answers "how many marathons went un-compacted this week".
+   */
+  contextLifetimeWarnings: number;
   /**
    * Total recoverable waste this window — the sum of every ranked waste item's
    * known `impactUsd` (across ALL waste, not just the shown slice), or null
@@ -164,6 +208,25 @@ function wasteTotals(
   return { wasteUsd, wasteShareOfCost: costUsd > 0 ? wasteUsd / costUsd : null };
 }
 
+/** Classify each session (by main-cost share) and tally the archetype distribution over the window. */
+function archetypeDistribution(
+  sessions: readonly BriefingSessionInput[],
+): BriefingArchetypeDistribution {
+  const dist: BriefingArchetypeDistribution = { marathon: 0, fanOut: 0, mixed: 0 };
+  for (const s of sessions) {
+    const archetype = classifyArchetype(s.mainCostShare ?? null);
+    if (archetype === "marathon") dist.marathon += 1;
+    else if (archetype === "fan-out") dist.fanOut += 1;
+    else dist.mixed += 1;
+  }
+  return dist;
+}
+
+/** True when this session ran past the context alarm with no compaction — study R1/A1. */
+function sessionHasContextWarning(s: BriefingSessionInput): boolean {
+  return isContextLifetimeWarning(s.ctxMaxTokens ?? 0, s.compactionCount ?? 0);
+}
+
 function summarize(input: BuildBriefingInput, allWaste: readonly WasteItem[]): BriefingSummary {
   const { window, summary } = input.trends;
   const { current, delta } = summary;
@@ -172,6 +235,8 @@ function summarize(input: BuildBriefingInput, allWaste: readonly WasteItem[]): B
     window: { days: window.days, startDate: window.startDate, endDate: window.endDate },
     costUsd: current.totalCostUsd,
     sessionCount: current.sessionCount,
+    archetypeDistribution: archetypeDistribution(input.sessions),
+    contextLifetimeWarnings: input.sessions.filter(sessionHasContextWarning).length,
     wasteUsd,
     wasteCount: allWaste.length,
     wasteShareOfCost,
@@ -189,6 +254,55 @@ function summarize(input: BuildBriefingInput, allWaste: readonly WasteItem[]): B
   };
 }
 
+/**
+ * Archetype-lever waste offenders for the window — a `marathon-context` entry
+ * per never-compacted marathon and a `fan-out-turn-budget` entry per fan-out
+ * with a turn-budget outlier. Deliberately UNPRICED (`impactUsd` omitted): the
+ * study's dollar attributions for these levers are JUDGED, not measured (e.g.
+ * pair-c "~50% of cost"), and the insight layer never invents a dollar figure.
+ * Returned worst-cost-first so that, since `rankWaste` sorts unpriced items
+ * after priced ones but keeps their order, the most expensive offender leads
+ * among the unpriced entries.
+ */
+function collectArchetypeWaste(sessions: readonly BriefingSessionInput[]): WasteItem[] {
+  const withCost: { costUsd: number; item: WasteItem }[] = [];
+  for (const s of sessions) {
+    const provenance = {
+      source: s.source,
+      sessionId: s.sessionId,
+      ...(s.title !== undefined && { title: s.title }),
+    };
+    const cost = s.totalCostUsd ?? 0;
+    const archetype = classifyArchetype(s.mainCostShare ?? null);
+    if (archetype === "marathon" && sessionHasContextWarning(s)) {
+      withCost.push({
+        costUsd: cost,
+        item: {
+          class: "marathon-context",
+          title: `Marathon session ran to ${(s.ctxMaxTokens ?? 0).toLocaleString()} context tokens with 0 compactions`,
+          fix: "Split multi-PR work into one session per PR and compact once per PR; alarm above 200K context (R1).",
+          provenance,
+        },
+      });
+    }
+    const outliers = s.turnOutliers ?? [];
+    if (archetype === "fan-out" && outliers.length > 0) {
+      const worst = [...outliers].sort((a, b) => b.toolCallCount - a.toolCallCount)[0];
+      const worstLabel = worst?.label ?? worst?.agentId ?? "a subagent";
+      withCost.push({
+        costUsd: cost,
+        item: {
+          class: "fan-out-turn-budget",
+          title: `Fan-out session with ${outliers.length} subagent(s) past 150 tool calls (worst: ${worstLabel} at ${worst?.toolCallCount ?? 0})`,
+          fix: "Cap subagent turn budgets at ~60 tool calls in every spawn prompt; treat >150 as a design failure (R4).",
+          provenance,
+        },
+      });
+    }
+  }
+  return withCost.sort((a, b) => b.costUsd - a.costUsd).map((x) => x.item);
+}
+
 function collectWaste(sessions: readonly BriefingSessionInput[]): WasteItem[] {
   const items: WasteItem[] = [];
   for (const s of sessions) {
@@ -202,7 +316,9 @@ function collectWaste(sessions: readonly BriefingSessionInput[]): WasteItem[] {
       items.push(...oversizedReturnsToWaste(s.oversizedReturns, provenance));
     }
   }
-  return rankWaste(items);
+  // Archetype offenders lead the pre-rank list so they head the UNPRICED tail
+  // after `rankWaste` floats priced Bash/return findings to the top.
+  return rankWaste([...collectArchetypeWaste(sessions), ...items]);
 }
 
 /**

@@ -18,12 +18,15 @@ function insight(overrides: Partial<SessionInsight> = {}): SessionInsight {
     sessionId: "sess-1",
     source: "claude-code",
     summary: {
-      headline: "$12.30 across sonnet, opus; 44% of cost delegated to subagents.",
+      headline: "$12.30 across sonnet, opus; 44% of cost delegated to subagents (mixed).",
       costUsd: 12.3,
       costIsComplete: true,
       models: ["sonnet", "opus"],
       delegationShare: 0.44,
+      archetype: "mixed",
+      mainCostShare: 0.56,
     },
+    contextLifetime: { ctxMaxTokens: 120_000, compactionCount: 0, warning: false },
     costDrivers: [],
     waste: [
       {
@@ -40,6 +43,8 @@ function insight(overrides: Partial<SessionInsight> = {}): SessionInsight {
       subagentCount: 3,
       models: ["sonnet", "opus"],
       oversizedReturnCount: 1,
+      turnBudget: { watch: 0, outliers: [] },
+      opusMessageShare: 0.3,
     },
     recommendations: [
       {
@@ -123,5 +128,27 @@ describe("InsightCallout", () => {
       <InsightCallout insight={insight({ recommendations: [], waste: [] })} sessionRef={ref} />,
     );
     expect(html).toContain("looks clean");
+  });
+
+  it("renders the cost-share archetype badge from the payload", () => {
+    const html = render(<InsightCallout insight={insight()} sessionRef={ref} />);
+    expect(html).toMatch(/class="abadge mixed"[^>]*>mixed</);
+  });
+
+  it("shows the context-lifetime warning line only when contextLifetime.warning is set", () => {
+    const clean = render(<InsightCallout insight={insight()} sessionRef={ref} />);
+    expect(clean).not.toContain("context ran to");
+
+    const warned = render(
+      <InsightCallout
+        insight={insight({
+          summary: { ...insight().summary, archetype: "marathon", mainCostShare: 0.95 },
+          contextLifetime: { ctxMaxTokens: 480_000, compactionCount: 0, warning: true },
+        })}
+        sessionRef={ref}
+      />,
+    );
+    expect(warned).toContain("context ran to 480,000 tokens with 0");
+    expect(warned).toMatch(/class="abadge marathon"[^>]*>marathon</);
   });
 });

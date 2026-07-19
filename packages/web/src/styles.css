@@ -2120,6 +2120,31 @@ button.fb {
   border-color: var(--h);
 }
 
+/* Archetype badge (Story insight callout) — cost-share axis (study §1). */
+.abadge {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--rad);
+  border: 1px solid var(--bd);
+  color: var(--mut);
+}
+.abadge.marathon {
+  color: var(--err);
+  border-color: var(--err);
+}
+.abadge.fanout {
+  color: var(--s);
+  border-color: var(--s);
+}
+.abadge.mixed {
+  color: var(--amb);
+  border-color: var(--amb);
+}
+
 .brief-dual {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
@@ -2506,6 +2531,10 @@ button.fb {
 .insight-headline {
   margin-top: 10px;
   line-height: 1.5;
+}
+.insight-ctxwarn {
+  margin-top: 6px;
+  line-height: 1.4;
 }
 .insight-metaline {
   display: flex;
