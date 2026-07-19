@@ -452,6 +452,35 @@ async function analyzeSubagents(
       ) {
         node.status = "failed";
       }
+      // A kill+resume cycle can leave sidecars ORPHANED from the run that
+      // finally finished: agents killed mid-flight before the resume have no
+      // entry in the FINAL run-state's `workflowProgress` at all (the resumed
+      // agents that redid their work got brand-new agentIds instead), so
+      // neither `resolveWorkflowAgentStatus` above nor the dead-run rule just
+      // above ever touches them — they stay "unresolved" forever, and the web
+      // renders a perpetual "run" chip for a session that finished minutes
+      // ago (observed: three orphaned rows stuck on green "run").
+      //
+      // Evidence hierarchy applied here, in order: (1) the run's own status
+      // is TERMINAL — "completed" is a non-failure terminal state, so BY
+      // DEFINITION no member of this run can still be running, which rules
+      // "unresolved" (= "still in flight, no evidence either way") out as a
+      // possibility; (2) with "still running" eliminated, the only question
+      // left is completed-vs-failed, which the orphaned agent's OWN
+      // transcript can answer via `endsAtRestByAgentId` — the same
+      // child-transcript at-rest evidence `launchLinkage`'s async-launch
+      // fallback already relies on elsewhere in this file.
+      //
+      // Deliberately narrow: only fires for `status === "completed"` (never
+      // a hypothetical in-progress-shaped status, and never `undefined` —
+      // both of those leave real uncertainty about whether the run itself is
+      // still live, so "unresolved" stays correct there), and only touches a
+      // node still "unresolved" after the two overrides above (so it can
+      // never relitigate a status the dead-run rule or the progress entry
+      // itself already settled).
+      if (node.status === "unresolved" && run?.status === "completed") {
+        node.status = endsAtRestByAgentId.get(node.agentId) === true ? "completed" : "failed";
+      }
     }
   }
   const byStart = (a: SubagentNode, b: SubagentNode) =>

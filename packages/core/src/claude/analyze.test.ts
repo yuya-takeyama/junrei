@@ -626,7 +626,7 @@ describe("analyzeClaudeSession with a Workflow-tool run that has no run-state fi
 });
 
 describe("analyzeClaudeSession with a resumed Workflow-tool run and killed run states", () => {
-  // `60606060…060` has three Workflow-tool shapes exercised nowhere else:
+  // `60606060…060` has four Workflow-tool shapes exercised nowhere else:
   //  - wf_9bbab5e3-d95: a `resumeFromRunId` resume. Claude Code assigns a NEW
   //    runId to the resumed launch but reuses the ORIGINAL run's already
   //    generated script file unchanged, so the launch's `tool_result`
@@ -644,6 +644,14 @@ describe("analyzeClaudeSession with a resumed Workflow-tool run and killed run s
   //    run-level override exercised by wf_run_killed above (this run's own
   //    status never matches the kill-shaped regex, so the run-level override
   //    never fires here).
+  //  - wf_run_orphaned: a run-state file with `status: "completed"` and an
+  //    EMPTY `workflowProgress` — simulating a kill+resume where the two
+  //    sidecars under `subagents/workflows/wf_run_orphaned/` (agents killed
+  //    mid-flight before the resume) never made it into the final run's own
+  //    progress list at all (the resumed agents that redid the work got
+  //    brand-new agentIds elsewhere). Isolates the orphan-resolution fallback
+  //    from wf_run_agentkilled above (that fixture's agent DOES have a
+  //    progress entry, just one with `state: "killed"`).
   const RESUMED_SESSION_FILE = join(
     FIXTURE_PROJECTS,
     "-Users-test-proj/60606060-6060-6060-6060-606060606060.jsonl",
@@ -670,6 +678,30 @@ describe("analyzeClaudeSession with a resumed Workflow-tool run and killed run s
     const analysis = await analyzeClaudeSession(RESUMED_SESSION_FILE);
     const agentKilled = analysis.subagents.find((n) => n.agentId === "wfagentkilled01");
     expect(agentKilled?.status).toBe("failed");
+  });
+
+  it("resolves an orphaned agent under a completed run as failed when its own transcript never ends at rest", async () => {
+    // wforphanstuck01 has no `wf_run_orphaned` progress entry at all (the
+    // run's own `workflowProgress` is empty) and its sidecar's last record is
+    // an assistant message with no `stop_reason` — mid-flight, never resumed
+    // under THIS agentId. The run itself is over (`status: "completed"`), so
+    // "unresolved" would be a lie; the child's own at-rest evidence settles
+    // it as failed.
+    const analysis = await analyzeClaudeSession(RESUMED_SESSION_FILE);
+    const stuck = analysis.subagents.find((n) => n.agentId === "wforphanstuck01");
+    expect(stuck).toBeDefined();
+    expect(stuck?.status).toBe("failed");
+  });
+
+  it("resolves an orphaned agent under a completed run as completed when its own transcript ends at rest", async () => {
+    // wforphandone001 is the same orphan shape (no progress entry under
+    // wf_run_orphaned's completed run-state) but its sidecar DOES end at rest
+    // (final assistant record has `stop_reason: "end_turn"`) — it finished
+    // its work but simply never made it into the final run's progress list.
+    const analysis = await analyzeClaudeSession(RESUMED_SESSION_FILE);
+    const done = analysis.subagents.find((n) => n.agentId === "wforphandone001");
+    expect(done).toBeDefined();
+    expect(done?.status).toBe("completed");
   });
 });
 
