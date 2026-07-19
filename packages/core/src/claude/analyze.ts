@@ -76,6 +76,18 @@ const RETURNED_PREVIEW_LIMIT = 2000;
  * SYNTHESIZED from the agent sidecars alone (see `buildWorkflowRunSummaries`).
  * There, `status`/`durationMs` are always absent (no evidence either way) and
  * `phases` is always `[]`.
+ *
+ * CAVEAT on `durationMs`: it is copied verbatim from the run-state file's own
+ * `durationMs` (see `WorkflowRun.durationMs` in `workflows.ts` for the full
+ * story) — `timestamp - startTime` of the FINAL Workflow invocation only. On
+ * a kill+resume that reuses the runId, the state file is overwritten and this
+ * covers just the last execution segment, which can be far shorter than the
+ * run's true wall-clock span. It is NOT the span of the run's agents.
+ * Consumers wanting the run's real wall-clock span (this includes the MCP
+ * `get_subagent_tree` output, which exposes this field directly) should
+ * derive it from the member `SubagentNode`s' `startedAt`/`endedAt` instead —
+ * exactly what the web tree's workflow header does (see
+ * `@junrei/web`'s `agentTree.ts:memberSpanDurationMs`).
  */
 export interface ClaudeWorkflowRunSummary {
   runId: string;

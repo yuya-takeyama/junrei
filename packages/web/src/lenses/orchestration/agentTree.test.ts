@@ -388,6 +388,112 @@ describe("groupedTreeRows", () => {
   it("still returns [] for a session with no subagents and no workflow runs at all", () => {
     expect(groupedTreeRows([], [])).toEqual([]);
   });
+
+  it("computes the header duration from the member span, not the run-state durationMs, on a killed-and-resumed run", () => {
+    // Motivating case, modeled on a real session (87da72a3-5ecf-4688-8ff8-3ff833be7013,
+    // run wf_9bbab5e3-d95 "pr1-core-mcp"): the run-state file's durationMs
+    // (275223ms) only covers the FINAL execution segment after a
+    // kill+resume that reuses the runId — the state file is overwritten and
+    // startTime resets. Member timestamps accumulate across every segment,
+    // so the header must use their span instead.
+    const memberA: SubagentNodeJson = {
+      ...node("implement", 1),
+      workflowRunId: "wf_9bbab5e3-d95",
+      startedAt: "2026-07-19T06:45:42.784Z",
+      endedAt: "2026-07-19T07:07:57.260Z",
+    };
+    const memberB: SubagentNodeJson = {
+      ...node("verify", 1),
+      workflowRunId: "wf_9bbab5e3-d95",
+      startedAt: "2026-07-19T07:29:37.140Z",
+      endedAt: "2026-07-19T07:31:26.104Z",
+    };
+    const run: WorkflowRunSummaryJson = {
+      runId: "wf_9bbab5e3-d95",
+      name: "pr1-core-mcp",
+      agentCount: 2,
+      durationMs: 275223,
+      phases: [],
+    };
+    const rows = groupedTreeRows([memberA, memberB], [run]);
+    const header = rows.find((r) => r.kind === "workflow-header");
+    if (header?.kind !== "workflow-header") throw new Error("expected a workflow-header row");
+
+    const expectedSpanMs =
+      Date.parse("2026-07-19T07:31:26.104Z") - Date.parse("2026-07-19T06:45:42.784Z");
+    expect(header.durationMs).toBe(expectedSpanMs);
+    expect(header.durationMs).not.toBe(275223);
+  });
+
+  it("falls back to the run summary's durationMs when no member has usable timestamps", () => {
+    const memberA: SubagentNodeJson = { ...node("wf-a", 0.1), workflowRunId: "wf_run1" };
+    const run: WorkflowRunSummaryJson = {
+      runId: "wf_run1",
+      agentCount: 1,
+      durationMs: 12345,
+      phases: [],
+    };
+    const rows = groupedTreeRows([memberA], [run]);
+    const header = rows.find((r) => r.kind === "workflow-header");
+    if (header?.kind !== "workflow-header") throw new Error("expected a workflow-header row");
+    expect(header.durationMs).toBe(12345);
+  });
+
+  it("omits durationMs entirely when neither member timestamps nor a run-state value are available", () => {
+    // Orphan run: no workflowRuns entry at all, and its member has no
+    // startedAt/endedAt either.
+    const memberA: SubagentNodeJson = { ...node("wf-a", 0.1), workflowRunId: "wf_run_orphan" };
+    const rows = groupedTreeRows([memberA], []);
+    const header = rows.find((r) => r.kind === "workflow-header");
+    if (header?.kind !== "workflow-header") throw new Error("expected a workflow-header row");
+    expect(header.durationMs).toBeUndefined();
+    expect("durationMs" in header).toBe(false);
+  });
+
+  it("extends the member span into descendants, not just root members", () => {
+    const child: SubagentNodeJson = {
+      ...node("nested-child", 0.1),
+      startedAt: "2026-07-19T06:50:00.000Z",
+      endedAt: "2026-07-19T08:00:00.000Z",
+    };
+    const rootMember: SubagentNodeJson = {
+      ...node("root-member", 0.1, [child]),
+      workflowRunId: "wf_run1",
+      startedAt: "2026-07-19T06:45:00.000Z",
+      endedAt: "2026-07-19T07:00:00.000Z",
+    };
+    const run: WorkflowRunSummaryJson = { runId: "wf_run1", agentCount: 1, phases: [] };
+    const rows = groupedTreeRows([rootMember], [run]);
+    const header = rows.find((r) => r.kind === "workflow-header");
+    if (header?.kind !== "workflow-header") throw new Error("expected a workflow-header row");
+
+    const expectedSpanMs =
+      Date.parse("2026-07-19T08:00:00.000Z") - Date.parse("2026-07-19T06:45:00.000Z");
+    expect(header.durationMs).toBe(expectedSpanMs);
+  });
+
+  it("spans from the earliest start to the latest end when one member is still in flight (no endedAt)", () => {
+    const finished: SubagentNodeJson = {
+      ...node("finished", 0.1),
+      workflowRunId: "wf_run1",
+      startedAt: "2026-07-19T06:50:00.000Z",
+      endedAt: "2026-07-19T07:10:00.000Z",
+    };
+    // Still running: earlier startedAt, no endedAt yet.
+    const inFlight: SubagentNodeJson = {
+      ...node("in-flight", 0.1),
+      workflowRunId: "wf_run1",
+      startedAt: "2026-07-19T06:40:00.000Z",
+    };
+    const run: WorkflowRunSummaryJson = { runId: "wf_run1", agentCount: 2, phases: [] };
+    const rows = groupedTreeRows([finished, inFlight], [run]);
+    const header = rows.find((r) => r.kind === "workflow-header");
+    if (header?.kind !== "workflow-header") throw new Error("expected a workflow-header row");
+
+    const expectedSpanMs =
+      Date.parse("2026-07-19T07:10:00.000Z") - Date.parse("2026-07-19T06:40:00.000Z");
+    expect(header.durationMs).toBe(expectedSpanMs);
+  });
 });
 
 describe("displayName", () => {
