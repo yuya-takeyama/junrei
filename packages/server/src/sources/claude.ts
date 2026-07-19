@@ -115,7 +115,11 @@ interface ClaudeAdapterBundle {
     line: number,
     agentId?: string,
   ): Promise<RecordDetail | undefined>;
-  getToolCallDetail(key: ClaudeSessionKey, toolUseId: string): Promise<ToolCallDetail | undefined>;
+  getToolCallDetail(
+    key: ClaudeSessionKey,
+    toolUseId: string,
+    agentId?: string,
+  ): Promise<ToolCallDetail | undefined>;
   getLastActivityAt(sessionId: string): Promise<string | undefined>;
   getAgentSession(sessionId: string, agentId: string): Promise<ClaudeSessionAnalysis | undefined>;
   getSessionData(key: ClaudeSessionKey): Promise<SessionData | undefined>;
@@ -437,21 +441,24 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
 
   /**
    * One tool call + its result as a single unit — for the `get_tool_call` MCP
-   * tool. Scoped to the MAIN transcript only (no `agentId` — unlike
-   * `getRecordDetail`/`getTimeline`, `get_tool_call`'s spec has no subagent
-   * scoping; a subagent's own tool calls aren't reachable through this
-   * lookup). `undefined` for BOTH an unknown session id and an unknown
-   * `toolUseId` — the MCP layer already resolved the session separately
-   * before calling this, so it can tell the two apart itself.
+   * tool. Default scope is the MAIN transcript; `agentId`, exactly like
+   * `getRecordDetail`/`getTimeline`, scopes the lookup to that subagent's own
+   * sidecar transcript instead (see `resolveThreadData`). `undefined` for an
+   * unknown session id, an unknown `agentId`, AND an unknown `toolUseId`
+   * alike — the MCP layer already resolved the session (and, when given,
+   * confirmed the subagent exists) separately before calling this, so it can
+   * tell all of those apart itself.
    */
   async function getToolCallDetail(
     key: ClaudeSessionKey,
     toolUseId: string,
+    agentId?: string,
   ): Promise<ToolCallDetail | undefined> {
     const ref = await store.findSessionFileById(key.id);
     if (ref === undefined) return undefined;
     try {
-      const data = await sessionDataCached(ref);
+      const data = await resolveThreadData(ref, agentId);
+      if (data === undefined) return undefined;
       return await getClaudeToolCallDetail(data, toolUseId, store);
     } catch {
       return undefined;
@@ -566,10 +573,13 @@ export async function getSessionRecordDetail(
 export async function getSessionToolCallDetail(
   sessionId: string,
   toolUseId: string,
+  agentId?: string,
 ): Promise<ToolCallDetail | undefined> {
   return firstDefined([
-    () => localBundle.getToolCallDetail({ id: sessionId }, toolUseId),
-    () => s3Bundle?.getToolCallDetail({ id: sessionId }, toolUseId) ?? Promise.resolve(undefined),
+    () => localBundle.getToolCallDetail({ id: sessionId }, toolUseId, agentId),
+    () =>
+      s3Bundle?.getToolCallDetail({ id: sessionId }, toolUseId, agentId) ??
+      Promise.resolve(undefined),
   ]);
 }
 
