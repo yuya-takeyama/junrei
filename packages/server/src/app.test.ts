@@ -185,6 +185,100 @@ describe("Claude Code timeline + record routes", () => {
   });
 });
 
+describe("Claude Code session analysis cache follows Workflow sidecars, not just the main transcript", () => {
+  // Regression coverage for the "analysis cache goes stale while a Workflow
+  // runs" bug: the main transcript can go quiet for 30+ minutes while a
+  // Workflow's agent sidecars keep appearing/growing under
+  // `<sessionDir>/subagents/workflows/<runId>/`, so a cache keyed ONLY on the
+  // main file's own change token would keep serving a pre-run analysis for
+  // the whole run. Built in a scratch temp dir (never the shared checked-in
+  // fixtures other describe blocks assert exact values against) because this
+  // test mutates the session's sidecar tree mid-test.
+  const SESSION_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+  const PROJECT_DIR_NAME = "-tmp-cache-fixture-proj";
+
+  let tempDir: string;
+  let projectDir: string;
+  let previousConfigDir: string | undefined;
+
+  beforeAll(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "junrei-analysis-cache-"));
+    projectDir = join(tempDir, "projects", PROJECT_DIR_NAME);
+    await mkdir(projectDir, { recursive: true });
+
+    const mainLines = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        sessionId: SESSION_ID,
+        timestamp: "2026-07-19T00:00:00.000Z",
+        isSidechain: false,
+        cwd: "/tmp/cache-fixture",
+        version: "2.1.202",
+        message: { role: "user", content: "Kick off a long-running Workflow" },
+      },
+    ];
+    await writeFile(
+      join(projectDir, `${SESSION_ID}.jsonl`),
+      `${mainLines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+    );
+
+    previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = tempDir;
+  });
+
+  afterAll(async () => {
+    if (previousConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("recomputes when a Workflow agent sidecar appears after the first request, main transcript untouched", async () => {
+    const app = createApp();
+
+    const first = await app.request(`/api/sessions/claude-code/${SESSION_ID}`);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { analysis: { subagentCount: number } };
+    expect(firstBody.analysis.subagentCount).toBe(0);
+
+    // The main transcript file is NEVER touched below — only a new sidecar
+    // transcript shows up, exactly like a Workflow run's agent appearing
+    // while the main session stays quiet.
+    const runDir = join(projectDir, SESSION_ID, "subagents", "workflows", "wf_cache_test");
+    await mkdir(runDir, { recursive: true });
+    const agentId = "cacheinvalidagt1";
+    await writeFile(
+      join(runDir, `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: "workflow-subagent", spawnDepth: 1 }),
+    );
+    const agentLines = [
+      {
+        type: "user",
+        uuid: "au1",
+        parentUuid: null,
+        sessionId: SESSION_ID,
+        agentId,
+        timestamp: "2026-07-19T00:05:00.000Z",
+        isSidechain: true,
+        message: { role: "user", content: "do work" },
+      },
+    ];
+    await writeFile(
+      join(runDir, `agent-${agentId}.jsonl`),
+      `${agentLines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+    );
+
+    const second = await app.request(`/api/sessions/claude-code/${SESSION_ID}`);
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as { analysis: { subagentCount: number } };
+    expect(secondBody.analysis.subagentCount).toBe(1);
+  });
+});
+
 describe("Claude Desktop title fallback", () => {
   const DESKTOP_DIR = join(FIXTURES_DIR, "claude-desktop");
   const DESKTOP_TITLED_SESSION = "44444444-4444-4444-4444-444444444445";

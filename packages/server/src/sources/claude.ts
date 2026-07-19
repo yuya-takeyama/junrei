@@ -184,13 +184,57 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
   }
   const cache = new Map<string, CacheEntry>();
 
-  async function analyzeCached(ref: ClaudeSessionFileRef): Promise<ClaudeSessionAnalysis> {
+  /**
+   * Sidecar-fingerprint component of a MAIN session's cache-validity token —
+   * folded into `analyzeCached`'s token alongside `ref.changeToken` so a
+   * Workflow run's agent sidecars (and its own `workflows/<runId>.json`
+   * run-state file) invalidate the cached analysis even while the main
+   * transcript itself stays silent for the run's whole duration (observed:
+   * 22 sidecar files on disk while the cache still reported `agentCount: 1`
+   * from before the run started). `listSidecarFiles` already covers BOTH
+   * `subagents/` (recursively, including the nested
+   * `subagents/workflows/<runId>/` layout) and `workflows/` (the run-state
+   * files themselves) — see `store.ts`'s doc comment — so a run-state being
+   * rewritten mid-run invalidates the cache too, not just a new/growing agent
+   * transcript. `fileCount`/`maxMtimeMs`/`totalSizeBytes` (rather than, say,
+   * hashing every file) is deliberately cheap: it catches every sidecar
+   * add/grow/rewrite that matters here without reading file contents, at the
+   * cost of it being merely EXTREMELY unlikely (not impossible) to miss a
+   * pathological same-mtime/same-size/same-count content-only mutation.
+   */
+  async function sidecarFingerprint(mainFilePath: string): Promise<string> {
+    const sidecars = await store.listSidecarFiles(mainFilePath);
+    let maxMtimeMs = 0;
+    let totalSizeBytes = 0;
+    for (const sidecar of sidecars) {
+      if (sidecar.mtimeMs > maxMtimeMs) maxMtimeMs = sidecar.mtimeMs;
+      totalSizeBytes += sidecar.sizeBytes;
+    }
+    return `${sidecars.length}:${maxMtimeMs}:${totalSizeBytes}`;
+  }
+
+  /**
+   * `isMainSession` scopes the sidecar fingerprint to MAIN-session refs only
+   * (`listItems`/`getDetail` below) — a per-AGENT synthetic ref (from
+   * `findAgentRef`) already carries a per-sidecar `changeToken` of its own
+   * (see that function's doc comment), and its `filePath` is the sidecar's
+   * OWN path, not the main session's, so fingerprinting "sidecars of a
+   * sidecar" would be both meaningless and wasted work. Defaults to `false`
+   * so every other caller keeps today's exact behavior.
+   */
+  async function analyzeCached(
+    ref: ClaudeSessionFileRef,
+    isMainSession = false,
+  ): Promise<ClaudeSessionAnalysis> {
+    const changeToken = isMainSession
+      ? `${ref.changeToken}:${await sidecarFingerprint(ref.filePath)}`
+      : ref.changeToken;
     const hit = cache.get(ref.filePath);
-    if (hit !== undefined && hit.changeToken === ref.changeToken) {
+    if (hit !== undefined && hit.changeToken === changeToken) {
       return hit.analysis;
     }
     const analysis = await analyzeClaudeSession(ref.filePath, store);
-    cache.set(ref.filePath, { changeToken: ref.changeToken, analysis });
+    cache.set(ref.filePath, { changeToken, analysis });
     return analysis;
   }
 
@@ -231,7 +275,7 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
       if (bounds?.sinceMs !== undefined && proxyMs < bounds.sinceMs - PROXY_MARGIN_MS) continue;
       if (bounds?.untilMs !== undefined && proxyMs >= bounds.untilMs + PROXY_MARGIN_MS) continue;
       try {
-        const analysis = await analyzeCached(ref);
+        const analysis = await analyzeCached(ref, true);
         const startedMs = analysis.startedAt === undefined ? NaN : Date.parse(analysis.startedAt);
         const sortMs = Number.isNaN(startedMs) ? proxyMs : startedMs;
         if (bounds?.sinceMs !== undefined && sortMs < bounds.sinceMs) continue;
@@ -251,7 +295,7 @@ function createClaudeAdapterBundle(store: ClaudeSessionStore): ClaudeAdapterBund
     const ref = await store.findSessionFileById(key.id);
     if (ref === undefined) return undefined;
     try {
-      const analysis = await analyzeCached(ref);
+      const analysis = await analyzeCached(ref, true);
       if (analysis.title !== undefined) return analysis;
       const title = (await desktopTitles()).get(key.id);
       // Copy rather than mutate: analyzeCached shares one object per change

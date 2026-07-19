@@ -1,0 +1,12 @@
+{
+  "runId": "wf_run_orphaned",
+  "workflowName": "orphaned-members-demo",
+  "status": "completed",
+  "durationMs": 45000,
+  "agentCount": 0,
+  "defaultModel": "claude-sonnet-5",
+  "totalTokens": 0,
+  "totalToolCalls": 0,
+  "phases": [],
+  "workflowProgress": []
+}
