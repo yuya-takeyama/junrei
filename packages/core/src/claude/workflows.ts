@@ -109,6 +109,19 @@ export async function listWorkflowRuns(
     const run = parseWorkflowRun(raw, filePath);
     if (run !== undefined) runs.push(run);
   }
+  // Sorted by runId purely for DETERMINISM — `store.listSidecarFiles()`
+  // order is directory-listing/lexicographic on the sidecar FILENAME
+  // (`wf_<id>.json`), which has no relationship to when a run actually
+  // started. This module doesn't sort chronologically because it has no
+  // cheap, reliable start-time signal to sort by: a run's own `startTime`
+  // covers only its LAST execution segment on a killed-and-resumed run (see
+  // `WorkflowRun.durationMs`'s doc comment), and per-agent `workflowProgress`
+  // timestamps only exist AFTER a run completes (no sidecar yet for an
+  // in-progress run at all). `@junrei/web`'s `agentTree.ts` owns the actual
+  // chronological ordering users see, because it has a strictly better
+  // signal available: the member subagents' own transcript `startedAt`,
+  // which exists for in-progress runs too and isn't affected by resume.
+  runs.sort((a, b) => a.runId.localeCompare(b.runId));
   return runs;
 }
 
