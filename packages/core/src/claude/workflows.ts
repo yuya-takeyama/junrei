@@ -59,6 +59,21 @@ export interface WorkflowRun {
   filePath: string;
   workflowName?: string;
   status?: string;
+  /**
+   * Verbatim from the run-state file — equals `timestamp - startTime` of the
+   * FINAL Workflow invocation recorded in this file (verified against a real
+   * killed-and-resumed run: session 87da72a3-5ecf-4688-8ff8-3ff833be7013, run
+   * wf_9bbab5e3-d95 "pr1-core-mcp"). When a run is killed/interrupted and
+   * later resumed reusing the same runId, the harness OVERWRITES this file
+   * and `startTime` resets to the resumed invocation's own start — so this
+   * field then covers only the LAST execution segment, not the run's full
+   * lifetime. It can be far shorter than the run's true member span (that
+   * session: 275223ms/4m35s here vs. a single member spanning 22m14s, full
+   * run span ~45m43s). This is NOT the wall-clock span of the run's agents —
+   * consumers wanting that should derive it from the member subagents'
+   * `startedAt`/`endedAt` instead (see `@junrei/web`'s
+   * `agentTree.ts:memberSpanDurationMs`).
+   */
   durationMs?: number;
   phases: WorkflowPhase[];
   /** agentId -> that agent's `workflow_agent` progress entry. */

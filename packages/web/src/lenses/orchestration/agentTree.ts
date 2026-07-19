@@ -210,6 +210,16 @@ export interface WorkflowHeaderRow {
   name?: string;
   status?: string;
   agentCount: number;
+  /**
+   * The run's member-span rollup (`memberSpanDurationMs`, earliest member
+   * `startedAt` to latest `endedAt` across the whole subtree) — NOT the raw
+   * `ClaudeWorkflowRunSummary.durationMs` from the run-state file. Falls back
+   * to that raw value only when no member carries a usable timestamp (see
+   * `groupedTreeRows`). This distinction matters: the run-state value covers
+   * only the FINAL execution segment of a killed-and-resumed run and can be
+   * far shorter than the run's true span — see `memberSpanDurationMs`'s doc
+   * comment for the verified case.
+   */
   durationMs?: number;
   rollup: { tokens: number; costUsd: number };
 }
@@ -243,6 +253,68 @@ function earliestStartedAt(nodes: readonly SubagentNodeJson[]): string | undefin
     if (earliest === undefined || n.startedAt < earliest) earliest = n.startedAt;
   }
   return earliest;
+}
+
+/**
+ * Wall-clock span (ms) covered by a run's member nodes AND every descendant
+ * — the same subtree walk `subtreeTokens`/`subtreeCost` use (`children`,
+ * recursively) — from the earliest `startedAt` to the latest `endedAt`
+ * across the whole set. This is the `WorkflowHeaderRow.durationMs` basis
+ * (see that field's doc comment), NOT a general-purpose duration helper.
+ *
+ * WHY member span is authoritative for the header, instead of the run-state
+ * `ClaudeWorkflowRunSummary.durationMs`: verified against a real session
+ * (claude-code session 87da72a3-5ecf-4688-8ff8-3ff833be7013, run
+ * wf_9bbab5e3-d95 "pr1-core-mcp") that the run-state file's `durationMs`
+ * equals `timestamp - startTime` of the FINAL Workflow invocation only. When
+ * a run is killed/interrupted and later resumed reusing the same runId, the
+ * harness overwrites the state file and `startTime` resets to the resumed
+ * invocation's start (`startTime + durationMs === timestamp`, confirmed) —
+ * so a resumed run's `durationMs` covers only its last execution segment and
+ * can be SHORTER than a single one of its own members' duration (observed:
+ * a 275223ms/4m35s run-state value vs. a 22m14s member; the run's full
+ * member span across segments was ~45m43s). Member `startedAt`/`endedAt`,
+ * by contrast,
+ * accumulate across every execution segment regardless of resume, so their
+ * span is the only reliable stand-in. The run-state file carries no resume
+ * marker (no `resumedFromRunId`), so resumption can't be detected and
+ * special-cased instead.
+ *
+ * Deliberately does NOT require every member to have `endedAt`: while a run
+ * is still in flight, this covers the members finished so far and grows as
+ * more complete. Requiring full coverage (and falling back to the stale
+ * run-state value otherwise) would resurrect exactly the contradiction above
+ * for any run still running — an in-progress run's stale run-state
+ * `durationMs` (or none at all, for a synthesized still-running summary) is
+ * a worse answer than a partial member span.
+ *
+ * Known, accepted trade-off: for a normal, uninterrupted run this slightly
+ * UNDERcounts harness overhead before the first member starts and after the
+ * last one ends (~9s observed on one 52m47s run) — the header reads a few
+ * seconds short rather than risking the resume bug above.
+ *
+ * `undefined` when no member (or descendant) has a usable `startedAt`, or
+ * none has a usable `endedAt` — the caller falls back to the run-state value.
+ */
+export function memberSpanDurationMs(nodes: readonly SubagentNodeJson[]): number | undefined {
+  let min: number | undefined;
+  let max: number | undefined;
+  const visit = (list: readonly SubagentNodeJson[]) => {
+    for (const n of list) {
+      if (n.startedAt !== undefined) {
+        const start = Date.parse(n.startedAt);
+        if (Number.isFinite(start) && (min === undefined || start < min)) min = start;
+      }
+      if (n.endedAt !== undefined) {
+        const end = Date.parse(n.endedAt);
+        if (Number.isFinite(end) && (max === undefined || end > max)) max = end;
+      }
+      visit(n.children);
+    }
+  };
+  visit(nodes);
+  if (min === undefined || max === undefined || max < min) return undefined;
+  return max - min;
 }
 
 /**
@@ -327,13 +399,18 @@ export function groupedTreeRows(
       }),
       { tokens: 0, costUsd: 0 },
     );
+    // Member span wins whenever it's usable — only a run with no
+    // member/descendant timestamps at all falls back to the run-state
+    // value, which for a killed-and-resumed run covers only its last
+    // execution segment (see `memberSpanDurationMs`'s doc comment).
+    const durationMs = memberSpanDurationMs(members) ?? run.durationMs;
     out.push({
       kind: "workflow-header",
       runId: run.runId,
       ...(run.name !== undefined && { name: run.name }),
       ...(run.status !== undefined && { status: run.status }),
       agentCount: run.agentCount,
-      ...(run.durationMs !== undefined && { durationMs: run.durationMs }),
+      ...(durationMs !== undefined && { durationMs }),
       rollup,
     });
 
