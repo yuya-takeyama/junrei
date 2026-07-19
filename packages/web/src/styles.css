@@ -1487,23 +1487,31 @@ button.fb {
    comment for why it's absent from `CODEX_LENSES`.
    --------------------------------------------------------------------- */
 
-/* Cost by command table (COST BY COMMAND) — command label, calls, errors,
-   ~est $, $ share, orch %, est. tokens; `.chars` adds total/avg result
-   chars behind the lens's chars toggle (see `Bash.tsx`'s `showChars`). */
+/* Shared tool/command ranking table (Tools lens "All" ranking AND the
+   re-anchored Bash "Cost by command" table) — label, calls, errors, ~est $,
+   $-share bar, orch %, chars/est.tokens, and a trailing slot (the All table's
+   "drill down →" link; an empty spacer in the Bash table for column parity).
+   `.chars` swaps the trailing slot for the Bash table's total/avg result-char
+   columns behind its chars toggle (see `Bash.tsx`'s `showChars`). */
 .bcmd {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px 40px 76px 68px 64px 84px;
+  grid-template-columns: minmax(0, 1fr) 50px 38px 72px minmax(140px, 1fr) 52px 82px 90px;
   gap: 10px;
   align-items: center;
-  padding: 6px 16px;
+  padding: 7px 16px;
   border-bottom: 1px dotted var(--bd);
   font-size: 12px;
 }
 .bcmd.chars {
-  grid-template-columns: minmax(0, 1fr) 48px 40px 76px 68px 64px 84px 76px 76px;
+  grid-template-columns: minmax(0, 1fr) 50px 38px 72px minmax(140px, 1fr) 52px 82px 76px 76px;
 }
 .bcmd.hdr {
   border-bottom: 1px solid var(--bd);
+}
+/* Totals roll-up row (Tools "All" ranking) — a top rule, no bottom rule. */
+.bcmd.tot {
+  border-top: 1px solid var(--bd);
+  border-bottom: none;
 }
 
 /* Heavy hitters table (EVIDENCE) — rank, command, thread badge, result
@@ -1558,6 +1566,241 @@ button.fb {
 .sortind {
   font-size: 7px;
   line-height: 1;
+}
+
+/* ---------------------------------------------------------------------
+   Tools lens (L2) — a two-sub-tab shell (All / Bash) over the session's
+   cross-tool analytics. The "All" sub-tab (Tools.tsx → AllView.tsx) adds a
+   decision strip, a cross-tool ranking (sharing `.bcmd` above), a built-in-vs
+   -MCP source split, an errors-by-tool × category matrix, and cross-tool
+   heavy hitters. Data-only, no judgment language (see AllView.tsx) — every $
+   figure is `~`/"(est)"-labeled. Maps onto the existing token palette; no new
+   colors.
+   --------------------------------------------------------------------- */
+
+/* Second-level sub-nav (Tools.tsx) — "TOOLS ▸ ALL | BASH" breadcrumb + the
+   two sub-tab anchors with an amber underline for the active one, a `~$` cost
+   hint, and a right-aligned scope hint. */
+.subnav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0 11px;
+  margin-top: 16px;
+  border-top: 1px dotted var(--bd);
+}
+.subnav-crumb {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+.subtab {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mut);
+  padding: 3px 1px;
+  border-bottom: 2px solid transparent;
+}
+.subtab.on {
+  color: var(--amb);
+  border-bottom-color: var(--amb);
+}
+.subtab:hover {
+  color: var(--tx);
+}
+.subtab.on:hover {
+  color: var(--amb);
+}
+.subcost {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mut);
+  opacity: 0.8;
+}
+.subnav-hint {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mut);
+  opacity: 0.85;
+}
+
+/* Tool-name cell + MCP badge + drill-down link (shared tool/command ranking). */
+.tname {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tbadge {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--bd);
+  color: var(--mut);
+  display: inline-block;
+}
+.drill {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--amb);
+  white-space: nowrap;
+}
+.drill:hover {
+  text-decoration: underline;
+}
+
+/* Inline $-share bar (`.bcmd`'s `$ share` column) — a track + fill scaled to
+   the table's largest share, with the actual percent alongside. */
+.shcell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.shtrk {
+  flex: 1;
+  height: 9px;
+  background: var(--bg);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+.shfill {
+  display: block;
+  height: 9px;
+  background: var(--amb);
+  border-radius: 2px;
+}
+.shpct {
+  width: 40px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* Decision strip (AllView.tsx) — 4 pure-data cards, each with a headline
+   value, an optional meter, and muted sub-lines. */
+.dstrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.dcard {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dcard-v {
+  font-family: var(--mono);
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.dcard-v .big {
+  font-size: 21px;
+}
+.dcard-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mut);
+  line-height: 1.5;
+}
+.meter {
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.meter > span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--amb);
+}
+.meter > span.mut {
+  background: var(--mut);
+  opacity: 0.7;
+}
+
+/* Source split bar (AllView.tsx) — built-in vs MCP, one segment each. */
+.splitbar {
+  display: flex;
+  height: 12px;
+  width: 100%;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.splitseg {
+  height: 12px;
+}
+.split-legend {
+  display: flex;
+  gap: 20px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* Errors-by-tool × category matrix (AllView.tsx) — grid columns are set
+   inline (only the categories that appear render), so this rule carries only
+   the shared row chrome. `.z` dims a zero cell; `.emxh` is a two-line header. */
+.emx {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.emx.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+.emx.tot {
+  border-bottom: none;
+  border-top: 1px solid var(--bd);
+}
+.emx .z {
+  opacity: 0.28;
+}
+.emxh {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mut);
+  text-align: right;
+  line-height: 1.25;
+}
+
+/* Cross-tool heavy hitters table (AllView.tsx) — rank, result, tool badge,
+   thread, chars, ~$. */
+.hh {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 60px 98px 62px 58px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 16px;
+  border-bottom: 1px dotted var(--bd);
+  font-size: 12px;
+}
+.hh.hdr {
+  border-bottom: 1px solid var(--bd);
+}
+.hh:last-child {
+  border-bottom: none;
 }
 
 /* ---------------------------------------------------------------------

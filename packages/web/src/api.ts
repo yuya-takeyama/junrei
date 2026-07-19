@@ -89,6 +89,8 @@ export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
 export type WorkflowRunSummaryJson = SessionJson["workflowRuns"][number];
 /** Bash-command analytics, both harnesses — see `BashStats` in `@junrei/core`'s `shared/bash-stats.ts` (`SessionAnalysisCore.bashStats`). */
 export type BashStatsJson = SessionJson["bashStats"];
+/** Cross-tool usage analytics, both harnesses — see `ToolUsageStats` in `@junrei/core`'s `shared/tool-usage-stats.ts` (`SessionAnalysisCore.toolUsageStats`). Backs the Tools lens's "All" sub-tab. Its `byThread` is type-identical to `BashStatsJson["byThread"]`, so the Bash lens's `WhoPaidPanel` renders against it unchanged. */
+export type ToolUsageStatsJson = SessionJson["toolUsageStats"];
 
 /**
  * Either harness's full session analysis, discriminated on `source` — shared
