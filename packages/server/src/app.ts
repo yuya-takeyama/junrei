@@ -7,6 +7,7 @@ import {
   computeTrends,
   createLearning,
   extractSessionId,
+  type LearningSource,
   type LearningStatus,
   type LearningVerification,
   updateLearning,
@@ -19,6 +20,7 @@ import {
   buildRepoBriefing,
   buildSessionInsightFor,
   listLearningsForRepo,
+  mergeLearningSourceSessions,
   resolveLearningRepoRoot,
 } from "./insight.js";
 import { createMcpServer } from "./mcp.js";
@@ -291,6 +293,7 @@ export function createApp(options: CreateAppOptions = {}) {
           repoPath?: string;
           source?: "claude-code" | "codex";
           sessionId?: string;
+          sourceSessions?: LearningSource[];
           id?: string;
           finding?: string;
           change?: string;
@@ -304,23 +307,27 @@ export function createApp(options: CreateAppOptions = {}) {
         } catch {
           return c.json({ error: "request body must be JSON" } as const, 400);
         }
-        const repoRoot = await resolveLearningRepoRoot({
-          ...(body.repoPath !== undefined && { repoPath: body.repoPath }),
+        // `sourceSessions` (an analyze_session recommendation's `logLearningCall.sourceSessions`,
+        // passed verbatim) wins over the top-level source+sessionId pair; both present merges the
+        // pair in when it isn't already one of the array's entries — see `mergeLearningSourceSessions`.
+        const sourceSessions = mergeLearningSourceSessions({
+          ...(body.sourceSessions !== undefined && { sourceSessions: body.sourceSessions }),
           ...(body.source !== undefined && { source: body.source }),
           ...(body.sessionId !== undefined && { sessionId: body.sessionId }),
+        });
+        const repoRoot = await resolveLearningRepoRoot({
+          ...(body.repoPath !== undefined && { repoPath: body.repoPath }),
+          sourceSessions,
         });
         if (repoRoot === undefined) {
           return c.json(
             {
-              error: "could not resolve a repo root — pass repoPath, or source + sessionId",
+              error:
+                "could not resolve a repo root — pass repoPath, or source + sessionId (or sourceSessions)",
             } as const,
             400,
           );
         }
-        const sourceSessions =
-          body.source !== undefined && body.sessionId !== undefined
-            ? [{ source: body.source, sessionId: body.sessionId }]
-            : [];
         if (body.id === undefined) {
           if (body.finding === undefined || body.change === undefined) {
             return c.json(

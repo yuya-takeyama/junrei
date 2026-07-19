@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildSessionInsight, type LearningSource } from "@junrei/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -445,6 +446,172 @@ describe("MCP loop surface", () => {
       const applied = body.learnings.find((l) => l.learning.status === "applied");
       expect(applied?.comparison?.windowDays).toBe(7);
       expect(applied?.comparison?.suggestedVerification.metric).toBe("costPerDayUsd");
+    });
+
+    describe("sourceSessions provenance (dogfood fix: create-mode used to silently drop it)", () => {
+      it("round-trips an actual analyze_session recommendation's logLearningCall verbatim", async () => {
+        client = await connect();
+        // A minimal-but-real buildSessionInsight fixture — same shape the live
+        // bug was caught with (a large Bash result waste finding).
+        const insight = buildSessionInsight({
+          source: "claude-code",
+          sessionId: "a19ae6e1-b2ef-4c11-8a1a-000000000001",
+          title: "30k-char pnpm result inside",
+          detail: "full",
+          totalCostUsd: 5,
+          costIsComplete: true,
+          models: ["opus"],
+          delegation: {
+            main: { tokens: 1000, outputTokens: 400, costUsd: 5, messageCount: 10 },
+            subagents: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+            byModel: [],
+            costIsComplete: true,
+          },
+          opportunities: [
+            {
+              class: "large-result",
+              title: "30k-char pnpm result inside",
+              lever: "command-flag",
+              fixText: "Use a quieter pnpm flag instead of piping the full output.",
+              estUsdSaved: 0.5,
+              savingsBasis: "heuristic",
+              occurrenceCount: 1,
+              totalChars: 30000,
+              threads: ["main"],
+              evidence: [],
+            },
+          ],
+          byThread: [
+            {
+              thread: "main",
+              calls: 1,
+              errors: 0,
+              inputChars: 10,
+              resultChars: 30000,
+              estimatedTokens: 8000,
+              charsSharePct: 100,
+            },
+          ],
+        });
+
+        const recommendation = insight.recommendations[0];
+        expect(recommendation).toBeDefined();
+        const logLearningCall = recommendation?.logLearningCall;
+        // The exact shape a real recommendation hands the caller: finding,
+        // change, expectedEffect?, and — the field the bug dropped — sourceSessions.
+        expect(logLearningCall?.sourceSessions).toEqual([
+          {
+            source: "claude-code",
+            sessionId: "a19ae6e1-b2ef-4c11-8a1a-000000000001",
+            title: "30k-char pnpm result inside",
+          },
+        ]);
+
+        // Pass the logLearningCall payload VERBATIM, exactly as the tool
+        // description and skill instruct — this is the call shape that used
+        // to silently save `sourceSessions: []`.
+        const created = await client.callTool({
+          name: "log_learning",
+          arguments: { repoPath, ...logLearningCall },
+        });
+        expect(created.isError).not.toBe(true);
+        const body = JSON.parse(textOf(created)) as {
+          learning: { sourceSessions: LearningSource[]; finding: string; change: string };
+        };
+        expect(body.learning.finding).toBe(logLearningCall?.finding);
+        expect(body.learning.change).toBe(logLearningCall?.change);
+        expect(body.learning.sourceSessions).toEqual(logLearningCall?.sourceSessions);
+      });
+
+      it("an explicit sourceSessions array alone is saved verbatim, multi-entry included", async () => {
+        client = await connect();
+        const sourceSessions: LearningSource[] = [
+          { source: "claude-code", sessionId: "sess-x", title: "Session X" },
+          { source: "codex", sessionId: "sess-y" },
+        ];
+        const created = await client.callTool({
+          name: "log_learning",
+          arguments: {
+            repoPath,
+            finding: "multi-session pattern",
+            change: "generalize the fix",
+            sourceSessions,
+          },
+        });
+        expect(created.isError).not.toBe(true);
+        const body = JSON.parse(textOf(created)) as {
+          learning: { sourceSessions: LearningSource[] };
+        };
+        expect(body.learning.sourceSessions).toEqual(sourceSessions);
+      });
+
+      it("top-level source+sessionId alone still attaches single-session provenance (pre-existing behavior)", async () => {
+        client = await connect();
+        const created = await client.callTool({
+          name: "log_learning",
+          arguments: {
+            repoPath,
+            finding: "single-session finding",
+            change: "single-session fix",
+            source: "claude-code",
+            sessionId: "sess-legacy",
+          },
+        });
+        expect(created.isError).not.toBe(true);
+        const body = JSON.parse(textOf(created)) as {
+          learning: { sourceSessions: LearningSource[] };
+        };
+        expect(body.learning.sourceSessions).toEqual([
+          { source: "claude-code", sessionId: "sess-legacy" },
+        ]);
+      });
+
+      it("both present, top-level pair absent from the array: sourceSessions wins, pair is merged in", async () => {
+        client = await connect();
+        const created = await client.callTool({
+          name: "log_learning",
+          arguments: {
+            repoPath,
+            finding: "merge-in case",
+            change: "merge-in fix",
+            sourceSessions: [{ source: "claude-code", sessionId: "sess-x" }],
+            source: "codex",
+            sessionId: "sess-z",
+          },
+        });
+        expect(created.isError).not.toBe(true);
+        const body = JSON.parse(textOf(created)) as {
+          learning: { sourceSessions: LearningSource[] };
+        };
+        expect(body.learning.sourceSessions).toEqual([
+          { source: "claude-code", sessionId: "sess-x" },
+          { source: "codex", sessionId: "sess-z" },
+        ]);
+      });
+
+      it("both present, top-level pair already in the array: no duplicate is added", async () => {
+        client = await connect();
+        const sourceSessions: LearningSource[] = [
+          { source: "claude-code", sessionId: "sess-x" },
+          { source: "codex", sessionId: "sess-z" },
+        ];
+        const created = await client.callTool({
+          name: "log_learning",
+          arguments: {
+            repoPath,
+            finding: "no-dup case",
+            change: "no-dup fix",
+            sourceSessions,
+            source: "codex",
+            sessionId: "sess-z",
+          },
+        });
+        expect(created.isError).not.toBe(true);
+        const body = JSON.parse(textOf(created)) as {
+          learning: { sourceSessions: LearningSource[] };
+        };
+        expect(body.learning.sourceSessions).toEqual(sourceSessions);
+      });
     });
   });
 

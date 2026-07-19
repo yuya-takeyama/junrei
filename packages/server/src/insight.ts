@@ -27,6 +27,7 @@ import {
   type FindPatternsResult,
   findPatterns,
   type Learning,
+  type LearningSource,
   type LearningStatus,
   type LearningVerification,
   listLearnings,
@@ -309,22 +310,57 @@ export async function listLearningsForRepo(options: {
 
 /**
  * Resolve the repo root a learning should be created/updated under for a
- * `log_learning` upsert: an explicit `repoPath` wins; otherwise the source
- * session's own `cwd` is normalized via `resolveRepoRoot` (stripping any
- * worktree suffix so every worktree shares one ledger). `undefined` when
- * neither is available (the caller then reports the ambiguity).
+ * `log_learning` upsert: an explicit `repoPath` wins; otherwise the FIRST
+ * `sourceSessions` entry's own `cwd` is normalized via `resolveRepoRoot`
+ * (stripping any worktree suffix so every worktree shares one ledger); else
+ * the top-level `source`+`sessionId` pair (pre-`sourceSessions` behavior).
+ * `undefined` when none of those is available (the caller then reports the
+ * ambiguity).
  */
 export async function resolveLearningRepoRoot(input: {
   repoPath?: string;
   source?: SessionSource;
   sessionId?: string;
+  sourceSessions?: LearningSource[];
 }): Promise<string | undefined> {
   if (input.repoPath !== undefined && input.repoPath !== "") return input.repoPath;
-  if (input.source !== undefined && input.sessionId !== undefined) {
-    const analysis = await loadAnalysis(input.source, input.sessionId);
+  const first = input.sourceSessions?.[0];
+  const source = first?.source ?? input.source;
+  const sessionId = first?.sessionId ?? input.sessionId;
+  if (source !== undefined && sessionId !== undefined) {
+    const analysis = await loadAnalysis(source, sessionId);
     if (analysis?.cwd !== undefined) return resolveRepoRoot(analysis.cwd);
   }
   return undefined;
+}
+
+/**
+ * Reconcile a create/update call's `sourceSessions` array against a
+ * top-level `source`+`sessionId` pair, per `log_learning`'s create-mode
+ * precedence: an explicit `sourceSessions` array wins over the top-level
+ * pair; if BOTH are present, the array wins but the top-level pair is
+ * merged in when it isn't already one of the array's entries (matched by
+ * `source`+`sessionId`). An empty/absent array falls back to the top-level
+ * pair alone (the pre-`sourceSessions` behavior); with neither, `[]`.
+ */
+export function mergeLearningSourceSessions(input: {
+  sourceSessions?: LearningSource[];
+  source?: SessionSource;
+  sessionId?: string;
+}): LearningSource[] {
+  const provided = input.sourceSessions ?? [];
+  if (provided.length > 0) {
+    if (input.source === undefined || input.sessionId === undefined) return provided;
+    const alreadyPresent = provided.some(
+      (s) => s.source === input.source && s.sessionId === input.sessionId,
+    );
+    return alreadyPresent
+      ? provided
+      : [...provided, { source: input.source, sessionId: input.sessionId }];
+  }
+  return input.source !== undefined && input.sessionId !== undefined
+    ? [{ source: input.source, sessionId: input.sessionId }]
+    : [];
 }
 
 // ---------------------------------------------------------------------------

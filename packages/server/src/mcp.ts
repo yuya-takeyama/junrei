@@ -63,6 +63,7 @@ import {
   buildRepoBriefing,
   buildSessionInsightFor,
   findPatternsFor,
+  mergeLearningSourceSessions,
   resolveLearningRepoRoot,
   reviewLearningsFor,
 } from "./insight.js";
@@ -664,12 +665,15 @@ const GET_EVIDENCE_DESCRIPTION =
 
 const LOG_LEARNING_DESCRIPTION =
   "Record (or update) a learning in the repo-local ledger under `<repoRoot>/.junrei/learnings/` — an UPSERT. " +
-  "Create: omit `id`, pass `finding` + `change` (an analyze_session recommendation's `logLearningCall` fills " +
-  "these); the repoRoot is `repoPath` if given, else derived from the source session's cwd. Update: pass the " +
-  "`id` plus a `status` transition (open -> applied -> verified/rejected — applied stamps appliedAt, " +
-  "verified/rejected stamps resolvedAt) and/or a `verification` measurement. This is the ONLY tool that " +
-  "writes a learning. Returns the saved learning, its file path, and nextSteps for closing the loop " +
-  "(apply -> review_learnings -> verify).";
+  "Create: omit `id`, pass `finding` + `change` — an analyze_session recommendation's `logLearningCall` " +
+  "object is accepted VERBATIM (pass it as the call's arguments, `sourceSessions` included) so its " +
+  "provenance is preserved exactly; the repoRoot is `repoPath` if given, else derived from the FIRST " +
+  "`sourceSessions` entry's cwd, else the top-level `source`+`sessionId` session's cwd. `sourceSessions` " +
+  "wins over `source`+`sessionId` when both are given (that pair is merged in if it isn't already one of " +
+  "the array's entries). Update: pass the `id` plus a `status` transition (open -> applied -> " +
+  "verified/rejected — applied stamps appliedAt, verified/rejected stamps resolvedAt) and/or a " +
+  "`verification` measurement. This is the ONLY tool that writes a learning. Returns the saved learning, " +
+  "its file path, and nextSteps for closing the loop (apply -> review_learnings -> verify).";
 
 const REVIEW_LEARNINGS_DESCRIPTION =
   "The did-it-help step: read-only listing of a repo's open + applied learnings, with a COMPUTED before/after " +
@@ -925,6 +929,22 @@ export function createMcpServer(): McpServer {
           .string()
           .optional()
           .describe("Source session id — attaches provenance + resolves repoRoot"),
+        sourceSessions: z
+          .array(
+            z.object({
+              source: z.enum(["claude-code", "codex"]),
+              sessionId: z.string(),
+              title: z.string().optional(),
+            }),
+          )
+          .optional()
+          .describe(
+            "Full provenance list — pass an analyze_session recommendation's " +
+              "`logLearningCall.sourceSessions` VERBATIM to preserve every contributing session. " +
+              "Wins over `source`+`sessionId` when both are given (that pair is merged in if it " +
+              "isn't already one of the array's entries); also resolves repoRoot from its first " +
+              "entry's session cwd when `repoPath` is omitted.",
+          ),
         id: z
           .string()
           .optional()
@@ -957,21 +977,33 @@ export function createMcpServer(): McpServer {
       },
     },
     async (args) => {
-      const repoRoot = await resolveLearningRepoRoot({
-        ...(args.repoPath !== undefined && { repoPath: args.repoPath }),
+      // Zod's `.optional()` infers `title?: string | undefined`, which
+      // `exactOptionalPropertyTypes` rejects against `LearningSource`'s
+      // `title?: string` — normalize away an explicit `undefined` before merging.
+      const normalizedSourceSessions: LearningSource[] | undefined = args.sourceSessions?.map(
+        (s) => ({
+          source: s.source,
+          sessionId: s.sessionId,
+          ...(s.title !== undefined && { title: s.title }),
+        }),
+      );
+      const sourceSessions: LearningSource[] = mergeLearningSourceSessions({
+        ...(normalizedSourceSessions !== undefined && {
+          sourceSessions: normalizedSourceSessions,
+        }),
         ...(args.source !== undefined && { source: args.source }),
         ...(args.sessionId !== undefined && { sessionId: args.sessionId }),
+      });
+      const repoRoot = await resolveLearningRepoRoot({
+        ...(args.repoPath !== undefined && { repoPath: args.repoPath }),
+        sourceSessions,
       });
       if (repoRoot === undefined) {
         return toolError(
           "Could not resolve a repo root for this learning — pass `repoPath` (an absolute repoRoot), " +
-            "or `source` + `sessionId` so it can be derived from the session's cwd.",
+            "or `source` + `sessionId` (or `sourceSessions`) so it can be derived from the session's cwd.",
         );
       }
-      const sourceSessions: LearningSource[] =
-        args.source !== undefined && args.sessionId !== undefined
-          ? [{ source: args.source, sessionId: args.sessionId }]
-          : [];
 
       if (args.id === undefined) {
         if (args.finding === undefined || args.change === undefined) {
