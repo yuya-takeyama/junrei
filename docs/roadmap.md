@@ -17,6 +17,12 @@ classification, context lifetime, opus-message ratio, turn-budget distribution)
 and ⬜ a what-if cost simulator (re-simulate a session's cost under per-PR
 compaction / screenshot eviction — verification queue D1/D5).
 
+- ✅ Deterministic toolkit (backlog B2/B3/B5/B6): `scripts/ship-pr.mjs`,
+  `scripts/gate.mjs` (`pnpm gate`), `scripts/repo-map.mjs`,
+  `scripts/bootstrap.mjs`, plus the reusable PR-cycle Workflow template
+  (`.claude/workflows/pr-cycle.js`) — procedures moved out of per-agent
+  re-derivation into replayable code (R5/R10).
+
 ### Renewal: insight layer & learnings loop (2026-07-19)
 
 The pivot from an agent-statistics analyzer to self-improvement-loop

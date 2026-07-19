@@ -146,15 +146,20 @@ that as the common failure background, not a per-archetype signal.
 
 ## 3. Deterministic-tool backlog (priority order)
 
-| # | Tool | Behavior it replaces | Class |
-|---|---|---|---|
-| B1 | Per-PR context reset / auto-compact hook | never-compacted marathon | **XL** |
-| B2 | `ship-pr` script | 8–11 shepherd spawns + CI watch | M |
-| B3 | pre-commit format+lint single gate | lint whack-a-mole ~7×/feature | M |
-| B4 | Evict post-verify screenshots / large tool_results | 1.67MB re-read every turn | L–M |
-| B5 | Repo-map generator (Haiku, cached) | 1278 bash re-exploration calls | M |
-| B6 | Env bootstrap (`aqua i -l`) | 4.4min env-hunt before first edit | S |
-| B7 | Route marathon-shaped work to a cheaper model / Codex | Fable-for-everything (Codex same shape $7–12 vs $131, D3) | XL |
+| # | Tool | Behavior it replaces | Class | Status |
+|---|---|---|---|---|
+| B1 | Per-PR context reset / auto-compact hook | never-compacted marathon | **XL** | ⬜ |
+| B2 | `ship-pr` script | 8–11 shepherd spawns + CI watch | M | ✅ `scripts/ship-pr.mjs` |
+| B3 | pre-commit format+lint single gate | lint whack-a-mole ~7×/feature | M | ✅ `scripts/gate.mjs` (`pnpm gate`) |
+| B4 | Evict post-verify screenshots / large tool_results | 1.67MB re-read every turn | L–M | ⬜ |
+| B5 | Repo-map generator (deterministic) | 1278 bash re-exploration calls | M | ✅ `scripts/repo-map.mjs` |
+| B6 | Env bootstrap (`aqua i -l`) | 4.4min env-hunt before first edit | S | ✅ `scripts/bootstrap.mjs` |
+| B7 | Route marathon-shaped work to a cheaper model / Codex | Fable-for-everything (Codex same shape $7–12 vs $131, D3) | XL | ⬜ |
+
+The proven PR cycle (Implement → Review → Fix-if-needed → Ship-without-merge) is
+encoded as a reusable Workflow script at `.claude/workflows/pr-cycle.js` (R5:
+control flow in code, not prose). B5's repo map is deterministic (no LLM) —
+`git ls-files` + leading-doc-comment roles — so it is reproducible and free.
 
 ## 4. Verification queue (cheapest first)
 

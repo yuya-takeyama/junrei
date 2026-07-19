@@ -58,7 +58,10 @@ or routing question commits to nothing.
   implementation-tier worker with a self-contained prompt; split across
   workers only when the pieces are truly independent.
 - **UI verification goes to `preview-verifier`; commit/push/PR/CI chores go
-  to `pr-shepherd`.** Both harnesses define these as standing roles.
+  to `pr-shepherd`.** Both harnesses define these as standing roles. Point
+  pr-shepherd-style chores at `scripts/ship-pr.mjs` (branch→commit→rebase→push→
+  draft PR→CI-watch, no merge) and run quality gates once via `pnpm gate`
+  (`scripts/gate.mjs`) rather than re-deriving either procedure per session.
 - **Do not delegate trivia.** A task the orchestrator finishes in about five
   tool calls (a one-line fix, a quick status check, reading one file) costs
   less inline than the spawn overhead plus handoff.
