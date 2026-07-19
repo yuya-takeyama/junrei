@@ -12,11 +12,10 @@ interface Props<K extends string> {
 }
 
 /**
- * One clickable, sortable header cell — shared by `CommandRankingTable`,
- * `HeavyHittersTable`, and `WasteDetectionPanel`'s flat waste grids so the
- * "button + aria-sort + ▲/▼ indicator" markup exists in exactly one place
- * (a v2 redesign of these tables inherits it as-is; see `tableSort.ts`'s
- * doc comment for the fuller "why a primitive" rationale).
+ * One clickable, sortable header cell — shared by `CommandRankingTable` and
+ * `HeavyHittersTable` so the "button + aria-sort + ▲/▼ indicator" markup
+ * exists in exactly one place (see `tableSort.ts`'s doc comment for the
+ * fuller "why a primitive" rationale).
  *
  * Stays a plain function component — no state of its own. The click just
  * hands the table's owner (`sortSpec`/`onSortChange` come from a `useState`
@@ -31,14 +30,13 @@ interface Props<K extends string> {
  * roles, and Biome's a11y rules (`useAriaPropsSupportedByRole`,
  * `useSemanticElements`, `useFocusableInteractive`) push toward the native
  * element over faking the role on a `<span>`. `<th>` blockifies fine as a
- * CSS Grid item (see `styles.css`'s `.bcmd th, .bhh th, .bflat th` reset for
- * the table header chrome — bold/centered/padded — it doesn't want here), so
- * it slots into the existing `.bcmd`/`.bhh`/`.bflat` grid rows unchanged.
- * Those three grids (plus their header/data row `<div>`s) also carry
- * `role="table"`/`role="row"` at their call sites — `<th>`'s implicit
- * columnheader role, and thus `aria-sort`, is only guaranteed to reach
- * assistive tech with that ancestry in place, since these grids have no real
- * `<table>` ancestor.
+ * CSS Grid item (see `styles.css`'s `.bcmd th, .bhh th` reset for the table
+ * header chrome — bold/centered/padded — it doesn't want here), so it slots
+ * into the existing `.bcmd`/`.bhh` grid rows unchanged. Those two grids
+ * (plus their header/data row `<div>`s) also carry `role="table"`/
+ * `role="row"` at their call sites — `<th>`'s implicit columnheader role,
+ * and thus `aria-sort`, is only guaranteed to reach assistive tech with
+ * that ancestry in place, since these grids have no real `<table>` ancestor.
  */
 export function SortableHeaderCell<K extends string>({
   label,

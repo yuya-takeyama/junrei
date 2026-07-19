@@ -117,6 +117,36 @@ subagent), estimated-token figures always marked as estimates
   `wallClockMs` (undocumented wire shape); Codex has no
   `run_in_background` concept, so a Codex session's `background` is always
   `[]`.
+- ✅ v2 redesign — the v1 tab was rejected by the product owner as a data
+  dump ("これを見てどんなインサイトが得られるんだよ"); a 4-lens design
+  process ("Goshuin"-style decision doc) converged on money-attribution +
+  actionable fixes over raw counts.
+  - ✅ Web: sortable columns for the Bash tab's tables, via a reusable
+    `tableSort.ts` primitive (#145)
+  - ✅ Core: $-weighting (`estUsdForChars`, `BashStats.totals.estUsd`/
+    `byThread[].estUsd`/`byCommand[].estUsd`) + `computeBashOpportunities`
+    (`bash-opportunities.ts`) turning `waste`/`byThread` into ranked,
+    templated fix suggestions (`BashOpportunity[]`, class/lever/fixText/
+    estUsdSaved with a measured\|heuristic\|none savings basis) (#146)
+  - ✅ Baselines: `bashSummary` on session-list items, `RepoOverview.bash`
+    (repo-wide rollup + per-session `resultChars`/`estUsd` distribution),
+    and `percentileRank` (`@junrei/core`) for ranking one session's figure
+    against its repo's history (#147)
+  - ✅ Web: the redesigned tab itself — a header strip (headline ~$ figure +
+    a server-computed percentile chip, `bash-percentile.ts` on
+    `packages/server`, gated on >=5 Bash-tracked sessions in the repo; a
+    Codex session's chip carries a main-thread-only-basis caveat), a WHO
+    PAID panel (chars-share vs. $-share bars per thread, subagent rows
+    aggregated by model beyond the top 3), a Fix Queue (ranked
+    `BashOpportunity` cards with a copy-ready `fixText` block and an
+    expandable evidence list wired to the record slide-over), and the
+    Cost by command table re-anchored on money (chars available behind a
+    toggle). The four v1 waste subsections and the four stat tiles are
+    gone — the Fix Queue and header strip replace them respectively; heavy
+    hitters survives as a collapsed-by-default Evidence drill-down.
+  - ⬜ MCP mirror — `get_bash_stats`/`get_trends`-style tools exposing
+    `opportunities`/`byThread`/`estUsd` to analyzing agents the same way
+    the web tab now does (part D)
 
 ## Open items
 

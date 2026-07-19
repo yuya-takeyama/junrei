@@ -38,6 +38,42 @@ export function repoKeyOf(item: AnySessionListItem): string {
   return `${CODEX_FALLBACK_PREFIX}${item.cwd ?? UNKNOWN_CWD}`;
 }
 
+/**
+ * Session-detail analog of `repoKeyOf` above — same repo-key resolution
+ * (same prefixes, same fallback order), but read from a session's own
+ * ANALYSIS fields (`repoRoot`/`source`/`projectDirName` (Claude)/
+ * `gitRepositoryUrl` (Codex)/`cwd`) rather than an `AnySessionListItem`,
+ * since a session-detail route (`GET /api/sessions/.../:id`, app.ts) has no
+ * list item at hand — only the `ClaudeSessionAnalysis`/
+ * `CodexSessionAnalysisWithSubagents` it already fetched. Deliberately a
+ * SEPARATE small function rather than a generalized `repoKeyOf` parameter
+ * type: `AnySessionListItem`'s `projectDirName`/`repoUrl` are discriminated
+ * by the `source` union in a way a plain structural interface can't
+ * reproduce, and duplicating the ~4-line resolution here is the same
+ * "kept in lockstep, not re-imported" tradeoff this file's module doc
+ * comment already accepts for `CLAUDE_FALLBACK_PREFIX` et al. (web's
+ * `repoFilterKey`). Used by `bash-percentile.ts`'s caller (app.ts) to look
+ * up the SAME repo bucket `GET /api/overview`/`get_repo_overview` already
+ * aggregate for that session's own list row, so a session's percentile rank
+ * is computed against its own repo's distribution, not some other bucket.
+ */
+export function repoKeyOfSession(session: {
+  repoRoot?: string;
+  source: SessionSource;
+  projectDirName?: string;
+  gitRepositoryUrl?: string;
+  cwd?: string;
+}): string {
+  if (session.repoRoot !== undefined) return session.repoRoot;
+  if (session.source !== "codex") {
+    return `${CLAUDE_FALLBACK_PREFIX}${session.projectDirName ?? ""}`;
+  }
+  if (session.gitRepositoryUrl !== undefined) {
+    return `${CODEX_REPO_URL_PREFIX}${session.gitRepositoryUrl}`;
+  }
+  return `${CODEX_FALLBACK_PREFIX}${session.cwd ?? UNKNOWN_CWD}`;
+}
+
 /** One UTC calendar day's cost/session-count bucket — see `RepoOverview.perDay`. */
 export interface RepoOverviewDay {
   /** UTC calendar day, `YYYY-MM-DD`. */
