@@ -14,7 +14,7 @@
  * aggregators (`computeTrends`) the rest of the server already relies on.
  */
 
-import { isAbsolute } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import {
   type Briefing,
   type BriefingSessionInput,
@@ -195,6 +195,83 @@ async function knownRepoRoots(): Promise<string[]> {
   return [...roots];
 }
 
+// ---------------------------------------------------------------------------
+// repo parameter ergonomics (bare-name resolution)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fallback-bucket key prefixes — a `repo` starting with one of these names a
+ * bucket with no on-disk checkout (see `overview.ts`'s `repoKeyOf`), so it's
+ * already a valid opaque key and is NEVER treated as a bare name to resolve.
+ */
+const FALLBACK_BUCKET_PREFIXES = ["claude-project:", "codex-repo:", "codex-cwd:"] as const;
+
+/**
+ * Raised when a bare repo name (e.g. `junrei`) matches more than one known
+ * repo root by basename. The caller surfaces the candidates so the user can
+ * re-issue with an unambiguous absolute `repoRoot` — a REST route as a 400,
+ * an MCP tool as an error with the candidates in its message.
+ */
+export class AmbiguousRepoError extends Error {
+  constructor(
+    readonly repo: string,
+    readonly candidates: string[],
+  ) {
+    super(
+      `repo "${repo}" matches ${String(candidates.length)} repo roots — pass an absolute repoRoot instead: ${candidates.join(", ")}`,
+    );
+    this.name = "AmbiguousRepoError";
+  }
+}
+
+/**
+ * Pure repo-key resolution against an already-collected set of known repo
+ * roots — the testable core of `resolveRepoParam` below. Rules, in order:
+ *  - empty/undefined -> no filter (`{ repo: undefined }`).
+ *  - an absolute path (a real `repoRoot`) -> used verbatim.
+ *  - a fallback-bucket key (`claude-project:`/`codex-repo:`/`codex-cwd:`) ->
+ *    used verbatim (it names a bucket, not a checkout).
+ *  - anything else is a BARE NAME: matched against `knownRoots` by `basename`.
+ *    Exactly one match -> that root's absolute path; several -> `candidates`
+ *    (the caller errors); none -> passed through verbatim, so it simply
+ *    matches zero sessions (an honest empty result, never an error).
+ */
+export function resolveRepoAgainstRoots(
+  rawRepo: string | undefined,
+  knownRoots: readonly string[],
+): { repo?: string; candidates?: string[] } {
+  const repo = rawRepo === undefined || rawRepo === "" ? undefined : rawRepo;
+  if (repo === undefined) return {};
+  if (isAbsolute(repo)) return { repo };
+  if (FALLBACK_BUCKET_PREFIXES.some((p) => repo.startsWith(p))) return { repo };
+  const matches = [...new Set(knownRoots.filter((root) => basename(root) === repo))].sort();
+  if (matches.length > 1) return { candidates: matches };
+  // Unique match -> that root's absolute path; no match -> the bare name
+  // verbatim (matches zero sessions, an honest empty result).
+  const [only] = matches;
+  return { repo: only ?? repo };
+}
+
+/**
+ * Resolve a `repo` parameter to a concrete filter key, accepting a bare repo
+ * name (basename of a known repo root) in addition to an absolute `repoRoot`
+ * or a fallback-bucket key — the PR3 ergonomics fix (a live `briefing(repo:
+ * "junrei")` returned 0 rows because the ledger key is an absolute path).
+ * Throws `AmbiguousRepoError` when a bare name matches several roots. Shared
+ * by `buildRepoBriefing`/`findPatternsFor` and the REST `/api/briefing` route
+ * so every surface resolves `repo` identically.
+ */
+export async function resolveRepoParam(rawRepo?: string): Promise<string | undefined> {
+  const repo = rawRepo === undefined || rawRepo === "" ? undefined : rawRepo;
+  if (repo === undefined || isAbsolute(repo)) return repo;
+  if (FALLBACK_BUCKET_PREFIXES.some((p) => repo.startsWith(p))) return repo;
+  const resolution = resolveRepoAgainstRoots(repo, await knownRepoRoots());
+  if (resolution.candidates !== undefined) {
+    throw new AmbiguousRepoError(repo, resolution.candidates);
+  }
+  return resolution.repo;
+}
+
 /**
  * The repo roots a learnings read/review should scan. An explicit `repoPath`
  * (or a `repo` that's itself an absolute path — i.e. a repoRoot) pins the
@@ -271,7 +348,9 @@ export async function buildRepoBriefing(options: {
 }): Promise<Briefing> {
   const days = options.days ?? DEFAULT_BRIEFING_DAYS;
   const detail = options.detail ?? "concise";
-  const repo = options.repo === undefined || options.repo === "" ? undefined : options.repo;
+  // Accepts a bare repo name in addition to an absolute repoRoot / bucket key
+  // (throws AmbiguousRepoError on a multi-match bare name — the caller 400s).
+  const repo = await resolveRepoParam(options.repo);
 
   const nowMs = Date.now();
   const trendsItems = await listAllSessionsInBounds({
@@ -360,7 +439,9 @@ export async function findPatternsFor(options: {
 }): Promise<FindPatternsResult> {
   const days = options.days ?? DEFAULT_PATTERNS_DAYS;
   const detail = options.detail ?? "concise";
-  const repo = options.repo === undefined || options.repo === "" ? undefined : options.repo;
+  // Same bare-name ergonomics as briefing (throws AmbiguousRepoError on a
+  // multi-match bare name — the caller surfaces the candidates).
+  const repo = await resolveRepoParam(options.repo);
 
   if (options.kind === "text") {
     const response = await searchSessions({

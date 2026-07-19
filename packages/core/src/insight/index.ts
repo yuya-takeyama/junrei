@@ -6,6 +6,7 @@
 
 export type {
   Briefing,
+  BriefingDailyCost,
   BriefingLearnings,
   BriefingSessionInput,
   BriefingSubagentLaunch,

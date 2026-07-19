@@ -14,7 +14,12 @@ import {
 import { type Context, Hono } from "hono";
 import { resolveBashPercentile } from "./bash-percentile.js";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
-import { buildRepoBriefing, listLearningsForRepo, resolveLearningRepoRoot } from "./insight.js";
+import {
+  AmbiguousRepoError,
+  buildRepoBriefing,
+  listLearningsForRepo,
+  resolveLearningRepoRoot,
+} from "./insight.js";
 import { createMcpServer } from "./mcp.js";
 import { getRepoOverview } from "./overview.js";
 import {
@@ -240,13 +245,22 @@ export function createApp(options: CreateAppOptions = {}) {
         const days =
           Number.isInteger(rawDays) && rawDays >= 1 && rawDays <= 90 ? rawDays : undefined;
         const detail = c.req.query("detail") === "full" ? "full" : "concise";
-        return c.json(
-          await buildRepoBriefing({
-            ...(repo !== undefined && { repo }),
-            ...(days !== undefined && { days }),
-            detail,
-          }),
-        );
+        try {
+          return c.json(
+            await buildRepoBriefing({
+              ...(repo !== undefined && { repo }),
+              ...(days !== undefined && { days }),
+              detail,
+            }),
+          );
+        } catch (err) {
+          // A bare `repo` name that matched several repo roots — hand back the
+          // candidates so the caller can re-issue with an absolute repoRoot.
+          if (err instanceof AmbiguousRepoError) {
+            return c.json({ error: err.message, candidates: err.candidates } as const, 400);
+          }
+          throw err;
+        }
       })
       // Repo-local learning ledger — GET lists (scanning every known repo root
       // when `repo` is omitted), POST is the SAME upsert `log_learning` runs

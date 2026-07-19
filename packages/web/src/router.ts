@@ -432,11 +432,10 @@ export const ALL_REPOS = "all";
  * until the user picks again, the same failure mode as any other filter
  * param pointing at data that no longer exists.
  *
- * Reused as-is by the Trends screen's own `?repo=` filter (Trends.tsx) — the
- * key semantics are identical (`GET /api/trends`'s `repo` param accepts the
- * same `repoRoot`/fallback-bucket keys as `GET /api/overview`'s, see
- * `trendRepoKey` in `@junrei/core`'s `trends.ts`), so it needs no
- * screen-specific variant.
+ * Reused as-is by the Briefing home's own `?repo=` filter (Home.tsx) — the
+ * key semantics are identical (`GET /api/briefing`'s `repo` param accepts the
+ * same `repoRoot`/fallback-bucket keys as `GET /api/overview`'s, plus a bare
+ * repo name resolved server-side), so it needs no screen-specific variant.
  */
 export function parseRepoParam(value: string | null): string {
   return value ?? ALL_REPOS;
@@ -450,8 +449,8 @@ const DAY_PARAM_RE = /^\d{4}-\d{2}-\d{2}$/;
  * from a Trends screen spike-day row / daily chart column (see
  * `sessionListDayFilterPath` below). `undefined` for anything missing or
  * malformed, same "never break on a stale URL" convention as
- * `parseRepoParam`/`parseTrendsWindowDays` — a bad value just falls back to
- * whatever date filter was already active instead of throwing.
+ * `parseRepoParam` — a bad value just falls back to whatever date filter was
+ * already active instead of throwing.
  */
 export function parseDayParam(value: string | null): string | undefined {
   return value !== null && DAY_PARAM_RE.test(value) ? value : undefined;
@@ -478,32 +477,65 @@ export function sessionListDayFilterPath(day: string, repoKey?: string): string 
   return `/?${params.toString()}`;
 }
 
-/** react-router path for the Trends screen — no dynamic segments, so (unlike the session/agent routes) no path-builder function is needed; a literal `/trends` Link target suffices, same as the session list's own bare `/`. */
+// ---------------------------------------------------------------------------
+// Top-level navigation (PR3 IA: Briefing / Sessions / Learnings) + Home masthead
+// ---------------------------------------------------------------------------
+
+/** react-router path for the moved session list — the old bare `/` (now the Briefing home) redirects legacy list URLs here (see `legacySessionListRedirectTarget`). */
+export const SESSIONS_ROUTE_PATH = "sessions";
+
+/** react-router path for the Learnings loop board (new in PR3). */
+export const LEARNINGS_ROUTE_PATH = "learnings";
+
+/** Legacy `/trends` path — kept only so main.tsx can register the redirect to the Briefing home that absorbed it. */
 export const TRENDS_ROUTE_PATH = "trends";
 
-/**
- * `GET /api/trends`'s `days` whitelist, mirrored from the server
- * (`TRENDS_DAYS_WHITELIST` in `packages/server/src/app.ts`) so the window
- * selector only ever offers values the API actually accepts. Declared
- * independently from the session list's `DATE_FILTER_PRESET_DAYS`
- * (`dateFilter.ts`) even though the three numbers coincide today — the two
- * features' day-count choices are unrelated facts (one bounds a
- * client-filtered fetch window, the other bounds a fixed-shape server
- * aggregation) that could diverge later.
- */
-export const TRENDS_WINDOW_DAYS: readonly number[] = [7, 14, 30];
+/** The three top-level destinations shown in the left nav rail — key, label, and path (`briefing` is the bare `/` home). */
+export type NavKey = "briefing" | "sessions" | "learnings";
 
-/** Default `days` for a first visit / stale-or-missing `?days=` — matches the server's `DEFAULT_TRENDS_DAYS`. */
-export const DEFAULT_TRENDS_WINDOW_DAYS = 14;
+export const NAV_ITEMS: readonly { key: NavKey; label: string; path: string }[] = [
+  { key: "briefing", label: "Briefing", path: "/" },
+  { key: "sessions", label: "Sessions", path: `/${SESSIONS_ROUTE_PATH}` },
+  { key: "learnings", label: "Learnings", path: `/${LEARNINGS_ROUTE_PATH}` },
+];
 
 /**
- * Normalizes the Trends screen's `?days=` query param to a value from
- * `TRENDS_WINDOW_DAYS`, defaulting (like `parseListPage`/`parseSourceTab`)
- * anything missing or unrecognized to `DEFAULT_TRENDS_WINDOW_DAYS` rather
- * than erroring — same "never break on a stale URL" convention every other
- * query-param parser here follows.
+ * The Briefing masthead's period toggle (Today = 1 / 7d / 30d) — the `days`
+ * window passed straight to `GET /api/briefing`. Distinct from the session
+ * list's own `DATE_FILTER_PRESET_DAYS`: this bounds a server aggregation, that
+ * bounds a client-side fetch window (same independence the old Trends window
+ * kept from the list's presets).
  */
-export function parseTrendsWindowDays(value: string | null): number {
+export const BRIEFING_PERIOD_DAYS: readonly number[] = [1, 7, 30];
+
+/** Default `days` for a first visit / stale-or-missing `?days=` on the Briefing home. */
+export const DEFAULT_BRIEFING_PERIOD_DAYS = 7;
+
+/**
+ * Normalizes the Briefing home's `?days=` query param to a value from
+ * `BRIEFING_PERIOD_DAYS`, defaulting anything missing or unrecognized to
+ * `DEFAULT_BRIEFING_PERIOD_DAYS` — same "never break on a stale URL"
+ * convention every other query-param parser here follows.
+ */
+export function parseBriefingPeriodDays(value: string | null): number {
   const days = value !== null ? Number(value) : Number.NaN;
-  return TRENDS_WINDOW_DAYS.includes(days) ? days : DEFAULT_TRENDS_WINDOW_DAYS;
+  return BRIEFING_PERIOD_DAYS.includes(days) ? days : DEFAULT_BRIEFING_PERIOD_DAYS;
+}
+
+/**
+ * The session list moved from `/` to `/sessions` in PR3 (the bare `/` is now
+ * the Briefing home). A bookmarked legacy list URL is recognized by carrying a
+ * session-list-only query param — `source`, `page`, or `day` (the Briefing
+ * home's own params are `repo`/`days`, which overlap only on the harmless
+ * `repo`, so those three are the unambiguous tell). Returns the `/sessions`
+ * path with the full original query preserved, or `undefined` for a bare (or
+ * Briefing-only) `/` visit that should render the home. Pure so main.tsx's
+ * index redirect and this file's tests share one definition.
+ */
+export function legacySessionListRedirectTarget(search: string): string | undefined {
+  const params = new URLSearchParams(search);
+  const isLegacyListUrl = params.has("source") || params.has("page") || params.has("day");
+  if (!isLegacyListUrl) return undefined;
+  const query = search.startsWith("?") ? search : `?${search}`;
+  return `/${SESSIONS_ROUTE_PATH}${query}`;
 }

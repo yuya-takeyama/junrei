@@ -69,6 +69,73 @@ describe("buildBriefing", () => {
     expect(briefing._meta.approxTokens).toBeGreaterThan(0);
   });
 
+  it("rolls up total recoverable waste ($ and share of cost) into the summary — one server number for the KPI strip, never a client re-sum", () => {
+    const report = trends([makeItem({ sessionId: "s1", totalCostUsd: 10 })]);
+    // Unpriced opportunity built by dropping estUsdSaved (exactOptionalPropertyTypes
+    // forbids setting it to `undefined`) — excluded from the rollup, not counted as $0.
+    const { estUsdSaved: _drop, ...unpriced } = makeOpportunity({ savingsBasis: "none" });
+    const sessions: BriefingSessionInput[] = [
+      {
+        source: "claude-code",
+        sessionId: "s1",
+        opportunities: [
+          makeOpportunity({ estUsdSaved: 1.5 }),
+          makeOpportunity({ estUsdSaved: 0.5 }),
+          unpriced,
+        ],
+      },
+    ];
+    const briefing = buildBriefing({
+      days: 7,
+      detail: "full",
+      trends: report,
+      sessions,
+      learnings: [],
+    });
+    expect(briefing.summary.costUsd).toBe(10);
+    expect(briefing.summary.wasteUsd).toBeCloseTo(2, 6);
+    expect(briefing.summary.wasteShareOfCost).toBeCloseTo(0.2, 6);
+  });
+
+  it("reports null waste totals when nothing in the window could be priced", () => {
+    const report = trends([makeItem({ sessionId: "s1" })]);
+    const { estUsdSaved: _drop, ...unpriced } = makeOpportunity({ savingsBasis: "none" });
+    const sessions: BriefingSessionInput[] = [
+      { source: "claude-code", sessionId: "s1", opportunities: [unpriced] },
+    ];
+    const briefing = buildBriefing({
+      days: 7,
+      detail: "full",
+      trends: report,
+      sessions,
+      learnings: [],
+    });
+    expect(briefing.summary.wasteUsd).toBeNull();
+    expect(briefing.summary.wasteShareOfCost).toBeNull();
+  });
+
+  it("projects the trend window's day buckets into a dailyCosts sparkbar series (oldest-first, one entry per window day)", () => {
+    const report = trends([
+      makeItem({ sessionId: "s1", startedAt: "2026-07-18T09:00:00.000Z", totalCostUsd: 5 }),
+      makeItem({ sessionId: "s2", startedAt: "2026-07-19T09:00:00.000Z", totalCostUsd: 8 }),
+    ]);
+    const briefing = buildBriefing({
+      days: 7,
+      detail: "full",
+      trends: report,
+      sessions: [],
+      learnings: [],
+    });
+    // One bucket per calendar day in the 7-day window (2026-07-13 .. 2026-07-19).
+    expect(briefing.dailyCosts).toHaveLength(report.buckets.length);
+    expect(briefing.dailyCosts).toHaveLength(7);
+    // Oldest-first, dates + costs traced verbatim from the trend buckets — the
+    // sparkbar can never disagree with the KPI window cost.
+    expect(briefing.dailyCosts.map((d) => d.date)).toEqual(report.buckets.map((b) => b.date));
+    expect(briefing.dailyCosts.at(-1)).toEqual({ date: "2026-07-19", costUsd: 8 });
+    expect(briefing.dailyCosts.find((d) => d.date === "2026-07-18")?.costUsd).toBe(5);
+  });
+
   it("ranks waste across sessions by dollar impact, priced above unpriced", () => {
     const report = trends([makeItem({ sessionId: "s1" })]);
     // Build the unpriced case by dropping estUsdSaved entirely

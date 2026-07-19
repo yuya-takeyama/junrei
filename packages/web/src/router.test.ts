@@ -4,17 +4,23 @@ import {
   ALL_REPOS,
   agentPath,
   agentRecordPath,
+  BRIEFING_PERIOD_DAYS,
   CLAUDE_AGENT_ROUTE_PATH,
   CLAUDE_LENSES,
   CLAUDE_SESSION_ROUTE_PATH,
   CODEX_AGENT_ROUTE_PATH,
   CODEX_LENSES,
   CODEX_SESSION_ROUTE_PATH,
+  DEFAULT_BRIEFING_PERIOD_DAYS,
   isLegacyClaudeProjectScopedUrl,
+  LEARNINGS_ROUTE_PATH,
   LENSES_BY_SOURCE,
   legacyClaudeSessionRedirectTarget,
+  legacySessionListRedirectTarget,
+  NAV_ITEMS,
   normalizeLens,
   normalizeToolsSub,
+  parseBriefingPeriodDays,
   parseDayParam,
   parseListPage,
   parseRecordAgentParam,
@@ -22,6 +28,7 @@ import {
   parseRepoParam,
   parseSourceTab,
   recordPath,
+  SESSIONS_ROUTE_PATH,
   sessionListDayFilterPath,
   sessionPath,
   sessionRefOf,
@@ -497,6 +504,50 @@ describe("parseRepoParam", () => {
     params.set("repo", "/Users/me/repo with spaces");
     const url = `?${params.toString()}`;
     expect(parseRepoParam(new URLSearchParams(url).get("repo"))).toBe("/Users/me/repo with spaces");
+  });
+});
+
+describe("NAV_ITEMS", () => {
+  it("lists the three top-level destinations, briefing at the bare root", () => {
+    expect(NAV_ITEMS.map((i) => i.key)).toEqual(["briefing", "sessions", "learnings"]);
+    expect(NAV_ITEMS[0]?.path).toBe("/");
+    expect(NAV_ITEMS.find((i) => i.key === "sessions")?.path).toBe(`/${SESSIONS_ROUTE_PATH}`);
+    expect(NAV_ITEMS.find((i) => i.key === "learnings")?.path).toBe(`/${LEARNINGS_ROUTE_PATH}`);
+  });
+});
+
+describe("parseBriefingPeriodDays", () => {
+  it("passes through a whitelisted period", () => {
+    for (const d of BRIEFING_PERIOD_DAYS) {
+      expect(parseBriefingPeriodDays(String(d))).toBe(d);
+    }
+  });
+
+  it("falls back to the default for missing/unknown/out-of-whitelist values", () => {
+    expect(parseBriefingPeriodDays(null)).toBe(DEFAULT_BRIEFING_PERIOD_DAYS);
+    expect(parseBriefingPeriodDays("")).toBe(DEFAULT_BRIEFING_PERIOD_DAYS);
+    expect(parseBriefingPeriodDays("14")).toBe(DEFAULT_BRIEFING_PERIOD_DAYS); // not in [1,7,30]
+    expect(parseBriefingPeriodDays("bogus")).toBe(DEFAULT_BRIEFING_PERIOD_DAYS);
+  });
+});
+
+describe("legacySessionListRedirectTarget", () => {
+  it("redirects a legacy list URL (carrying source/page/day) to /sessions, preserving the query", () => {
+    expect(legacySessionListRedirectTarget("?source=codex&page=2")).toBe(
+      "/sessions?source=codex&page=2",
+    );
+    expect(legacySessionListRedirectTarget("?day=2026-07-14&repo=%2FUsers%2Fme%2Fjunrei")).toBe(
+      "/sessions?day=2026-07-14&repo=%2FUsers%2Fme%2Fjunrei",
+    );
+    // Normalizes a query string missing its leading '?'.
+    expect(legacySessionListRedirectTarget("page=3")).toBe("/sessions?page=3");
+  });
+
+  it("returns undefined for a bare or Briefing-only root (renders the home)", () => {
+    expect(legacySessionListRedirectTarget("")).toBeUndefined();
+    // The home's own params (repo/days) are NOT session-list tells.
+    expect(legacySessionListRedirectTarget("?repo=%2FUsers%2Fme%2Fjunrei")).toBeUndefined();
+    expect(legacySessionListRedirectTarget("?days=30")).toBeUndefined();
   });
 });
 

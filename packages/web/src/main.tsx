@@ -3,18 +3,22 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router";
 import { AgentShell } from "./AgentShell.js";
 import { App } from "./App.js";
+import { Home } from "./Home.js";
+import { Learnings } from "./Learnings.js";
 import {
   CLAUDE_AGENT_ROUTE_PATH,
   CLAUDE_SESSION_ROUTE_PATH,
   CODEX_AGENT_ROUTE_PATH,
   CODEX_SESSION_ROUTE_PATH,
+  LEARNINGS_ROUTE_PATH,
   legacyClaudeSessionRedirectTarget,
+  legacySessionListRedirectTarget,
+  SESSIONS_ROUTE_PATH,
   TRENDS_ROUTE_PATH,
 } from "./router.js";
 import { SessionList } from "./SessionList.js";
 import { SessionShell } from "./SessionShell.js";
 import "./styles.css";
-import { Trends } from "./Trends.js";
 
 const root = document.getElementById("root");
 if (root === null) {
@@ -33,6 +37,20 @@ function CatchAll() {
   const target = legacyClaudeSessionRedirectTarget(location.pathname, location.search);
   if (target !== undefined) return <Navigate replace to={target} />;
   return <SessionList />;
+}
+
+/**
+ * Index route (`/`): the Briefing home, UNLESS the URL carries a legacy
+ * session-list query (`?source=`/`?page=`/`?day=`) — a bookmark from when the
+ * list lived at `/`. Those redirect to `/sessions` with the query preserved
+ * (see `legacySessionListRedirectTarget`), so an old link keeps working; a
+ * bare (or Briefing-only) `/` renders the home.
+ */
+function HomeOrRedirect() {
+  const location = useLocation();
+  const target = legacySessionListRedirectTarget(location.search);
+  if (target !== undefined) return <Navigate replace to={target} />;
+  return <Home />;
 }
 
 // Pre-history-router bookmarks still carry `#/session/...[?record=N]` — the
@@ -55,8 +73,11 @@ const router = createBrowserRouter([
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <SessionList /> },
-      { path: TRENDS_ROUTE_PATH, element: <Trends /> },
+      { index: true, element: <HomeOrRedirect /> },
+      { path: SESSIONS_ROUTE_PATH, element: <SessionList /> },
+      { path: LEARNINGS_ROUTE_PATH, element: <Learnings /> },
+      // Trends was folded into the Briefing home (PR3) — its bookmark redirects there.
+      { path: TRENDS_ROUTE_PATH, element: <Navigate replace to="/" /> },
       // The agent routes' static "agent" segment outranks the session routes'
       // optional ":lens?" — react-router's route ranking scores static segments
       // higher than dynamic ones regardless of declaration order, so
