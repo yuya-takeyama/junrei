@@ -1,80 +1,112 @@
 import { useState } from "react";
 import type { AnySessionJson } from "../api.js";
 import type { SortSpec } from "../tableSort.js";
-import { BashStatsSummary } from "./bash/BashStatsSummary.js";
 import { hasBashActivity } from "./bash/bashLensFormat.js";
 import {
   type CommandRankingSortKey,
   CommandRankingTable,
   DEFAULT_COMMAND_RANKING_SORT,
+  DEFAULT_COMMAND_RANKING_SORT_UNPRICED,
 } from "./bash/CommandRankingTable.js";
+import { FixQueue } from "./bash/FixQueue.js";
+import { HeaderStrip } from "./bash/HeaderStrip.js";
 import {
   DEFAULT_HEAVY_HITTER_SORT,
   type HeavyHitterSortKey,
   HeavyHittersTable,
 } from "./bash/HeavyHittersTable.js";
-import {
-  DEFAULT_BASH_AS_READ_SORT,
-  DEFAULT_LARGE_RESULTS_SORT,
-  type FlatWasteSortKey,
-  WasteDetectionPanel,
-} from "./bash/WasteDetectionPanel.js";
+import { WhoPaidPanel } from "./bash/WhoPaidPanel.js";
 
 interface Props {
   session: AnySessionJson;
-  /** Opens the record slide-over (L3) for a source line — see `HeavyHittersTable`. `agentId` scopes the fetch to a subagent's own transcript, when the line came from one. */
+  /** Opens the record slide-over (L3) for a source line — see `HeavyHittersTable`/`FixQueue`. `agentId` scopes the fetch to a subagent's own transcript, when the line came from one. */
   onOpenRecord?: (line: number, agentId?: string) => void;
 }
 
 /**
- * Bash lens (L2) — source-uniform (see `bashStats` on `SessionAnalysisCore`
- * in `@junrei/core`'s `shared/session-analysis.ts`; both `analyzeClaudeSession`
- * and `analyzeCodexSession`/`getCodexSession` populate it). Three panels,
- * laid out top-to-bottom as full-width sections (unlike Files & skills/
- * Context & cost's two-column rows, since none of these three panels pair
- * naturally side-by-side):
+ * Bash lens (L2) — v2 redesign ("top of screen = the decision, not the
+ * data"), replacing the v1 data-dump layout (4 stat tiles, a chars-ranked
+ * command table, chars-ranked heavy hitters, 4 bare waste-count
+ * subsections) end to end. Source-uniform, same as v1 (see `bashStats` on
+ * `SessionAnalysisCore` in `@junrei/core`'s `shared/session-analysis.ts`;
+ * both `analyzeClaudeSession` and `analyzeCodexSession`/`getCodexSession`
+ * populate it).
  *
- *   1. Command ranking — `byCommand`, one row per resolved family+subcommand
- *      group, sortable by every column (default: result chars desc, matching
- *      the engine's own order).
- *   2. Context consumption — a stat-tile summary row (`BashStatsSummary`)
- *      over `totals`, then the top-10 `heavyHitters` table (also sortable).
- *   3. Waste detection — `waste`'s four subsections (near-duplicates, large
- *      results, rerun-after-error, bash-as-read); the two flat grids (large
- *      results, bash-as-read) are sortable, the two free-form group lists
- *      are not (see `WasteDetectionPanel`'s doc comment).
+ * Layout, top to bottom:
  *
- * Quantitative only throughout — counts, char totals, line-number
- * occurrences — no advice/hint prose. That's a deliberate scope decision
- * carried over from `@junrei/core`'s `BashWaste` doc comment: this PR wires
- * the data into the UI, a later PR (if any) would be the one to turn
- * "near-duplicate ×5" into an actionable suggestion.
+ *   ┌ HEADER STRIP ─────────────────────────────────────────────┐
+ *   │ Bash context cost ~$X.XX (est)      [pNN for this repo ·  │
+ *   │                                       M.Mx median]        │
+ *   └─────────────────────────────────────────────────────────┘
+ *   ┌ WHO PAID ─────────────────────────────────────────────────┐
+ *   │ main (sonnet)   chars ▓░░░░░░░░░ 1.6%    $ ▓▓▓▓▓▓▓▓░░ 81% │
+ *   │ sub (haiku)     chars ▓▓▓▓▓▓▓▓▓▓ 60%     $ ▓░░░░░░░░░ 8%  │
+ *   │ +N more         chars ▓▓░░░░░░░░ 8.4%    $ ░░░░░░░░░░ 5%  │
+ *   └─────────────────────────────────────────────────────────┘
+ *   ┌ FIX QUEUE (N) ────────────────────────────────────────────┐
+ *   │ #1 [near-duplicate][spawn-prompt]              ~$0.31     │
+ *   │    5× "git diff <PATH>" repeated across main, sub1        │
+ *   │    ┌ Fix ──────────────────────────────── [copy] ┐        │
+ *   │    │ Batch or cache `git diff <PATH>` ...         │        │
+ *   │    └───────────────────────────────────────────────┘      │
+ *   │    ▸ evidence (5)                                          │
+ *   └─────────────────────────────────────────────────────────┘
+ *   ┌ COST BY COMMAND ──────────────────────────────  [chars] ──┐
+ *   │ Command   Calls  Err  ~Est $  $share  Orch%  Est.tokens   │
+ *   │ git diff    12     0   $0.31    74%    12%      3.1k      │
+ *   └─────────────────────────────────────────────────────────┘
+ *   ▸ EVIDENCE — heavy hitters (10)              [collapsed]
+ *   ─────────────────────────────────────────────────────────────
+ *   ~ token/$ figures are chars/4 × model input price estimates;
+ *   compound commands can mis-bucket families; Codex
+ *   local_shell_call sizes are placeholders.
  *
- * This is the ONE place in the Bash lens that holds React state: each
- * table below is a pure function component (`CommandRankingTable`,
- * `HeavyHittersTable`, `WasteDetectionPanel`'s flat grids) — no `useState`
- * inside a table itself, because this repo's component tests call
- * components directly as plain functions and walk the returned element
- * tree (no jsdom/testing-library), which only works for hook-free
- * components. So sort state lives here instead, one `useState` per table,
- * seeded from that table's own `DEFAULT_*_SORT` (each exported next to its
- * table so the default lives beside the component it describes) and handed
- * down as a `sortSpec`/`onSortChange` pair — see `tableSort.ts` for the
- * underlying `SortSpec`/`sortRows` primitive every table sorts with.
+ * `programFrequency` and the four `waste` subsections never surface here
+ * directly — `waste` feeds `opportunities` (core, `bash-opportunities.ts`),
+ * which the Fix Queue renders instead; `programFrequency` has no consumer
+ * in this lens (still MCP-only). The 4 v1 stat tiles are gone (the header
+ * strip's headline $ figure replaces them); the 4 v1 waste subsections are
+ * gone (the Fix Queue replaces them); heavy hitters survives as a demoted,
+ * collapsed-by-default drill-down.
+ *
+ * This is the ONE place in the Bash lens that holds React state — every
+ * table/card component below is a pure function component (no `useState`
+ * inside one itself), because this repo's component tests call components
+ * directly as functions and walk the returned element tree (no
+ * jsdom/testing-library), which only works for hook-free components. Sort
+ * state, the chars-column toggle, the Fix Queue's per-card evidence-expand
+ * set, and the Evidence section's own collapse all live here as one
+ * `useState` each, handed down as value + setter pairs — see
+ * `tableSort.ts` for the underlying `SortSpec`/`sortRows` primitive every
+ * sortable table here uses.
  */
 export function Bash({ session, onOpenRecord }: Props) {
   const { bashStats } = session;
 
   const [commandRankingSort, setCommandRankingSort] = useState<SortSpec<CommandRankingSortKey>>(
-    DEFAULT_COMMAND_RANKING_SORT,
+    bashStats.totals.estUsd !== undefined
+      ? DEFAULT_COMMAND_RANKING_SORT
+      : DEFAULT_COMMAND_RANKING_SORT_UNPRICED,
   );
+  const [showChars, setShowChars] = useState(false);
   const [heavyHitterSort, setHeavyHitterSort] =
     useState<SortSpec<HeavyHitterSortKey>>(DEFAULT_HEAVY_HITTER_SORT);
-  const [largeResultsSort, setLargeResultsSort] = useState<SortSpec<FlatWasteSortKey>>(
-    DEFAULT_LARGE_RESULTS_SORT,
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [expandedOpportunities, setExpandedOpportunities] = useState<ReadonlySet<string>>(
+    () => new Set(),
   );
-  const [bashAsReadSort, setBashAsReadSort] =
-    useState<SortSpec<FlatWasteSortKey>>(DEFAULT_BASH_AS_READ_SORT);
+
+  const toggleExpandedOpportunity = (key: string) => {
+    setExpandedOpportunities((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   if (!hasBashActivity(bashStats.totals)) {
     return (
@@ -87,29 +119,69 @@ export function Bash({ session, onOpenRecord }: Props) {
   return (
     <>
       <div className="hpad mt16">
-        <CommandRankingTable
-          byCommand={bashStats.byCommand}
-          sortSpec={commandRankingSort}
-          onSortChange={setCommandRankingSort}
+        <HeaderStrip
+          totals={bashStats.totals}
+          bashPercentile={session.bashPercentile}
+          source={session.source}
         />
       </div>
-      <div className="hpad">
-        <BashStatsSummary totals={bashStats.totals} />
-        <HeavyHittersTable
-          heavyHitters={bashStats.heavyHitters}
-          sortSpec={heavyHitterSort}
-          onSortChange={setHeavyHitterSort}
+
+      <div className="hpad mt16">
+        <WhoPaidPanel byThread={bashStats.byThread} />
+      </div>
+
+      <div className="hpad mt16">
+        <div className="chartcap">
+          <span className="lbl">Fix queue · {bashStats.opportunities.length}</span>
+        </div>
+        <FixQueue
+          opportunities={bashStats.opportunities}
+          expandedKeys={expandedOpportunities}
+          onToggleExpand={toggleExpandedOpportunity}
           {...(onOpenRecord !== undefined && { onOpenRecord })}
         />
       </div>
-      <div className="hpad">
-        <WasteDetectionPanel
-          waste={bashStats.waste}
-          largeResultsSortSpec={largeResultsSort}
-          onLargeResultsSortChange={setLargeResultsSort}
-          bashAsReadSortSpec={bashAsReadSort}
-          onBashAsReadSortChange={setBashAsReadSort}
+
+      <div className="hpad mt16">
+        <div className="chartcap">
+          <span className="lbl">Cost by command</span>
+          <button type="button" className="chip" onClick={() => setShowChars((v) => !v)}>
+            {showChars ? "hide chars" : "show chars"}
+          </button>
+        </div>
+        <CommandRankingTable
+          byCommand={bashStats.byCommand}
+          totals={bashStats.totals}
+          sortSpec={commandRankingSort}
+          onSortChange={setCommandRankingSort}
+          showChars={showChars}
         />
+      </div>
+
+      <div className="hpad mt16">
+        <button
+          type="button"
+          className="exp-toggle mono fs11 mut"
+          onClick={() => setEvidenceOpen((v) => !v)}
+          aria-expanded={evidenceOpen}
+        >
+          {evidenceOpen ? "▾" : "▸"} Evidence — heavy hitters ({bashStats.heavyHitters.length})
+        </button>
+        {evidenceOpen && (
+          <HeavyHittersTable
+            heavyHitters={bashStats.heavyHitters}
+            sortSpec={heavyHitterSort}
+            onSortChange={setHeavyHitterSort}
+            {...(onOpenRecord !== undefined && { onOpenRecord })}
+          />
+        )}
+      </div>
+
+      <div className="hpad mt16" style={{ paddingBottom: "16px" }}>
+        <div className="mono fs10 mut">
+          ~ token/$ figures are chars/4 × model input price estimates; compound commands can
+          mis-bucket families; Codex local_shell_call sizes are placeholders.
+        </div>
       </div>
     </>
   );

@@ -10,10 +10,10 @@ import {
 /**
  * Same "call the component directly, walk the returned element tree"
  * approach the sibling `*.test.ts` files in this folder use (no
- * jsdom/testing-library in this repo — see `HeavyHittersTable.test.ts`'s
- * doc comment). `SortableHeaderCell` is a hookless function component, so
- * resolving it by calling `type(props)` is a legitimate function call, same
- * as descending into a host element's `children`.
+ * jsdom/testing-library — see `HeavyHittersTable.test.ts`'s doc comment).
+ * `SortableHeaderCell` is a hookless function component, so resolving it by
+ * calling `type(props)` is a legitimate function call, same as descending
+ * into a host element's `children`.
  */
 function flattenText(node: ReactNode): string {
   if (node === null || node === undefined || typeof node === "boolean") return "";
@@ -43,7 +43,12 @@ function rowLabelsInOrder(node: ReactNode): string[] {
       walk((n.type as (p: unknown) => ReactNode)(props));
       return;
     }
-    if (n.type === "div" && props.className === "bcmd") {
+    if (
+      n.type === "div" &&
+      typeof props.className === "string" &&
+      props.className.split(" ").includes("bcmd") &&
+      !props.className.split(" ").includes("hdr")
+    ) {
       const firstChild = Array.isArray(props.children) ? props.children[0] : props.children;
       labels.push(flattenText(firstChild as ReactNode));
       return; // rows don't nest further bcmd divs
@@ -86,6 +91,15 @@ function findHeaderOnClick(node: ReactNode, labelPrefix: string): (() => void) |
   return found;
 }
 
+const TOTALS = {
+  calls: 15,
+  errors: 1,
+  inputChars: 35,
+  resultChars: 37_000,
+  estimatedTokens: 9_250,
+  estUsd: 1.0,
+};
+
 const BY_COMMAND: BashCommandGroupJson[] = [
   {
     family: "git",
@@ -98,6 +112,7 @@ const BY_COMMAND: BashCommandGroupJson[] = [
     estimatedTokens: 1_250,
     sharePct: 10,
     sampleCommands: [],
+    estUsd: 0.1,
   },
   {
     family: "npm",
@@ -110,6 +125,7 @@ const BY_COMMAND: BashCommandGroupJson[] = [
     estimatedTokens: 5_000,
     sharePct: 40,
     sampleCommands: [],
+    estUsd: 0.6,
   },
   {
     family: "cat",
@@ -121,15 +137,18 @@ const BY_COMMAND: BashCommandGroupJson[] = [
     estimatedTokens: 3_000,
     sharePct: 24,
     sampleCommands: [],
+    estUsd: 0.3,
   },
 ];
 
 describe("CommandRankingTable", () => {
-  it("renders rows in the given sortSpec's order (totalChars desc — the default)", () => {
+  it("renders rows in the given sortSpec's order (estUsd desc — the v2 default)", () => {
     const element = CommandRankingTable({
       byCommand: BY_COMMAND,
+      totals: TOTALS,
       sortSpec: DEFAULT_COMMAND_RANKING_SORT,
       onSortChange: () => {},
+      showChars: false,
     });
     expect(rowLabelsInOrder(element)).toEqual(["npm test", "cat", "git diff"]);
   });
@@ -137,8 +156,10 @@ describe("CommandRankingTable", () => {
   it("re-sorts rows when given a different sortSpec (calls asc)", () => {
     const element = CommandRankingTable({
       byCommand: BY_COMMAND,
+      totals: TOTALS,
       sortSpec: { key: "calls", dir: "asc" },
       onSortChange: () => {},
+      showChars: false,
     });
     expect(rowLabelsInOrder(element)).toEqual(["git diff", "cat", "npm test"]);
   });
@@ -146,31 +167,79 @@ describe("CommandRankingTable", () => {
   it("sorts the label column as a string (asc)", () => {
     const element = CommandRankingTable({
       byCommand: BY_COMMAND,
+      totals: TOTALS,
       sortSpec: { key: "label", dir: "asc" },
       onSortChange: () => {},
+      showChars: false,
     });
     expect(rowLabelsInOrder(element)).toEqual(["cat", "git diff", "npm test"]);
+  });
+
+  it("sorts unpriced commands (undefined estUsd) to the bottom regardless of direction", () => {
+    const byCommand: BashCommandGroupJson[] = [
+      { ...(BY_COMMAND[0] as BashCommandGroupJson), estUsd: undefined },
+      BY_COMMAND[1] as BashCommandGroupJson,
+    ];
+    const desc = CommandRankingTable({
+      byCommand,
+      totals: TOTALS,
+      sortSpec: { key: "estUsd", dir: "desc" },
+      onSortChange: () => {},
+      showChars: false,
+    });
+    expect(rowLabelsInOrder(desc)).toEqual(["npm test", "git diff"]);
+
+    const asc = CommandRankingTable({
+      byCommand,
+      totals: TOTALS,
+      sortSpec: { key: "estUsd", dir: "asc" },
+      onSortChange: () => {},
+      showChars: false,
+    });
+    expect(rowLabelsInOrder(asc)).toEqual(["npm test", "git diff"]);
   });
 
   it("wires each header's click to onSortChange with the right next spec", () => {
     const calls: Array<{ key: CommandRankingSortKey; dir: "asc" | "desc" }> = [];
     const element = CommandRankingTable({
       byCommand: BY_COMMAND,
-      sortSpec: DEFAULT_COMMAND_RANKING_SORT, // { key: "totalChars", dir: "desc" }
+      totals: TOTALS,
+      sortSpec: DEFAULT_COMMAND_RANKING_SORT, // { key: "estUsd", dir: "desc" }
       onSortChange: (spec) => calls.push(spec),
+      showChars: false,
     });
 
     // Clicking a different column (Calls, numeric) jumps to its own default (desc).
     findHeaderOnClick(element, "Calls")?.();
-    // Clicking the already-active column (Total chars) toggles desc -> asc.
-    findHeaderOnClick(element, "Total chars")?.();
+    // Clicking the already-active column (~Est $) toggles desc -> asc.
+    findHeaderOnClick(element, "~Est $")?.();
     // Clicking the string column (Command) starts at its default (asc).
     findHeaderOnClick(element, "Command")?.();
 
     expect(calls).toEqual([
       { key: "calls", dir: "desc" },
-      { key: "totalChars", dir: "asc" },
+      { key: "estUsd", dir: "asc" },
       { key: "label", dir: "asc" },
     ]);
+  });
+
+  it("omits the Total/Avg chars header cells when showChars is false, shows them when true", () => {
+    const withoutChars = CommandRankingTable({
+      byCommand: BY_COMMAND,
+      totals: TOTALS,
+      sortSpec: DEFAULT_COMMAND_RANKING_SORT,
+      onSortChange: () => {},
+      showChars: false,
+    });
+    expect(findHeaderOnClick(withoutChars, "Total chars")).toBeUndefined();
+
+    const withChars = CommandRankingTable({
+      byCommand: BY_COMMAND,
+      totals: TOTALS,
+      sortSpec: DEFAULT_COMMAND_RANKING_SORT,
+      onSortChange: () => {},
+      showChars: true,
+    });
+    expect(findHeaderOnClick(withChars, "Total chars")).toBeDefined();
   });
 });

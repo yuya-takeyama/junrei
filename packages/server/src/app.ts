@@ -5,15 +5,17 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { computeTrends, extractSessionId } from "@junrei/core";
 import { type Context, Hono } from "hono";
+import { computeSessionBashPercentile, type SessionBashFigure } from "./bash-percentile.js";
 import { assembleEvaluationTrace } from "./evaluation-trace.js";
 import { createMcpServer } from "./mcp.js";
-import { getRepoOverview } from "./overview.js";
+import { getRepoOverview, repoKeyOfSession } from "./overview.js";
 import {
   claudeAdapter,
   codexAdapter,
   getAgentSession,
   getClaudeLastActivityAt,
   getCodexLastActivityAt,
+  getCodexSessionBashStatsMainOnly,
   listAllSessionsInBounds,
   listSessions,
   MAX_LIST_LIMIT,
@@ -49,6 +51,30 @@ export type CreateAppOptions = {
 
 function parseSourceFilter(raw: string | undefined): SessionSourceFilter | undefined {
   return raw === "claude-code" || raw === "codex" || raw === "all" ? raw : undefined;
+}
+
+/**
+ * The Bash tab v2 header strip's percentile chip ("pNN for this repo · M.Mx
+ * median") — the one small server addition the redesign needed, since the
+ * web layer never imports `@junrei/core` directly (see `bash-percentile.ts`'s
+ * doc comment). Resolves the SAME repo bucket `GET /api/overview`/
+ * `get_repo_overview` already aggregate for this session's own list row
+ * (`repoKeyOfSession`, kept in lockstep with `repoKeyOf`), re-lists that
+ * repo, and ranks `ownFigure` against it — `undefined` (chip hidden) when
+ * the repo doesn't yet have enough Bash-tracked sessions to rank against
+ * (see `computeSessionBashPercentile`'s own gate).
+ *
+ * `ownFigure` is the caller's responsibility to get right — see
+ * `computeSessionBashPercentile`'s doc comment for why a Codex session must
+ * pass its main-thread-only figure, never its detail view's
+ * (possibly forest-inclusive) `bashStats.totals`.
+ */
+async function resolveBashPercentile(
+  session: Parameters<typeof repoKeyOfSession>[0],
+  ownFigure: SessionBashFigure,
+) {
+  const overview = await getRepoOverview(repoKeyOfSession(session));
+  return computeSessionBashPercentile(ownFigure, overview.bash);
 }
 
 /**
@@ -239,7 +265,19 @@ export function createApp(options: CreateAppOptions = {}) {
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
-        return c.json({ analysis, lastActivityAt });
+        // Claude's `bashStats` is ALREADY the main+every-subagent joint pass
+        // at both list-item and detail time (no forest-override discrepancy
+        // the way Codex has — see `bash-percentile.ts`'s doc comment), so
+        // `analysis.bashStats.totals` is directly the right basis to rank.
+        const bashPercentile = await resolveBashPercentile(analysis, {
+          estUsd: analysis.bashStats.totals.estUsd,
+          resultChars: analysis.bashStats.totals.resultChars,
+        });
+        return c.json({
+          analysis,
+          lastActivityAt,
+          ...(bashPercentile !== undefined && { bashPercentile }),
+        });
       })
       .get("/api/sessions/claude-code/:id/timeline", async (c) => {
         const entries = await claudeAdapter.getTimeline(
@@ -299,7 +337,25 @@ export function createApp(options: CreateAppOptions = {}) {
         if (analysis === undefined) {
           return c.json({ error: "session not found" } as const, 404);
         }
-        return c.json({ analysis, lastActivityAt });
+        // Percentile ranking needs THIS session's own main-thread-only
+        // figure — the SAME basis every repo-distribution sample was itself
+        // built from (see `bash-percentile.ts`'s doc comment) — never
+        // `analysis.bashStats`, which `getDetail` (= `getCodexSession`)
+        // OVERRIDES with a forest-inclusive joint recompute once a
+        // sub-agent forest exists.
+        const mainOnlyBashStats = await getCodexSessionBashStatsMainOnly(id);
+        const bashPercentile =
+          mainOnlyBashStats === undefined
+            ? undefined
+            : await resolveBashPercentile(analysis, {
+                estUsd: mainOnlyBashStats.totals.estUsd,
+                resultChars: mainOnlyBashStats.totals.resultChars,
+              });
+        return c.json({
+          analysis,
+          lastActivityAt,
+          ...(bashPercentile !== undefined && { bashPercentile }),
+        });
       })
       .get("/api/sessions/codex/:id/timeline", async (c) => {
         const entries = await codexAdapter.getTimeline({ id: c.req.param("id") });

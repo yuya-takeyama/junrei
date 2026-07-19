@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeRepoOverview } from "./overview.js";
+import { computeRepoOverview, repoKeyOf, repoKeyOfSession } from "./overview.js";
 import type { AnySessionListItem } from "./sessions.js";
 import type { ClaudeSessionListItem } from "./sources/claude.js";
 import type { CodexSessionListItem } from "./sources/codex.js";
@@ -493,5 +493,37 @@ describe("computeRepoOverview — bash rollup + distribution", () => {
       resultChars: 0,
       distribution: { resultChars: [], estUsd: [] },
     });
+  });
+});
+
+describe("repoKeyOfSession — session-detail analog of repoKeyOf", () => {
+  it("returns repoRoot verbatim when present, same as repoKeyOf", () => {
+    const session = { repoRoot: REPO, source: "claude-code" as const };
+    expect(repoKeyOfSession(session)).toBe(REPO);
+    expect(repoKeyOfSession(session)).toBe(repoKeyOf(claudeItem({ repoRoot: REPO })));
+  });
+
+  it("falls back to the claude-project: bucket, matching repoKeyOf's list-item form", () => {
+    const session = { source: "claude-code" as const, projectDirName: "-Users-me-proj" };
+    expect(repoKeyOfSession(session)).toBe("claude-project:-Users-me-proj");
+    expect(repoKeyOfSession(session)).toBe(
+      repoKeyOf(claudeItem({ projectDirName: "-Users-me-proj" })),
+    );
+  });
+
+  it("falls back to the codex-repo: bucket keyed by gitRepositoryUrl", () => {
+    const session = {
+      source: "codex" as const,
+      gitRepositoryUrl: "https://github.com/x/y.git",
+    };
+    expect(repoKeyOfSession(session)).toBe("codex-repo:https://github.com/x/y.git");
+    expect(repoKeyOfSession(session)).toBe(
+      repoKeyOf(codexItem({ repoUrl: "https://github.com/x/y.git" })),
+    );
+  });
+
+  it("falls back to the codex-cwd: bucket, using (unknown cwd) when cwd itself is missing", () => {
+    expect(repoKeyOfSession({ source: "codex" as const, cwd: "/repo" })).toBe("codex-cwd:/repo");
+    expect(repoKeyOfSession({ source: "codex" as const })).toBe("codex-cwd:(unknown cwd)");
   });
 });

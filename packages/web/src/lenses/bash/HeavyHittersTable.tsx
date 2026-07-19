@@ -3,7 +3,7 @@ import { defaultDirFor, type SortColumnDef, type SortSpec, sortRows } from "../.
 import { buildHeavyHitterRows, type HeavyHitterRow } from "./bashLensFormat.js";
 import { SortableHeaderCell } from "./SortableHeaderCell.js";
 
-export type HeavyHitterSortKey = "rank" | "command" | "thread" | "resultChars" | "line";
+export type HeavyHitterSortKey = "rank" | "command" | "thread" | "resultChars" | "estUsd" | "line";
 
 /** Column defs for `sortRows` — `thread` compares the row's already-shortened display text (`thread.text`), the same string every row actually shows, rather than the raw untruncated `agentId`. */
 const COLUMNS: readonly SortColumnDef<HeavyHitterRow, HeavyHitterSortKey>[] = [
@@ -11,6 +11,7 @@ const COLUMNS: readonly SortColumnDef<HeavyHitterRow, HeavyHitterSortKey>[] = [
   { key: "command", type: "string", value: (r) => r.command },
   { key: "thread", type: "string", value: (r) => r.thread.text },
   { key: "resultChars", type: "numeric", value: (r) => r.resultChars },
+  { key: "estUsd", type: "numeric", value: (r) => r.estUsd },
   { key: "line", type: "numeric", value: (r) => r.line },
 ];
 
@@ -41,15 +42,16 @@ interface Props {
 }
 
 /**
- * Heavy hitters table (Bash lens panel 2, bottom) — top 10 Bash calls by
- * result chars, across every thread (already ranked/capped by
- * `computeHeavyHitters` in `@junrei/core`'s `bash-stats.ts`). Sortable by
- * every column via `sortRows` (`tableSort.ts`); defaults to
- * `DEFAULT_HEAVY_HITTER_SORT`, matching the engine's own order. When
- * `onOpenRecord` is wired, the command label becomes a `.lnbtn` button
- * opening the record slide-over at that call's own line — the same
- * click-to-drill-down pattern `FileAccessTree.tsx` already uses for its
- * injected-content rows, not a new navigation mechanism.
+ * Heavy hitters table (Bash lens — EVIDENCE, collapsed-by-default drill-down
+ * per the v2 redesign; `Bash.tsx` wraps this in a collapsible section) — top
+ * 10 Bash calls by result chars, across every thread (already ranked/capped
+ * by `computeHeavyHitters` in `@junrei/core`'s `bash-stats.ts`), now with an
+ * `~Est $` column alongside result chars. Sortable by every column via
+ * `sortRows` (`tableSort.ts`); defaults to `DEFAULT_HEAVY_HITTER_SORT`,
+ * matching the engine's own order. When `onOpenRecord` is wired, the command
+ * label becomes a `.lnbtn` button opening the record slide-over at that
+ * call's own line — the same click-to-drill-down pattern `FileAccessTree.tsx`
+ * already uses for its injected-content rows, not a new navigation mechanism.
  *
  * Stays a pure function component — `sortSpec`/`onSortChange` are owned by
  * `Bash.tsx`, not a local `useState` here (see `CommandRankingTable.tsx`'s
@@ -89,6 +91,7 @@ export function HeavyHittersTable({ heavyHitters, sortSpec, onSortChange, onOpen
         {header("command", "Command")}
         {header("thread", "Thread", "right")}
         {header("resultChars", "Result chars", "right")}
+        {header("estUsd", "~Est $", "right")}
         {header("line", "Line", "right")}
       </div>
       {rows.length === 0 ? (
@@ -127,6 +130,9 @@ export function HeavyHittersTable({ heavyHitters, sortSpec, onSortChange, onOpen
               {row.thread.text}
             </span>
             <span className="num fs12 cellr">{row.resultCharsText}</span>
+            <span className={row.estUsd === undefined ? "num fs12 cellr mut" : "num fs12 cellr"}>
+              {row.estUsdText}
+            </span>
             <span className="num fs11 cellr mut">L{row.line}</span>
           </div>
         ))

@@ -43,14 +43,32 @@ type CodexSessionResponse = InferResponseType<(typeof client.api.sessions.codex)
 type AnySessionResponseBody = ClaudeSessionResponse | CodexSessionResponse;
 
 /**
- * `lastActivityAt` lives on the ENVELOPE (`{ analysis, lastActivityAt }`),
- * never inside the mtime-cached `analysis` object itself (see the server's
- * `getClaudeLastActivityAt`/`getCodexLastActivityAt`) — intersected onto the
+ * The Bash tab v2 header strip's percentile chip data — see the server's
+ * `bash-percentile.ts` for the computation and why it's a small SERVER
+ * addition rather than a web-side one (the web layer never imports
+ * `@junrei/core` directly — types cross via Hono-inferred JSON only, same
+ * convention as every other type on this page). `NonNullable`'d because the
+ * envelope field itself is only ever PRESENT when defined (the server spreads
+ * it in conditionally — `...(bashPercentile !== undefined && {
+ * bashPercentile })` — never sends an explicit `null`/`undefined`), so the
+ * inferred field type is `T | undefined` at the optional-property level, and
+ * this alias should describe the payload shape alone.
+ */
+export type SessionBashPercentileJson = NonNullable<
+  Extract<ClaudeSessionResponse, { analysis: unknown }>["bashPercentile"]
+>;
+
+/**
+ * `lastActivityAt`/`bashPercentile` live on the ENVELOPE (`{ analysis,
+ * lastActivityAt, bashPercentile? }`), never inside the mtime-cached
+ * `analysis` object itself (see the server's `getClaudeLastActivityAt`/
+ * `getCodexLastActivityAt` and `bash-percentile.ts`) — intersected onto the
  * session JSON type here rather than left off, so every session-level
- * component (`isSessionLive`, the Orchestration tree's Status column, ...)
- * can read `session.lastActivityAt` directly instead of threading the
- * envelope separately. `unwrapSessionResponse` below is what actually merges
- * it onto the returned object at runtime.
+ * component (`isSessionLive`, the Orchestration tree's Status column, the
+ * Bash lens's header strip, ...) can read `session.lastActivityAt`/
+ * `session.bashPercentile` directly instead of threading the envelope
+ * separately. `unwrapSessionResponse` below is what actually merges them
+ * onto the returned object at runtime.
  */
 export type SessionJson = Extract<ClaudeSessionResponse, { analysis: unknown }>["analysis"] & {
   // `| undefined` explicit (not just `?:`) — `exactOptionalPropertyTypes`
@@ -58,9 +76,12 @@ export type SessionJson = Extract<ClaudeSessionResponse, { analysis: unknown }>[
   // case) to a bare `?:` field. Same pattern as `format.ts`'s
   // `DelegationShareScope.costUsd`.
   lastActivityAt?: string | undefined;
+  /** Absent when the repo doesn't yet have enough Bash-tracked sessions to rank against — see `bash-percentile.ts`'s gate. The Bash lens's header strip hides its percentile chip entirely in that case. */
+  bashPercentile?: SessionBashPercentileJson | undefined;
 };
 export type CodexSessionJson = Extract<CodexSessionResponse, { analysis: unknown }>["analysis"] & {
   lastActivityAt?: string | undefined;
+  bashPercentile?: SessionBashPercentileJson | undefined;
 };
 export type SubagentNodeJson = SessionJson["subagents"][number];
 export type ModelUsageSummary = SessionJson["totalUsageByModel"][number];
@@ -90,7 +111,11 @@ export type AnySessionJson = SessionJson | CodexSessionJson;
  */
 export function unwrapSessionResponse(body: AnySessionResponseBody): AnySessionJson | undefined {
   if (!("analysis" in body)) return undefined;
-  return { ...body.analysis, lastActivityAt: body.lastActivityAt };
+  return {
+    ...body.analysis,
+    lastActivityAt: body.lastActivityAt,
+    bashPercentile: body.bashPercentile,
+  };
 }
 
 /**
