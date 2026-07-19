@@ -73,6 +73,20 @@ describe("LearningsBoard", () => {
     expect(html).toContain("Dismiss");
   });
 
+  it("offers Dismiss on an open agent learning — the undo path the Story tab's Logged link promises", () => {
+    // A "Log learning" write (from the Story callout or the Measure feed) lands
+    // as an open, agent-proposed learning in LEARN; Dismiss is its no-dialog
+    // undo, which the LoggedLink tooltip points here for.
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <LearningsBoard learnings={[learning({ id: "L-020", status: "open" })]} waste={[]} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("L-020");
+    expect(html).toContain("Open · agent");
+    expect(html).toContain("Dismiss");
+  });
+
   it("shows a verified learning's before/after effect and the loop-health verified saving", () => {
     const html = render();
     expect(html).toContain("costPerDayUsd: 31 → 21");

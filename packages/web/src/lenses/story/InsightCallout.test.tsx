@@ -88,7 +88,7 @@ describe("InsightCallout", () => {
     expect(readOnly).not.toContain("Log learning");
   });
 
-  it("shows the pending / done states for the recommendation being logged", () => {
+  it("shows the pending state for the recommendation being logged", () => {
     const logging = render(
       <InsightCallout
         insight={insight()}
@@ -98,6 +98,9 @@ describe("InsightCallout", () => {
       />,
     );
     expect(logging).toContain("logging…");
+  });
+
+  it("replaces a logged recommendation's button with a link to the Learnings board (undo = Dismiss)", () => {
     const logged = render(
       <InsightCallout
         insight={insight()}
@@ -106,7 +109,13 @@ describe("InsightCallout", () => {
         loggedKeys={new Set(["Subagent returns avg 8.2k chars"])}
       />,
     );
-    expect(logged).toContain("logged ✓");
+    // Post-write feedback: no confirm dialog, the button becomes a link.
+    expect(logged).toContain("Logged ✓ → View in Learnings");
+    expect(logged).toContain('href="/learnings"');
+    // The tooltip documents the undo path (Dismiss on the Learnings board).
+    expect(logged).toContain("To undo, use Dismiss on the Learnings board.");
+    // The re-log button is gone once the recommendation is logged.
+    expect(logged).not.toContain("Log learning");
   });
 
   it("renders the clean-session copy when there are no recommendations", () => {
