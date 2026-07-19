@@ -1711,9 +1711,15 @@ export function createMcpServer(): McpServer {
         "assistant record's own log line (confidence `exact`, provenance that log line) whenever " +
         "the log records it, OVERRIDING the template's captured default — so a session that ran " +
         "on a different model than the template capture reports its REAL model, never a stale " +
-        "default; every other params key stays `template`. A key with neither a template default " +
-        "nor a log value is `unknown`, declared. When no template supplied params, `entries` is " +
-        "empty or model-only and a section-level `confidence: unknown` declares the gap. Called " +
+        "default; every other params key stays `template`. EXCEPTION: if the CLI was launched " +
+        "with a model ALIAS, the wire request carried that alias literal but the log records the " +
+        "alias's RESOLVED id (e.g. wire `claude-haiku-4-5` vs log `claude-haiku-4-5-20251001`) — " +
+        "when the template default is exactly that alias, it is KEPT at `template` confidence " +
+        "with a log-consistency note on `entries.model.note`, since overriding it with the " +
+        "resolved id would misreport what the wire literal actually was. A key with neither a " +
+        "template default nor a log value is `unknown`, declared. When no template supplied " +
+        "params, `entries` is empty or model-only and a section-level `confidence: unknown` " +
+        "declares the gap. Called " +
         "with neither `requestId` nor `line`, this returns the DISCOVERY listing instead of a " +
         "full reconstruction: every reconstructable request in the session as " +
         "`{requestId?, ordinal, targetLine}` — call again with one of those to fetch the actual " +

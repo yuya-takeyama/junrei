@@ -130,6 +130,23 @@ function uniquePush(list: string[], value: string): void {
   if (!list.includes(value)) list.push(value);
 }
 
+/**
+ * True when `logModel` is the RESOLVED form of the model ALIAS `tpl`. Claude
+ * Code can be launched with an alias (e.g. `claude-haiku-4-5`); when it is,
+ * the wire request body carries that alias literal, but the CLI resolves it
+ * before recording the response, so the session log's assistant record
+ * carries `<alias>-<8-digit-date>` instead (measured on a real capture, CLI
+ * 2.1.205: wire `"model":"claude-haiku-4-5"` vs log
+ * `claude-haiku-4-5-20251001`). Overriding a template's alias default with
+ * that resolved log id would therefore be byte-WRONG versus what actually
+ * went out on the wire.
+ */
+function isAliasResolvedForm(tpl: string, logModel: string): boolean {
+  const prefix = `${tpl}-`;
+  if (!logModel.startsWith(prefix)) return false;
+  return /^\d{8}$/.test(logModel.slice(prefix.length));
+}
+
 interface MaterializeContext {
   diskContext: DiskContext | undefined;
   dateStr: string | undefined;
@@ -305,10 +322,14 @@ interface TemplateSections {
  * Build the per-key `params` map: template-captured defaults (each `template`),
  * with the LOG-recorded `model` overlaid on top (`exact`, provenance the target
  * assistant record's own line) so a session that ran on a different model than
- * the template capture reports its real model. A key with neither a template
- * default nor a log value (today only `model` can be log-derived) is declared
- * `unknown`. The section-level fields describe the whole section ONLY when no
- * template params exist (non-model params are then unrecoverable).
+ * the template capture reports its real model — UNLESS the template's default
+ * is a model ALIAS and the log value is exactly that alias's resolved form
+ * (see `isAliasResolvedForm`), in which case the wire literal really was the
+ * alias and the template entry is kept, annotated log-consistent instead of
+ * overridden. A key with neither a template default nor a log value (today
+ * only `model` can be log-derived) is declared `unknown`. The section-level
+ * fields describe the whole section ONLY when no template params exist
+ * (non-model params are then unrecoverable).
  */
 function buildParamsSection(
   template: ReconstructionTemplate | undefined,
@@ -326,16 +347,43 @@ function buildParamsSection(
   }
 
   if (logModel !== undefined) {
-    // Log wins over any template default — this is the whole point of Defect 1.
-    entries.model = {
-      value: logModel,
-      confidence: "exact",
-      provenance: { kind: "log", lines: [targetLine] },
-      note:
-        entries.model !== undefined
-          ? "model taken from the target assistant record's own log line, overriding the template's captured default"
-          : "model taken from the target assistant record's own log line",
-    };
+    const templateEntry = entries.model;
+    if (templateEntry?.value === logModel) {
+      // Log wins over any template default — this is the whole point of
+      // Defect 1 — but here the template default already agrees, so this is
+      // a confirmation, not an override.
+      entries.model = {
+        value: logModel,
+        confidence: "exact",
+        provenance: { kind: "log", lines: [targetLine] },
+        note: "model taken from the target assistant record's own log line; the template default agrees",
+      };
+    } else if (
+      templateEntry !== undefined &&
+      typeof templateEntry.value === "string" &&
+      isAliasResolvedForm(templateEntry.value, logModel)
+    ) {
+      // The template default is a model ALIAS and the log carries exactly
+      // that alias's resolved form — the wire literal really was the alias,
+      // so overriding it with the resolved id would be byte-wrong. Keep the
+      // template entry, just note the log-observed resolution.
+      entries.model = {
+        ...templateEntry,
+        note: `log-consistent: the response records the resolved model id ${logModel} for this alias`,
+      };
+    } else {
+      // True mismatch (or no/non-string template default) — log wins over
+      // any template default, this is the whole point of Defect 1.
+      const overriding = templateEntry !== undefined;
+      entries.model = {
+        value: logModel,
+        confidence: "exact",
+        provenance: { kind: "log", lines: [targetLine] },
+        note: overriding
+          ? "model taken from the target assistant record's own log line, overriding the template's captured default; the wire literal may have been an alias of this id"
+          : "model taken from the target assistant record's own log line; the wire literal may have been an alias of this id",
+      };
+    }
   } else if (entries.model === undefined) {
     entries.model = {
       confidence: "unknown",
