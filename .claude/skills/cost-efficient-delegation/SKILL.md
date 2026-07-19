@@ -9,6 +9,13 @@ The strongest session model is the **orchestrator**: it plans, decomposes,
 judges, and verifies. Delegate execution to the cheapest model that can do the
 job well, but only through controls the current harness actually exposes.
 
+**Diagnose before you prescribe.** When a session (yours or another's) is
+already expensive, classify it by main-loop cost share FIRST, then pick levers
+— see `docs/cost-playbook.md` (MARATHON main ≥85% → cap context lifetime,
+one PR per session; FAN-OUT main ≤55% → drop the subagent tier and bound
+turns). The measured evidence behind every rule below lives in that playbook
+and its linked study.
+
 ## Route by harness
 
 The two harnesses route models in opposite ways — read the matching reference
@@ -39,6 +46,14 @@ or routing question commits to nothing.
 - **Main loop = planning, integration, review.** Beyond the trivia
   carve-out below, the orchestrator does not edit files, run gates, or
   drive browsers itself.
+- **One PR per session for an orchestrator.** A multi-PR marathon on one
+  session never compacts and the context climbs to 400–650K, which becomes the
+  single biggest cost line. Split each PR into its own session (or compact once
+  per PR); alarm above 200K context.
+- **State a turn budget in every spawn prompt** — a target of ~60 tool calls.
+  cacheRead scales with a subagent's turn count, not its token price: a
+  252-tool-call implementer accumulated 88.4M cacheRead. Treat any worker over
+  150 tool calls as a design failure to revisit, not a normal run.
 - **One implementer per work item.** Clear implementation goes to a single
   implementation-tier worker with a self-contained prompt; split across
   workers only when the pieces are truly independent.
@@ -80,6 +95,15 @@ against Junrei's pricing snapshot at
 
 On a fat main context, cache writes can be the single largest line item —
 multipliers and a measured example are in `references/claude-code.md`.
+
+**Tier the subagent by task risk, not by default to the top.** Measured per
+subagent: opus ≈ $0.13/msg vs sonnet ≈ $0.027/msg (5×) — in one fan-out session
+the opus workers alone were $99 (48% of a $208 session). So: **opus for
+adversarial review and genuinely hard debugging only** (the two rows the
+decision table still routes to opus); routine implementation, verification, and
+inventory go to sonnet (14-day baseline 98.7% success / $1.85); exploration and
+scouting go to haiku ($0.23). Whether opus→sonnet review loses catch-rate is not yet verified,
+so keep adversarial review on opus until it is.
 
 ### Codex GPT-5.6 family
 
@@ -135,6 +159,12 @@ Rules of thumb:
   Explore agent, wait for its report, then read only the files you will
   actually edit. Reading the same files in both threads pays twice and
   permanently fattens the main context.
+- **Warm the cache before a fan-out.** A cache entry only becomes usable after
+  the first response begins, so N workers spawned simultaneously onto a cold
+  shared prefix each pay full cache-write price (1.25–2× base) instead of the
+  0.1× read price. Launch one worker first to warm the shared prefix, then fan
+  out the rest — the write pays for itself after 1–2 re-reads, but only within
+  the cache TTL.
 
 ## Measure it
 
