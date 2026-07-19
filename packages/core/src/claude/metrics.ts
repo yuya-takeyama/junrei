@@ -6,6 +6,7 @@ import type {
   UsageSummary,
 } from "../shared/metrics.js";
 import { estimateCostComponents, estimateCostUsd } from "../shared/pricing/pricing.js";
+import type { ToolErrorCategory } from "../shared/tool-error.js";
 import type { SessionData, TaskNotificationEvent, ToolCall, UserPrompt } from "./session-data.js";
 import type { ClaudeSessionRecord } from "./types.js";
 
@@ -195,14 +196,13 @@ export function computeContextTimeline(data: SessionData): ContextPoint[] {
 // Tool stats & error classification
 // ---------------------------------------------------------------------------
 
-export type ToolErrorCategory =
-  | "file-not-found"
-  | "string-not-found"
-  | "command-failed"
-  | "permission-denied"
-  | "interrupted"
-  | "timeout"
-  | "other";
+// `ToolErrorCategory` now lives in `../shared/tool-error.ts` (harness-neutral,
+// so the cross-tool analytics engine can consume it without importing this
+// Claude-only module) — imported above for local use and re-exported here so
+// existing `@junrei/core` importers (via `claude/index.ts`) see no change. The
+// regex-based `classifyToolError` that PRODUCES it stays here, genuinely
+// Claude-side (its patterns key off Claude's own tool_result text).
+export type { ToolErrorCategory };
 
 const ERROR_PATTERNS: ReadonlyArray<readonly [ToolErrorCategory, RegExp]> = [
   [

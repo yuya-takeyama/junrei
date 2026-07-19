@@ -8,6 +8,7 @@ import type {
   TokenTotals,
   UsageSummary,
 } from "./metrics.js";
+import type { ToolUsageStats } from "./tool-usage-stats.js";
 
 /** Which harness produced a session transcript. */
 export type SessionSource = "claude-code" | "codex";
@@ -154,4 +155,19 @@ export interface SessionAnalysisCore {
    * the fact (see `../shared/bash-stats.ts`'s module doc comment).
    */
   bashStats: BashStats;
+  /**
+   * Cross-tool usage analytics — see `ToolUsageStats`. The "Tools (All)" lens's
+   * data: every tool (Read/Edit/Bash/WebFetch/…) ranked by context-cost
+   * contribution, where `bashStats` above is the per-command drill-down beneath
+   * the Bash row. Populated exactly like `bashStats` — Claude: main + every
+   * subagent, one joint pass at analysis time (`claude/analyze.ts`); Codex:
+   * this session's own transcript at analysis time, OVERRIDDEN at serve time
+   * (`getCodexSession`) with a joint recompute over every reachable descendant
+   * thread (same reason as `bashStats`: ranking fields can't be additively
+   * folded). A REQUIRED field on every fresh analysis, the same convention
+   * `bashStats` follows — analyses are recomputed from source (in-memory
+   * change-token cache, never persisted across schema changes), so no stored
+   * analysis can lack it.
+   */
+  toolUsageStats: ToolUsageStats;
 }

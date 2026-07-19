@@ -116,6 +116,50 @@ describe("analyzeClaudeSession", () => {
     expect(analysis.bashStats.totals.estUsd).toBeGreaterThan(0);
   });
 
+  it("wires toolUsageStats across every tool and thread ($-weighted, error categories, byThread, heavy hitters)", async () => {
+    const analysis = await analyzeClaudeSession(SESSION_FILE);
+    const tu = analysis.toolUsageStats;
+
+    // Totals cover every tool call, not just Bash — main's Read x4 / Bash x3 /
+    // Edit x1 / Agent x1 / WebFetch x1, plus the subagent's own Read call(s).
+    // toolCallCount is the MAIN transcript's own count; toolUsageStats spans
+    // main + subagents, so its call total is at least that.
+    expect(tu.totals.calls).toBeGreaterThanOrEqual(analysis.toolCallCount);
+    expect(tu.totals.estUsd).toBeGreaterThan(0);
+    expect(tu.totals).not.toHaveProperty("inputChars");
+
+    // The Bash row aggregates the same 3 calls / 2 errors bashStats counts,
+    // and carries the SAME command-failed error classification toolStats does.
+    const bash = tu.byTool.find((t) => t.name === "Bash");
+    expect(bash).toMatchObject({ calls: 3, errors: 2 });
+    expect(bash?.errorCategories["command-failed"]).toBe(2);
+    const edit = tu.byTool.find((t) => t.name === "Edit");
+    expect(edit?.errorCategories["string-not-found"]).toBe(1);
+
+    // byTool is sorted by estUsd desc (priced rows lead).
+    const pricedUsds = tu.byTool.map((t) => t.estUsd).filter((v): v is number => v !== undefined);
+    expect([...pricedUsds]).toEqual([...pricedUsds].sort((a, b) => b - a));
+
+    // byThread has both the main transcript and the subagent thread (which
+    // issues Read but no Bash — so it appears here even though it's absent from
+    // bashStats.byThread), each priced by its own model.
+    const threads = new Map(tu.byThread.map((t) => [t.thread, t]));
+    expect(threads.get("main")).toMatchObject({ model: "claude-fable-5" });
+    expect(threads.get("aaaa111122223333f")).toMatchObject({
+      model: "claude-haiku-4-5-20251001",
+    });
+    for (const row of tu.byThread) expect(row.inputChars).toBe(0);
+
+    // heavyHitters ranked by resultChars desc, carrying tool/thread/model/id.
+    const hitterChars = tu.heavyHitters.map((h) => h.resultChars);
+    expect([...hitterChars]).toEqual([...hitterChars].sort((a, b) => b - a));
+    expect(tu.heavyHitters[0]).toMatchObject({
+      tool: expect.any(String),
+      thread: expect.any(String),
+      id: expect.any(String),
+    });
+  });
+
   it("detects repetitions: identical runs, file re-reads, repeated failures", async () => {
     const analysis = await analyzeClaudeSession(SESSION_FILE);
     const kinds = analysis.repetitions.map((r) => r.kind);

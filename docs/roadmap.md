@@ -164,6 +164,35 @@ subagent), estimated-token figures always marked as estimates
     mtime-cached, but the directory sweep + repo aggregation pass was not.
     Bash-analysis v2 is now complete (parts A-D).
 
+### Tools lens (All + Bash) — cross-tool usage analytics
+
+The top-level "Bash" lens becomes "Tools", with an "All" sub-tab (new
+cross-tool, per-tool, $-weighted analysis) and the existing Bash lens re-homed
+under a "Bash" sub-tab. Delivered as two sequential PRs (never stacked).
+
+- ✅ Core + MCP (PR1) — `computeToolUsageStats` in `@junrei/core`
+  (harness-neutral `shared/tool-usage-stats.ts`, sibling to `bash-stats.ts`),
+  with Claude (`claude/tool-usage-stats.ts`, maps EVERY tool call) and Codex
+  (`codex/tool-usage-stats.ts`, over the generic `tool-calls.ts` listing)
+  adapters, feeding a new required `SessionAnalysisCore.toolUsageStats`. Ranks
+  every tool by context-cost contribution (`byTool`, sorted by `estUsd`, each
+  with a per-category error tally — `errorCategories`, reusing `ToolErrorCategory`
+  promoted to `shared/tool-error.ts`), a per-thread money rollup (`byThread`,
+  byte-identical to `bash-stats.ts` so the web "Who paid" panel is reusable),
+  and cross-tool `heavyHitters`. Estimation/$-weighting reuse `bash-stats.ts`'s
+  `estimateTokens`/`estUsdForChars` (no duplication); no `inputChars` (tool
+  inputs are params, not context chars). A Codex sub-agent forest is folded in
+  with a joint recompute at serve time (`getCodexSession`), mirroring
+  `bashStats`. MCP: `get_tool_usage_stats` mirrors `get_bash_stats`'s
+  registration (sessionRef, `includeSubagents` default true, `topTools`/
+  `topHeavyHitters` caps with `{items,totalCount,truncated}` markers,
+  main-only recompute when `includeSubagents: false`); the Bash tool appears
+  as one aggregate row and `get_bash_stats` remains its per-command drill-down.
+- ⬜ Web (PR2) — the "Tools" lens with All/Bash sub-tabs, `/tools` +
+  `/tools/bash` routes (legacy `/bash` aliased), the All view (reused
+  `WhoPaidPanel` + new tool ranking / heavy-hitters tables + errors-by-tool
+  matrix), and docs.
+
 ## Open items
 
 - ⬜ Docs refreshed; README quick start (v1 M4)
