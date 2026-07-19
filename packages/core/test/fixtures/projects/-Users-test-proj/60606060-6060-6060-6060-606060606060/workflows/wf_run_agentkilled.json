@@ -1,0 +1,26 @@
+{
+  "runId": "wf_run_agentkilled",
+  "workflowName": "agent-killed-demo",
+  "status": "completed",
+  "durationMs": 30000,
+  "agentCount": 1,
+  "defaultModel": "claude-sonnet-5",
+  "totalTokens": 100,
+  "totalToolCalls": 0,
+  "phases": [],
+  "workflowProgress": [
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "worker:killed-individually",
+      "phaseIndex": 1,
+      "phaseTitle": "Work",
+      "agentId": "wfagentkilled01",
+      "model": "claude-sonnet-5",
+      "state": "killed",
+      "queuedAt": 1783650020000,
+      "startedAt": 1783650021000,
+      "promptPreview": "this one got killed on its own, run stayed completed"
+    }
+  ]
+}

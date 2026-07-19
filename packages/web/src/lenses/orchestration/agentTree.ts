@@ -130,6 +130,35 @@ export function nodeStatus(
   return undefined;
 }
 
+/**
+ * Tree "run"/"done"/"fail" status label for a `WorkflowHeaderRow` — same
+ * three-value shape as `nodeStatus` above, but read from the RUN's own
+ * `status` string (`ClaudeWorkflowRunSummary.status`, e.g.
+ * "completed"/"killed") since a run header has no `SubagentNode.status` of
+ * its own to read:
+ *  - `status === "completed"` -> "done".
+ *  - Any OTHER defined status that's error/failure/cancellation/kill-shaped
+ *    (case-insensitive) -> "fail" — matched by shape rather than an exact
+ *    list since the harness's full status vocabulary isn't documented
+ *    (observed so far: "completed", "killed").
+ *  - Everything else — an in-progress status like "running", or `status`
+ *    undefined entirely (no run-state file yet: a still-in-flight run
+ *    synthesized by `buildWorkflowRunSummaries`) — falls back to whether the
+ *    SESSION itself still looks live, same live-gated rule `nodeStatus` uses
+ *    for an "unresolved" agent node: "run" while live, `undefined` once the
+ *    session has gone quiet (a long-finished session with a stale/missing
+ *    status just means the log never captured completion, not that the run
+ *    is still going).
+ */
+export function workflowHeaderStatus(
+  status: string | undefined,
+  sessionLive: boolean,
+): "run" | "done" | "fail" | undefined {
+  if (status === "completed") return "done";
+  if (status !== undefined && /error|fail|cancel|kill/i.test(status)) return "fail";
+  return sessionLive ? "run" : undefined;
+}
+
 export interface FlatTreeRow {
   id: string;
   depth: number;

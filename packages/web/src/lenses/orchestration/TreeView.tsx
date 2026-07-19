@@ -11,6 +11,7 @@ import {
   nodeStatus,
   type SelectedId,
   totalTokensOf,
+  workflowHeaderStatus,
 } from "./agentTree.js";
 import { DetailPanel } from "./DetailPanel.js";
 import { formatCostCell, formatDurationCompact, formatPctShare } from "./format.js";
@@ -79,14 +80,7 @@ export function TreeView({ session, selected, onSelect }: Props) {
         {rows.map((entry) => {
           if (entry.kind === "workflow-header") {
             const share = costShare(entry.rollup.costUsd, session.totalUsage.costUsd);
-            const status =
-              entry.status === "completed"
-                ? "done"
-                : entry.status !== undefined && /error|fail|cancel/i.test(entry.status)
-                  ? "fail"
-                  : sessionLive
-                    ? "run"
-                    : undefined;
+            const status = workflowHeaderStatus(entry.status, sessionLive);
             return (
               <div className="tn workflow-hdr" key={`wf-${entry.runId}`}>
                 <span className="nowrap">

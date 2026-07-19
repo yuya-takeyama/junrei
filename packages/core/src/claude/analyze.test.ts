@@ -625,6 +625,54 @@ describe("analyzeClaudeSession with a Workflow-tool run that has no run-state fi
   });
 });
 
+describe("analyzeClaudeSession with a resumed Workflow-tool run and killed run states", () => {
+  // `60606060…060` has three Workflow-tool shapes exercised nowhere else:
+  //  - wf_9bbab5e3-d95: a `resumeFromRunId` resume. Claude Code assigns a NEW
+  //    runId to the resumed launch but reuses the ORIGINAL run's already
+  //    generated script file unchanged, so the launch's `tool_result`
+  //    "Script file:" line's basename embeds the ORIGINAL run
+  //    (wf_9b53e6c0-ddb), never the new one — see `extractWorkflowScriptName`.
+  //    No `workflows/wf_9bbab5e3-d95.json` exists (still in flight), so this
+  //    run is synthesized, exactly like the orphan-run case above.
+  //  - wf_run_killed: a real run-state file with `status: "killed"` and two
+  //    `workflow_agent` entries — one `state: "done"` (finished before the
+  //    kill), one `state: "progress"` (still running when the run died, and
+  //    Claude Code never rewrites that agent's own state afterward).
+  //  - wf_run_agentkilled: a run-state file with `status: "completed"` but a
+  //    single agent whose own `state` is `"killed"` — isolates
+  //    `resolveWorkflowAgentStatus`'s per-agent "killed" mapping from the
+  //    run-level override exercised by wf_run_killed above (this run's own
+  //    status never matches the kill-shaped regex, so the run-level override
+  //    never fires here).
+  const RESUMED_SESSION_FILE = join(
+    FIXTURE_PROJECTS,
+    "-Users-test-proj/60606060-6060-6060-6060-606060606060.jsonl",
+  );
+
+  it("derives the resumed run's name from the reused script's ORIGINAL runId, not the new run's own id", async () => {
+    const analysis = await analyzeClaudeSession(RESUMED_SESSION_FILE);
+    const resumed = analysis.workflowRuns.find((r) => r.runId === "wf_9bbab5e3-d95");
+    expect(resumed).toBeDefined();
+    expect(resumed?.status).toBeUndefined(); // still in flight, no run-state file yet
+    expect(resumed?.name).toBe("pr1-core-mcp");
+    expect(resumed?.toolUseId).toBe("toolu_wf_resumed");
+  });
+
+  it("marks a killed run's still-unfinished (progress) agent as failed, but leaves its already-completed sibling alone", async () => {
+    const analysis = await analyzeClaudeSession(RESUMED_SESSION_FILE);
+    const done = analysis.subagents.find((n) => n.agentId === "wfkilleddone001");
+    const stuck = analysis.subagents.find((n) => n.agentId === "wfkilledprog001");
+    expect(done?.status).toBe("completed");
+    expect(stuck?.status).toBe("failed");
+  });
+
+  it("maps an individually-killed agent's own state to failed even under a run that stayed completed", async () => {
+    const analysis = await analyzeClaudeSession(RESUMED_SESSION_FILE);
+    const agentKilled = analysis.subagents.find((n) => n.agentId === "wfagentkilled01");
+    expect(agentKilled?.status).toBe("failed");
+  });
+});
+
 describe("analyzeClaudeSession with a corrupt subagent transcript", () => {
   // Regression coverage for the "one unreadable subagent sidecar shouldn't
   // fail the whole session" bug: a session with two subagent sidecars, one
@@ -875,8 +923,9 @@ describe("listClaudeSessionFiles", () => {
   it("finds session files under a projects dir", async () => {
     const refs = await listClaudeSessionFiles([FIXTURE_PROJECTS]);
     // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture,
-    // #27) plus 55555555…555 (Workflow-tool fixture).
-    expect(refs).toHaveLength(5);
+    // #27) plus 55555555…555 (Workflow-tool fixture) plus 60606060…060
+    // (resumed/killed Workflow-tool fixture).
+    expect(refs).toHaveLength(6);
     expect(refs.map((r) => r.sessionId)).toContain("11111111-1111-1111-1111-111111111111");
     expect(refs[0]?.projectDirName).toBe("-Users-test-proj");
   });

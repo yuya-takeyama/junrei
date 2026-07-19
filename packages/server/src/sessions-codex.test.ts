@@ -126,16 +126,28 @@ const FIXTURE_MTIMES: Array<[string, number]> = [
     1_767_193_100,
   ],
   // Skill-injection fixture (core issue #27). Its transcript starts at
-  // 2026-07-09T04:00 — the NEWEST startedAt of every fixture — so its stamp
-  // must rank first among the Claude files too, or the proxy-ordered
-  // analysis window (limit=3 in the merge test below) would skip the very
-  // session the start-time order puts on page one.
+  // 2026-07-09T04:00 — the second-newest startedAt among the Claude
+  // fixtures (only 60606060…060 below starts later) — so its stamp must
+  // rank ahead of every OTHER Claude file, or the proxy-ordered analysis
+  // window (limit=3 in the merge test below) would skip the very session
+  // the start-time order puts on page one.
   [
     join(
       CLAUDE_FIXTURES_DIR,
       "projects/-Users-test-proj/44444444-4444-4444-4444-444444444445.jsonl",
     ),
     1_767_193_520,
+  ],
+  // Resumed/killed Workflow-tool fixture. Its transcript starts at
+  // 2026-07-15T00:00 — the NEWEST startedAt of every Claude fixture — so its
+  // stamp must rank first among the Claude files, same rationale as
+  // 44444444…445 above.
+  [
+    join(
+      CLAUDE_FIXTURES_DIR,
+      "projects/-Users-test-proj/60606060-6060-6060-6060-606060606060.jsonl",
+    ),
+    1_767_193_540,
   ],
 ];
 
@@ -298,9 +310,10 @@ describe("listSessions (source filter + Codex merge)", () => {
   it("source: 'claude-code' lists only Claude sessions (unchanged behavior)", async () => {
     const { sessions: items, total } = await listSessions(50, "claude-code");
     // 11111111/22222222/33333333 plus 44444444…445 (skill-injection fixture,
-    // #27) plus 55555555…555 (Workflow-tool fixture).
-    expect(items.length).toBe(5);
-    expect(total).toBe(5);
+    // #27) plus 55555555…555 (Workflow-tool fixture) plus 60606060…060
+    // (resumed/killed Workflow-tool fixture).
+    expect(items.length).toBe(6);
+    expect(total).toBe(6);
     for (const item of items) {
       expect(item.source).toBe("claude-code");
     }
@@ -309,15 +322,16 @@ describe("listSessions (source filter + Codex merge)", () => {
   it('source "all" merges both sets, newest first by session START time, limit and offset applied after the merge', async () => {
     // The list sorts by each session's `startedAt` (first transcript
     // timestamp), NOT by the stamped file mtimes: every Claude fixture
-    // starts on 2026-07-09 or later (55555555…555, the Workflow-tool
-    // fixture, starts 2026-07-10 — the newest of all) while the Codex
-    // rollouts start 2026-07-01..03, so all Claude rows precede all Codex
-    // rows regardless of how the mtime stamps interleave the two sources.
-    // 88888888/99999999 don't appear — they're 77777777's sub-agents,
-    // excluded from the list.
+    // starts on 2026-07-09 or later (60606060…060, the resumed/killed
+    // Workflow-tool fixture, starts 2026-07-15 — the newest of all) while the
+    // Codex rollouts start 2026-07-01..03, so all Claude rows precede all
+    // Codex rows regardless of how the mtime stamps interleave the two
+    // sources. 88888888/99999999 don't appear — they're 77777777's
+    // sub-agents, excluded from the list.
     const all = await listSessions(50, "all");
-    expect(all.total).toBe(10);
+    expect(all.total).toBe(11);
     expect(all.sessions.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "claude-code:60606060",
       "claude-code:55555555",
       "claude-code:44444444",
       "claude-code:33333333",
@@ -333,28 +347,28 @@ describe("listSessions (source filter + Codex merge)", () => {
     // limit=3 must cut the *merged* series, not take 3 from each source
     // first — and `total` still reports the full count, not the page's.
     const limited = await listSessions(3, "all");
-    expect(limited.total).toBe(10);
+    expect(limited.total).toBe(11);
     expect(limited.sessions.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "claude-code:60606060",
       "claude-code:55555555",
       "claude-code:44444444",
-      "claude-code:33333333",
     ]);
 
     // offset pages through the same merged series — this window ([3, 6))
-    // now falls entirely within the Claude rows (there's one more of them).
+    // still falls entirely within the Claude rows (there are now 6 of them).
     const paged = await listSessions(3, "all", 3);
-    expect(paged.total).toBe(10);
+    expect(paged.total).toBe(11);
     expect(paged.sessions.map((i) => `${i.source}:${i.sessionId.slice(0, 8)}`)).toEqual([
+      "claude-code:33333333",
       "claude-code:22222222",
       "claude-code:11111111",
-      "codex:77777777",
     ]);
 
     // An offset past the end yields an empty page but keeps `total`, so a
     // stale deep-page URL can still render a working pager.
     const past = await listSessions(3, "all", 100);
     expect(past.sessions).toEqual([]);
-    expect(past.total).toBe(10);
+    expect(past.total).toBe(11);
   });
 
   it('source omitted means "all" (no back-compat Claude-only default)', async () => {

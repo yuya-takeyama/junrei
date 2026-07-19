@@ -14,6 +14,7 @@ import {
   SESSION_LIVE_THRESHOLD_MS,
   spawnedByLabel,
   subtreeCost,
+  workflowHeaderStatus,
 } from "./agentTree.js";
 
 function usage(costUsd: number) {
@@ -140,6 +141,31 @@ describe("nodeStatus", () => {
   it("returns undefined for a Codex node (status never set) regardless of liveness", () => {
     expect(nodeStatus({ status: undefined }, true)).toBeUndefined();
     expect(nodeStatus({ status: undefined }, false)).toBeUndefined();
+  });
+});
+
+describe("workflowHeaderStatus", () => {
+  it("maps a completed run to done regardless of session liveness", () => {
+    expect(workflowHeaderStatus("completed", true)).toBe("done");
+    expect(workflowHeaderStatus("completed", false)).toBe("done");
+  });
+
+  it("maps kill/error/fail/cancel-shaped statuses to fail, case-insensitively", () => {
+    expect(workflowHeaderStatus("killed", true)).toBe("fail");
+    expect(workflowHeaderStatus("killed", false)).toBe("fail");
+    expect(workflowHeaderStatus("error", true)).toBe("fail");
+    expect(workflowHeaderStatus("failed", true)).toBe("fail");
+    expect(workflowHeaderStatus("cancelled", true)).toBe("fail");
+  });
+
+  it("reads an undefined status (no run-state file yet) as run only while the session looks live", () => {
+    expect(workflowHeaderStatus(undefined, true)).toBe("run");
+    expect(workflowHeaderStatus(undefined, false)).toBeUndefined();
+  });
+
+  it("reads any other in-progress status the same live-gated way", () => {
+    expect(workflowHeaderStatus("running", true)).toBe("run");
+    expect(workflowHeaderStatus("running", false)).toBeUndefined();
   });
 });
 

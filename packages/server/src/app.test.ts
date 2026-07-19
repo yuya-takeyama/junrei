@@ -458,7 +458,7 @@ describe("Codex routes", () => {
     // narrower window would let the Claude adapter's mtime-proxy preselection
     // (see `claudeListItems`) pick a checkout-order-dependent subset and the
     // slice comparison below would flake.
-    const paged = await app.request("/api/sessions?source=all&limit=9&offset=1");
+    const paged = await app.request("/api/sessions?source=all&limit=10&offset=1");
     const pagedBody = (await paged.json()) as {
       sessions: Array<{ source: string; sessionId: string }>;
       total: number;
@@ -468,7 +468,7 @@ describe("Codex routes", () => {
     // The window must be a slice of the same merged order the unpaged
     // request returns, not a per-source cut.
     expect(pagedBody.sessions.map((s) => `${s.source}:${s.sessionId}`)).toEqual(
-      fullBody.sessions.slice(1, 10).map((s) => `${s.source}:${s.sessionId}`),
+      fullBody.sessions.slice(1, 11).map((s) => `${s.source}:${s.sessionId}`),
     );
 
     // Past the end: empty page, same total (a stale deep-page URL still

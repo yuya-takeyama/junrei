@@ -1,0 +1,40 @@
+{
+  "runId": "wf_run_killed",
+  "workflowName": "killed-run-demo",
+  "status": "killed",
+  "durationMs": 61000,
+  "agentCount": 2,
+  "defaultModel": "claude-sonnet-5",
+  "totalTokens": 400,
+  "totalToolCalls": 0,
+  "phases": [{ "title": "Work", "detail": "do the work" }],
+  "workflowProgress": [
+    { "type": "workflow_phase", "index": 1, "title": "Work" },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "worker:done",
+      "phaseIndex": 1,
+      "phaseTitle": "Work",
+      "agentId": "wfkilleddone001",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "queuedAt": 1783650000000,
+      "startedAt": 1783650001000,
+      "promptPreview": "finish before the kill"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "worker:stuck",
+      "phaseIndex": 1,
+      "phaseTitle": "Work",
+      "agentId": "wfkilledprog001",
+      "model": "claude-sonnet-5",
+      "state": "progress",
+      "queuedAt": 1783650010000,
+      "startedAt": 1783650011000,
+      "promptPreview": "still running when the run was killed"
+    }
+  ]
+}
