@@ -12,6 +12,12 @@ interface Props {
   sessionRef: SessionRef;
   /** Log a recommendation as a new open learning. Omitted in read-only renders. */
   onLog?: (rec: SessionInsightRecommendation) => void;
+  /**
+   * Recommendation key in the armed confirm step (its button reads "Confirm
+   * log?"). The write is two-step — the owner arms on the first click and only
+   * writes on the second — so a stray click can't create a ledger entry.
+   */
+  armedKey?: string | undefined;
   /** Recommendation key currently being written (its button shows a pending state). */
   loggingKey?: string | undefined;
   /** Recommendation keys already logged this session view (button shows a done state). */
@@ -35,13 +41,23 @@ export function recommendationKey(rec: SessionInsightRecommendation): string {
  * `buildSessionInsightFor` the `analyze_session` MCP tool calls, so the callout
  * and the tool can't drift. Each recommendation carries a "Log learning" button
  * that POSTs the recommendation's `logLearningCall` as a new open learning
- * (with this session as its `sourceSessions` provenance).
+ * (with this session as its `sourceSessions` provenance). The write is guarded:
+ * the first click only arms the button ("Confirm log?", `armedKey`), and the
+ * owner writes on the second click — so an accidental click can't create a
+ * ledger entry.
  *
  * A `delegationShare`/waste summary line gives the money read at a glance; the
  * `analyze_session()` provenance badge (Pattern C) traces every number to one
  * server call and shows its `_meta.approxTokens` context cost.
  */
-export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedKeys }: Props) {
+export function InsightCallout({
+  insight,
+  sessionRef,
+  onLog,
+  armedKey,
+  loggingKey,
+  loggedKeys,
+}: Props) {
   const { summary, recommendations, waste, delegation } = insight;
   const badge = (
     <ProvenanceBadge call="analyze_session()" approxTokens={insight._meta.approxTokens} />
@@ -98,6 +114,7 @@ export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedK
           <ol className="insight-recs">
             {recommendations.map((rec, i) => {
               const key = recommendationKey(rec);
+              const armed = armedKey === key;
               const logging = loggingKey === key;
               const logged = loggedKeys?.has(key) === true;
               return (
@@ -120,13 +137,13 @@ export function InsightCallout({ insight, sessionRef, onLog, loggingKey, loggedK
                       ) : (
                         <button
                           type="button"
-                          className="ghost"
+                          className={armed ? "ghost armed" : "ghost"}
                           disabled={logging}
                           onClick={() => {
                             onLog(rec);
                           }}
                         >
-                          {logging ? "logging…" : "Log learning"}
+                          {logging ? "logging…" : armed ? "Confirm log?" : "Log learning"}
                         </button>
                       ))}
                   </div>

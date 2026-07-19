@@ -2212,6 +2212,16 @@ button.fb {
   opacity: 0.5;
   cursor: default;
 }
+/* Armed confirm step ("Confirm log?") — the click is about to write a ledger
+   entry, so the button drops the ghost treatment and turns amber. */
+.ghost.armed {
+  color: var(--amb);
+  border: 1px solid var(--amb);
+}
+.ghost.armed:hover:not(:disabled) {
+  color: var(--amb);
+  border-color: var(--amb);
+}
 
 .wincol {
   display: flex;
