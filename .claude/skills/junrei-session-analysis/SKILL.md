@@ -127,9 +127,10 @@ across sessions in `wastePatterns[]`). Params also take `repo?`, `days?`
 
 ## Diagnosis protocol
 
-Before choosing which levers to recommend for an expensive session, **classify
-its archetype** from `analyze_session`'s `delegation` cost shares
-(`mainCostShare` / `subagentCostShare`). The archetype decides the lever set —
+Before choosing which levers to recommend for an expensive session, **read its
+archetype** — `analyze_session` now classifies it for you: `summary.archetype`
+is `"marathon"` / `"fan-out"` / `"mixed"`, and `summary.mainCostShare` is the
+main-loop cost share it was computed from. The archetype decides the lever set —
 prescribing before classifying is how analyses reach for the wrong fix. Full
 provenance and per-rule verify-signals: `docs/cost-playbook.md`.
 
@@ -144,9 +145,16 @@ provenance and per-rule verify-signals: `docs/cost-playbook.md`.
 - **MIXED** — in between (the main thread AND the subagents are each large
   lines). Apply both lever sets.
 
-Context lifetime is the cross-cutting check for all three: `compactions` was
-empty in every studied session and context ran to 270–503K even in fan-out
-sessions, so a high `contextTokens` peak is a finding regardless of archetype.
+Context lifetime is the cross-cutting check for all three, and it too is now a
+first-class field: read `contextLifetime` — `ctxMaxTokens` (the session's
+context peak), `compactionCount`, and `warning` (true when it ran past 200K
+with 0 compactions, the study's biggest lever). A `contextLifetime.warning` is
+a finding regardless of archetype. For the fan-out tier/turn levers, read them
+straight off `delegation`: `turnBudget.watch` / `turnBudget.outliers` (subagents
+past ~60 / 150 tool calls) and `opusMessageShare` (the Opus-class subagent
+message share). `analyze_session` already folds a marathon-with-warning and a
+fan-out-with-outliers into `recommendations[]`, each with a ready
+`logLearningCall`.
 
 ### Refuted hypotheses — do not re-litigate these
 

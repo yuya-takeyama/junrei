@@ -19,6 +19,7 @@ import {
   type Briefing,
   type BriefingSessionInput,
   type BriefingSubagentLaunch,
+  type BriefingTurnOutlier,
   buildBriefing,
   buildSessionInsight,
   type ClaudeSessionAnalysis,
@@ -26,6 +27,8 @@ import {
   type Detail,
   type FindPatternsResult,
   findPatterns,
+  type InsightSubagent,
+  isOpusClassModel,
   type Learning,
   type LearningSource,
   type LearningStatus,
@@ -112,6 +115,86 @@ function notAvailableFor(source: SessionSource): string[] | undefined {
   return source === "codex" ? ["repetitions", "taskExecutions"] : undefined;
 }
 
+/** Turn-budget outlier threshold — mirrors `@junrei/core`'s `TURN_OUTLIER_THRESHOLD` (kept local so the server doesn't import a constant just to filter). */
+const TURN_OUTLIER_THRESHOLD = 150;
+
+/** Max effective request context over the session's timeline (0 when it has no context points). */
+function ctxMaxTokensOf(a: AnyAnalysis): number {
+  let max = 0;
+  for (const p of a.contextTimeline) if (p.contextTokens > max) max = p.contextTokens;
+  return max;
+}
+
+/** The main-loop cost share (`delegation.main.costUsd / totalUsage.costUsd`) — the archetype axis; null when unpriced or zero-cost. */
+function mainCostShareOf(a: AnyAnalysis): number | null {
+  const main = a.delegation.main.costUsd;
+  const total = a.totalUsage.costUsd;
+  return main !== undefined && total > 0 ? main / total : null;
+}
+
+/** A subagent node's preferred display label — its workflow label, else its agent type, undefined otherwise (the caller falls back to `agentId`). */
+function subagentLabel(n: SubagentNode): string | undefined {
+  return n.workflowLabel ?? n.agentType;
+}
+
+/** Per-subagent turn-budget material for `buildSessionInsight` (agent id/label + tool-call count). */
+function insightSubagentsOf(flat: readonly SubagentNode[]): InsightSubagent[] {
+  return flat.map((n) => {
+    const label = subagentLabel(n);
+    return {
+      agentId: n.agentId,
+      ...(label !== undefined && { label }),
+      ...(n.model !== undefined && { model: n.model }),
+      toolCallCount: n.toolCallCount,
+    };
+  });
+}
+
+/** Subagents past the turn-budget outlier bar (>150 tc) — the fan-out waste entry's fix-text material. */
+function turnOutliersOf(flat: readonly SubagentNode[]): BriefingTurnOutlier[] {
+  return flat
+    .filter((n) => n.toolCallCount > TURN_OUTLIER_THRESHOLD)
+    .map((n) => {
+      const label = subagentLabel(n);
+      return {
+        agentId: n.agentId,
+        ...(label !== undefined && { label }),
+        toolCallCount: n.toolCallCount,
+      };
+    });
+}
+
+/**
+ * A window's `avgCtxMaxTokens` (mean per-session context peak) and
+ * `opusMessageShare` (Opus-class subagent messages as a share of all subagent
+ * messages), computed from the sessions' full analyses — the two metrics
+ * `review_learnings` compares before vs. after so the deep-read/contrast-pair
+ * learnings become verifiable. Analyses are mtime-cached (no transcript
+ * re-parse); `review_learnings` is a low-frequency call, so loading them here
+ * is acceptable. Both are `null`/`0` when the window has no matching session.
+ */
+function windowArchetypeMetrics(analyses: readonly AnyAnalysis[]): {
+  avgCtxMaxTokens: number;
+  opusMessageShare: number | null;
+} {
+  if (analyses.length === 0) return { avgCtxMaxTokens: 0, opusMessageShare: null };
+  let ctxSum = 0;
+  let opusMessages = 0;
+  let totalSubagentMessages = 0;
+  for (const a of analyses) {
+    ctxSum += ctxMaxTokensOf(a);
+    for (const m of a.delegation.byModel) {
+      const messages = m.subagents.messageCount ?? 0;
+      totalSubagentMessages += messages;
+      if (isOpusClassModel(m.model)) opusMessages += messages;
+    }
+  }
+  return {
+    avgCtxMaxTokens: ctxSum / analyses.length,
+    opusMessageShare: totalSubagentMessages > 0 ? opusMessages / totalSubagentMessages : null,
+  };
+}
+
 /** Map one loaded analysis into `buildBriefing`'s per-session waste/wins material. */
 function toBriefingSessionInput(a: AnyAnalysis): BriefingSessionInput {
   const flat = flattenSubagents(a.subagents ?? []);
@@ -131,6 +214,14 @@ function toBriefingSessionInput(a: AnyAnalysis): BriefingSessionInput {
     opportunities: a.bashStats.opportunities,
     oversizedReturns: oversizedReturnsOf(flat),
     subagentLaunches: launches,
+    // Archetype/context-lifetime primitives — the window rolls these up into
+    // its archetype distribution + context-warning count and surfaces the
+    // worst offenders into `waste[]` (see `@junrei/core`'s `buildBriefing`).
+    totalCostUsd: a.totalUsage.costUsd,
+    mainCostShare: mainCostShareOf(a),
+    ctxMaxTokens: ctxMaxTokensOf(a),
+    compactionCount: a.compactions.length,
+    turnOutliers: turnOutliersOf(flat),
     ...(notAvailable !== undefined && { notAvailable }),
   };
 }
@@ -171,7 +262,12 @@ function toSessionInsightInput(a: AnyAnalysis, detail: Detail): SessionInsightIn
     opportunities: a.bashStats.opportunities,
     byThread: a.bashStats.byThread,
     subagentReturns: oversizedReturnsOf(flat),
+    subagents: insightSubagentsOf(flat),
     subagentCount: a.subagentCount ?? 0,
+    // Context-lifetime inputs (already reduced to numbers, keeping the core
+    // builder pure) — the biggest single cost lever (study R1/A1).
+    ctxMaxTokens: ctxMaxTokensOf(a),
+    compactionCount: a.compactions.length,
     ...(notAvailable !== undefined && { notAvailable }),
   };
 }
@@ -528,7 +624,7 @@ export async function findPatternsFor(options: {
 // review_learnings
 // ---------------------------------------------------------------------------
 
-/** The four window metrics `review_learnings` compares before vs. after a learning was applied. */
+/** The window metrics `review_learnings` compares before vs. after a learning was applied. */
 export interface ReviewWindowMetrics {
   costPerDayUsd: number;
   /** Subagent share of cost, 0-1, null when unpriced / no cost. */
@@ -537,6 +633,19 @@ export interface ReviewWindowMetrics {
   cacheHitRate: number | null;
   /** Bash spend estimate over the window, undefined when nothing priced. */
   bashEstUsd?: number;
+  /**
+   * Mean per-session context peak over the window (study R1/A1 — the biggest
+   * lever). Promoted here so the deep-read learning ("cap context lifetime")
+   * is verifiable: after applying it, this should fall.
+   */
+  avgCtxMaxTokens: number;
+  /**
+   * Opus-class subagent messages as a share of all subagent messages over the
+   * window (study R3/A4). Promoted here so the contrast-pair learning ("tier
+   * the subagent model") is verifiable: after applying it, this should fall.
+   * `null` when the window had no subagent messages.
+   */
+  opusMessageShare: number | null;
 }
 
 /** A computed (never persisted) before/after comparison for one applied learning. */
@@ -554,13 +663,43 @@ export interface ReviewedLearning {
   comparison?: ReviewComparison;
 }
 
-function toWindowMetrics(totals: TrendWindowTotals, windowDays: number): ReviewWindowMetrics {
+function toWindowMetrics(
+  totals: TrendWindowTotals,
+  windowDays: number,
+  extra: { avgCtxMaxTokens: number; opusMessageShare: number | null },
+): ReviewWindowMetrics {
   return {
     costPerDayUsd: windowDays > 0 ? totals.totalCostUsd / windowDays : totals.totalCostUsd,
     delegationShare: totals.subagentCostShare,
     cacheHitRate: totals.cacheHitRate,
     ...(totals.bashEstUsd !== undefined && { bashEstUsd: totals.bashEstUsd }),
+    avgCtxMaxTokens: extra.avgCtxMaxTokens,
+    opusMessageShare: extra.opusMessageShare,
   };
+}
+
+/**
+ * Load the analyses for the repo's sessions that started within `[sinceMs,
+ * untilMs)` and compute the window's archetype metrics (`avgCtxMaxTokens`,
+ * `opusMessageShare`). Partitions `items` by a plain start-time range
+ * (appliedAt-anchored, matching how the caller frames before/after) rather
+ * than reusing `computeTrends`' calendar-day buckets — these two supplementary
+ * metrics don't need exact calendar alignment with the cost KPIs, and a simple
+ * ms window keeps the extra load unambiguous.
+ */
+async function windowArchetypeMetricsFor(
+  items: readonly AnySessionListItem[],
+  repoRoot: string,
+  sinceMs: number,
+  untilMs: number,
+): Promise<{ avgCtxMaxTokens: number; opusMessageShare: number | null }> {
+  const inWindow = items.filter((item) => {
+    if (repoKeyOf(item) !== repoRoot || item.startedAt === undefined) return false;
+    const ms = Date.parse(item.startedAt);
+    return !Number.isNaN(ms) && ms >= sinceMs && ms < untilMs;
+  });
+  const analyses = await gatherSessionInputs(inWindow, (a) => a);
+  return windowArchetypeMetrics(analyses);
 }
 
 /**
@@ -586,9 +725,17 @@ async function computeReviewComparison(
     timeZone: DEFAULT_TRENDS_TIMEZONE,
     repo: repoRoot,
   });
-  const after = toWindowMetrics(trends.summary.current, windowDays);
+  const windowMs = windowDays * TRENDS_DAY_MS;
+  const afterExtra = await windowArchetypeMetricsFor(items, repoRoot, appliedAtMs, anchorMs);
+  const after = toWindowMetrics(trends.summary.current, windowDays, afterExtra);
   const before =
-    trends.summary.previous === null ? null : toWindowMetrics(trends.summary.previous, windowDays);
+    trends.summary.previous === null
+      ? null
+      : toWindowMetrics(
+          trends.summary.previous,
+          windowDays,
+          await windowArchetypeMetricsFor(items, repoRoot, appliedAtMs - windowMs, appliedAtMs),
+        );
   return {
     windowDays,
     before,

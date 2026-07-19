@@ -4,13 +4,20 @@
  * doc comment; the server (PR2) wires these into the MCP surface and REST.
  */
 
+export type { SessionArchetype } from "./archetype.js";
+export {
+  classifyArchetype,
+  isContextLifetimeWarning,
+} from "./archetype.js";
 export type {
   Briefing,
+  BriefingArchetypeDistribution,
   BriefingDailyCost,
   BriefingLearnings,
   BriefingSessionInput,
   BriefingSubagentLaunch,
   BriefingSummary,
+  BriefingTurnOutlier,
   BriefingWin,
   BuildBriefingInput,
 } from "./briefing.js";
@@ -46,12 +53,16 @@ export type {
 } from "./patterns.js";
 export { findPatterns } from "./patterns.js";
 export type {
+  ContextLifetime,
   CostDriver,
   DelegationHealth,
+  InsightSubagent,
   Recommendation,
   SessionInsight,
   SessionInsightInput,
   SessionInsightSummary,
+  TurnBudget,
+  TurnBudgetOutlier,
 } from "./sessionInsight.js";
 export { buildSessionInsight } from "./sessionInsight.js";
 export type {

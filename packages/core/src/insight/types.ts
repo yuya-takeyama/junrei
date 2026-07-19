@@ -106,16 +106,22 @@ export interface InsightMeta {
 /** A finding an agent should act on, ranked by dollar impact where known. */
 export interface WasteItem {
   /**
-   * Stable class of the finding — the four Bash-opportunity classes plus
+   * Stable class of the finding — the four Bash-opportunity classes,
    * `oversized-return` (a subagent that dumped a large result back into its
-   * parent's context).
+   * parent's context), plus the two archetype-lever classes the briefing
+   * surfaces from the cost-performance study: `marathon-context` (a
+   * main-cost-dominated session that ran to a huge, never-compacted context —
+   * study rule A1/R1) and `fan-out-turn-budget` (a fan-out session with a
+   * subagent past the ~60-tool-call turn budget — A5/R4).
    */
   class:
     | "bash-as-read"
     | "large-result"
     | "near-duplicate"
     | "rerun-after-error"
-    | "oversized-return";
+    | "oversized-return"
+    | "marathon-context"
+    | "fan-out-turn-budget";
   /** Human-readable headline. */
   title: string;
   /** Copy-ready, imperative fix. */

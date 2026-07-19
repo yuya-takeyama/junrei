@@ -220,6 +220,26 @@ function KpiStrip({ briefing, badge }: { briefing: Briefing; badge: ReactNode })
         sub={delta === null ? "of cost" : `of cost · ${formatDeltaPts(delta.delegationSharePts)}`}
       />
       <Kpi
+        label="Ctx warnings"
+        value={String(summary.contextLifetimeWarnings)}
+        {...(summary.contextLifetimeWarnings > 0 && { valueClass: "t-rd" })}
+        sub="≥200K ctx · 0 compactions"
+      />
+      <div className="kpi">
+        <div className="kpi-label">Archetype</div>
+        <div className="ldots mono fs12">
+          <span title="main ≥85% of cost — orchestrator-context-dominated (R1)">
+            {summary.archetypeDistribution.marathon} marathon
+          </span>
+          <span title="main ≤55% of cost — subagent-tier/turn-dominated (R3/R4)">
+            {summary.archetypeDistribution.fanOut} fan-out
+          </span>
+          <span title="in between — both levers apply">
+            {summary.archetypeDistribution.mixed} mixed
+          </span>
+        </div>
+      </div>
+      <Kpi
         label="Cache hit"
         value={formatRate(summary.cacheHitRate)}
         sub={delta === null ? "of effective input" : formatDeltaPts(delta.cacheHitRatePts)}

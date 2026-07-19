@@ -325,4 +325,112 @@ describe("buildBriefing", () => {
     });
     expect(briefing.notAvailable?.sort()).toEqual(["repetitions", "taskExecutions"]);
   });
+
+  describe("archetype aggregation", () => {
+    const report = trends([makeItem({ sessionId: "s1" })]);
+    const base = { days: 7, detail: "full" as const, trends: report, learnings: [] };
+
+    it("tallies the archetype distribution over the window's sessions", () => {
+      const briefing = buildBriefing({
+        ...base,
+        sessions: [
+          { source: "claude-code", sessionId: "m1", opportunities: [], mainCostShare: 0.9 },
+          { source: "claude-code", sessionId: "m2", opportunities: [], mainCostShare: 1 },
+          { source: "claude-code", sessionId: "f1", opportunities: [], mainCostShare: 0.3 },
+          { source: "claude-code", sessionId: "x1", opportunities: [], mainCostShare: 0.7 },
+          // unpriced share → mixed
+          { source: "claude-code", sessionId: "x2", opportunities: [], mainCostShare: null },
+        ],
+      });
+      expect(briefing.summary.archetypeDistribution).toEqual({
+        marathon: 2,
+        fanOut: 1,
+        mixed: 2,
+      });
+    });
+
+    it("counts context-lifetime warnings (>200K ctx, 0 compactions)", () => {
+      const briefing = buildBriefing({
+        ...base,
+        sessions: [
+          {
+            source: "claude-code",
+            sessionId: "w1",
+            opportunities: [],
+            ctxMaxTokens: 480_000,
+            compactionCount: 0,
+          },
+          {
+            source: "claude-code",
+            sessionId: "w2",
+            opportunities: [],
+            ctxMaxTokens: 480_000,
+            compactionCount: 1, // relieved → no warning
+          },
+          {
+            source: "claude-code",
+            sessionId: "w3",
+            opportunities: [],
+            ctxMaxTokens: 150_000,
+            compactionCount: 0, // below threshold → no warning
+          },
+        ],
+      });
+      expect(briefing.summary.contextLifetimeWarnings).toBe(1);
+    });
+
+    it("surfaces marathon + fan-out offenders into waste[], worst-cost-first among the unpriced", () => {
+      const briefing = buildBriefing({
+        ...base,
+        sessions: [
+          {
+            source: "claude-code",
+            sessionId: "marathon-cheap",
+            title: "cheap marathon",
+            opportunities: [],
+            totalCostUsd: 30,
+            mainCostShare: 0.95,
+            ctxMaxTokens: 300_000,
+            compactionCount: 0,
+          },
+          {
+            source: "claude-code",
+            sessionId: "fanout-expensive",
+            title: "expensive fan-out",
+            opportunities: [],
+            totalCostUsd: 220,
+            mainCostShare: 0.4,
+            turnOutliers: [{ agentId: "impl", label: "impl", toolCallCount: 252 }],
+          },
+        ],
+      });
+      const classes = briefing.waste.map((w) => w.class);
+      expect(classes).toContain("marathon-context");
+      expect(classes).toContain("fan-out-turn-budget");
+      // Both unpriced; the $220 fan-out outranks the $30 marathon.
+      expect(briefing.waste[0]?.class).toBe("fan-out-turn-budget");
+      expect(briefing.waste[0]?.fix).toMatch(/~60 tool calls/);
+      expect(briefing.waste.find((w) => w.class === "marathon-context")?.fix).toMatch(/per PR/);
+    });
+
+    it("ranks priced Bash waste above the unpriced archetype offenders", () => {
+      const briefing = buildBriefing({
+        ...base,
+        sessions: [
+          {
+            source: "claude-code",
+            sessionId: "s1",
+            opportunities: [makeOpportunity({ estUsdSaved: 2 })],
+            totalCostUsd: 100,
+            mainCostShare: 0.95,
+            ctxMaxTokens: 300_000,
+            compactionCount: 0,
+          },
+        ],
+      });
+      expect(briefing.waste[0]?.class).toBe("near-duplicate");
+      expect(briefing.waste[0]?.impactUsd).toBe(2);
+      expect(briefing.waste.some((w) => w.class === "marathon-context")).toBe(true);
+    });
+  });
 });

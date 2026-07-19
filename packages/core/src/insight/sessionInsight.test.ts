@@ -182,4 +182,162 @@ describe("buildSessionInsight", () => {
     expect(insight.summary.delegationShare).toBeNull();
     expect(insight.summary.headline).toMatch(/unpriced/);
   });
+
+  describe("archetype classification (from main cost share)", () => {
+    it("is fan-out when the main loop holds ≤55% of cost", () => {
+      // default input: main $4 of $5 total → mainCostShare 0.8 → mixed; push
+      // main down to $2 of $5 (0.4) for a fan-out.
+      const insight = buildSessionInsight(
+        input({
+          delegation: delegation({
+            main: { tokens: 1000, outputTokens: 400, costUsd: 2, messageCount: 10 },
+          }),
+        }),
+      );
+      expect(insight.summary.mainCostShare).toBeCloseTo(0.4);
+      expect(insight.summary.archetype).toBe("fan-out");
+    });
+
+    it("is marathon by construction for a zero-subagent, fully-main-priced session", () => {
+      const insight = buildSessionInsight(
+        input({
+          totalCostUsd: 4,
+          subagentCount: 0,
+          delegation: delegation({
+            main: { tokens: 1000, outputTokens: 400, costUsd: 4, messageCount: 10 },
+            subagents: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+            byModel: [
+              {
+                model: "opus",
+                main: { tokens: 1000, outputTokens: 400, costUsd: 4, messageCount: 10 },
+                subagents: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+              },
+            ],
+          }),
+        }),
+      );
+      expect(insight.summary.mainCostShare).toBeCloseTo(1);
+      expect(insight.summary.archetype).toBe("marathon");
+    });
+  });
+
+  describe("contextLifetime", () => {
+    it("warns above 200K with zero compactions", () => {
+      const insight = buildSessionInsight(input({ ctxMaxTokens: 480_000, compactionCount: 0 }));
+      expect(insight.contextLifetime).toEqual({
+        ctxMaxTokens: 480_000,
+        compactionCount: 0,
+        warning: true,
+      });
+    });
+
+    it("does not warn when a compaction fired, even at high ctx", () => {
+      const insight = buildSessionInsight(input({ ctxMaxTokens: 480_000, compactionCount: 2 }));
+      expect(insight.contextLifetime.warning).toBe(false);
+    });
+
+    it("defaults to a zeroed, non-warning lifetime when the inputs are absent", () => {
+      const insight = buildSessionInsight(input());
+      expect(insight.contextLifetime).toEqual({
+        ctxMaxTokens: 0,
+        compactionCount: 0,
+        warning: false,
+      });
+    });
+  });
+
+  describe("delegation.turnBudget", () => {
+    it("counts watch (>60) and outliers (>150), worst-first, with cap suggestion in fix text", () => {
+      const insight = buildSessionInsight(
+        input({
+          // main $2/$5 → fan-out, so the outlier recommendation fires too.
+          delegation: delegation({
+            main: { tokens: 1000, outputTokens: 400, costUsd: 2, messageCount: 10 },
+          }),
+          subagents: [
+            { agentId: "a1", label: "impl", toolCallCount: 252 },
+            { agentId: "a2", toolCallCount: 61 },
+            { agentId: "a3", toolCallCount: 60 }, // exactly 60 — not watched (strict >)
+            { agentId: "a4", toolCallCount: 180 },
+          ],
+        }),
+      );
+      expect(insight.delegation.turnBudget.watch).toBe(3); // 252, 61, 180
+      expect(insight.delegation.turnBudget.outliers.map((o) => o.agentId)).toEqual(["a1", "a4"]);
+      const rec = insight.recommendations.find((r) => /turn budget/i.test(r.change));
+      expect(rec?.change).toMatch(/~60 tool calls/);
+      expect(rec?.logLearningCall.finding).toMatch(/impl/);
+    });
+
+    it("is empty when no subagent material is supplied", () => {
+      const insight = buildSessionInsight(input());
+      expect(insight.delegation.turnBudget).toEqual({ watch: 0, outliers: [] });
+    });
+  });
+
+  describe("delegation.opusMessageShare", () => {
+    it("derives the Opus-class subagent message share from the delegation split", () => {
+      const insight = buildSessionInsight(
+        input({
+          delegation: delegation({
+            byModel: [
+              {
+                model: "claude-opus-4-8",
+                main: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+                subagents: { tokens: 100, outputTokens: 50, costUsd: 1, messageCount: 3 },
+              },
+              {
+                model: "claude-sonnet-4-5",
+                main: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+                subagents: { tokens: 100, outputTokens: 50, costUsd: 1, messageCount: 9 },
+              },
+            ],
+          }),
+        }),
+      );
+      expect(insight.delegation.opusMessageShare).toBeCloseTo(3 / 12);
+    });
+
+    it("is null when no subagent messages were recorded", () => {
+      const insight = buildSessionInsight(
+        input({
+          delegation: delegation({
+            byModel: [
+              {
+                model: "opus",
+                main: { tokens: 1000, outputTokens: 400, costUsd: 4, messageCount: 10 },
+                subagents: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+              },
+            ],
+          }),
+        }),
+      );
+      expect(insight.delegation.opusMessageShare).toBeNull();
+    });
+  });
+
+  it("folds a marathon-with-warning into recommendations, ahead of waste fixes", () => {
+    const insight = buildSessionInsight(
+      input({
+        totalCostUsd: 4,
+        subagentCount: 0,
+        ctxMaxTokens: 480_000,
+        compactionCount: 0,
+        delegation: delegation({
+          main: { tokens: 1000, outputTokens: 400, costUsd: 4, messageCount: 10 },
+          subagents: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+          byModel: [
+            {
+              model: "opus",
+              main: { tokens: 1000, outputTokens: 400, costUsd: 4, messageCount: 10 },
+              subagents: { tokens: 0, outputTokens: 0, costUsd: 0, messageCount: 0 },
+            },
+          ],
+        }),
+      }),
+    );
+    expect(insight.summary.archetype).toBe("marathon");
+    expect(insight.recommendations[0]?.change).toMatch(/one session per PR|compact/i);
+    expect(insight.recommendations[0]?.logLearningCall.change).toMatch(/compact/i);
+  });
 });

@@ -129,7 +129,12 @@ describe("MCP loop surface", () => {
       const result = await client.callTool({ name: "briefing", arguments: { days: 30 } });
       expect(result.isError).not.toBe(true);
       const body = JSON.parse(textOf(result)) as {
-        summary: { costUsd: number; sessionCount: number };
+        summary: {
+          costUsd: number;
+          sessionCount: number;
+          archetypeDistribution: { marathon: number; fanOut: number; mixed: number };
+          contextLifetimeWarnings: number;
+        };
         waste: unknown[];
         wins: unknown[];
         learnings: { open: number; applied: number; verified: number; rejected: number };
@@ -137,6 +142,8 @@ describe("MCP loop surface", () => {
         _meta: Meta;
       };
       expect(body.summary.sessionCount).toBeGreaterThanOrEqual(0);
+      expect(body.summary.archetypeDistribution).toHaveProperty("marathon");
+      expect(typeof body.summary.contextLifetimeWarnings).toBe("number");
       expect(Array.isArray(body.waste)).toBe(true);
       expect(body.learnings).toHaveProperty("open");
       expect(body._meta.approxTokens).toBeGreaterThan(0);
@@ -165,16 +172,26 @@ describe("MCP loop surface", () => {
       const body = JSON.parse(textOf(result)) as {
         sessionId: string;
         source: string;
-        summary: { costUsd: number };
+        summary: { costUsd: number; archetype: string; mainCostShare: number | null };
         costDrivers: unknown[];
         waste: unknown[];
-        delegation: { subagentCount: number };
+        contextLifetime: { ctxMaxTokens: number; compactionCount: number; warning: boolean };
+        delegation: {
+          subagentCount: number;
+          turnBudget: { watch: number; outliers: unknown[] };
+          opusMessageShare: number | null;
+        };
         recommendations: Array<{ logLearningCall: { finding: string; change: string } }>;
         _meta: Meta;
       };
       expect(body.sessionId).toBe(CLAUDE_SESSION_ID);
       expect(body.source).toBe("claude-code");
       expect(body.summary.costUsd).toBeGreaterThanOrEqual(0);
+      expect(["marathon", "fan-out", "mixed"]).toContain(body.summary.archetype);
+      expect(body.contextLifetime).toHaveProperty("warning");
+      expect(typeof body.contextLifetime.ctxMaxTokens).toBe("number");
+      expect(body.delegation.turnBudget).toHaveProperty("watch");
+      expect(body.delegation).toHaveProperty("opusMessageShare");
       expect(Array.isArray(body.costDrivers)).toBe(true);
       for (const rec of body.recommendations) {
         expect(rec.logLearningCall.finding.length).toBeGreaterThan(0);
@@ -436,7 +453,7 @@ describe("MCP loop surface", () => {
           learning: { id: string; status: string };
           comparison?: {
             windowDays: number;
-            after: unknown;
+            after: { avgCtxMaxTokens: number; opusMessageShare: number | null };
             suggestedVerification: { metric: string };
           };
         }>;
@@ -446,6 +463,9 @@ describe("MCP loop surface", () => {
       const applied = body.learnings.find((l) => l.learning.status === "applied");
       expect(applied?.comparison?.windowDays).toBe(7);
       expect(applied?.comparison?.suggestedVerification.metric).toBe("costPerDayUsd");
+      // The deep-read / contrast-pair metrics are on every window's metric set.
+      expect(typeof applied?.comparison?.after.avgCtxMaxTokens).toBe("number");
+      expect(applied?.comparison?.after).toHaveProperty("opusMessageShare");
     });
 
     describe("sourceSessions provenance (dogfood fix: create-mode used to silently drop it)", () => {
