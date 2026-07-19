@@ -13,7 +13,7 @@
 
 import type { SessionSource } from "../shared/session-analysis.js";
 import { buildMeta } from "./meta.js";
-import type { Detail, InsightMeta } from "./types.js";
+import type { Detail, InsightMeta, TruncatedField } from "./types.js";
 
 export type PatternKind = "text" | "delegation" | "waste";
 
@@ -177,10 +177,14 @@ export function findPatterns(input: FindPatternsInput): FindPatternsResult {
     const all = input.hits ?? [];
     const textHits = all.slice(0, limit);
     const payload = { ...common, textHits };
+    const truncatedFields: TruncatedField[] =
+      textHits.length < all.length
+        ? [{ path: "textHits", shown: textHits.length, total: all.length }]
+        : [];
     return {
       ...payload,
       _meta: buildMeta(payload, {
-        ...(textHits.length < all.length && { truncated: true }),
+        ...(truncatedFields.length > 0 && { truncatedFields }),
         ...(all.length === 0 && { nextSteps: noResultsNextSteps("text") }),
       }),
     };
@@ -191,10 +195,14 @@ export function findPatterns(input: FindPatternsInput): FindPatternsResult {
     const all = delegationPatterns(sessions);
     const shown = all.slice(0, limit);
     const payload = { ...common, delegationPatterns: shown };
+    const truncatedFields: TruncatedField[] =
+      shown.length < all.length
+        ? [{ path: "delegationPatterns", shown: shown.length, total: all.length }]
+        : [];
     return {
       ...payload,
       _meta: buildMeta(payload, {
-        ...(shown.length < all.length && { truncated: true }),
+        ...(truncatedFields.length > 0 && { truncatedFields }),
         ...(all.length === 0 && { nextSteps: noResultsNextSteps("delegation") }),
       }),
     };
@@ -203,10 +211,14 @@ export function findPatterns(input: FindPatternsInput): FindPatternsResult {
   const all = wastePatterns(sessions);
   const shown = all.slice(0, limit);
   const payload = { ...common, wastePatterns: shown };
+  const truncatedFields: TruncatedField[] =
+    shown.length < all.length
+      ? [{ path: "wastePatterns", shown: shown.length, total: all.length }]
+      : [];
   return {
     ...payload,
     _meta: buildMeta(payload, {
-      ...(shown.length < all.length && { truncated: true }),
+      ...(truncatedFields.length > 0 && { truncatedFields }),
       ...(all.length === 0 && { nextSteps: noResultsNextSteps("waste") }),
     }),
   };

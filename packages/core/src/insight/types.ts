@@ -71,6 +71,18 @@ export interface Learning {
 export type Detail = "concise" | "full";
 
 /**
+ * One capped list's shown/total counts, so a caller can tell exactly what
+ * was cut instead of just that *something* was. `path` is a dot-path from
+ * the payload root to the capped array (e.g. `"waste"`, or `"learnings.recent"`
+ * when the array is nested).
+ */
+export interface TruncatedField {
+  path: string;
+  shown: number;
+  total: number;
+}
+
+/**
  * Envelope every insight response carries. `approxTokens` is a cheap size
  * estimate (`JSON.stringify(payload).length / 4`, see `meta.ts`) so a caller
  * can budget context before spending it; `nextSteps` is ALWAYS populated on
@@ -81,6 +93,12 @@ export interface InsightMeta {
   approxTokens: number;
   /** Set true when `detail: "concise"` (or a hard cap) dropped entries from any list. */
   truncated?: boolean;
+  /**
+   * Per-section detail on what got cut. Present only when at least one list
+   * was capped — and whenever present, `truncated` is always `true` too (the
+   * coarse flag and the detailed list can never disagree).
+   */
+  truncatedFields?: TruncatedField[];
   /** What the agent should do / call next — never omitted on empty or error results. */
   nextSteps?: string[];
 }

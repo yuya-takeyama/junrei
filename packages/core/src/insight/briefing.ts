@@ -16,7 +16,14 @@ import type { BashOpportunity } from "../shared/bash-opportunities.js";
 import type { SessionSource } from "../shared/session-analysis.js";
 import type { TrendsReport } from "../shared/trends.js";
 import { buildMeta } from "./meta.js";
-import type { Detail, InsightMeta, Learning, LearningStatus, WasteItem } from "./types.js";
+import type {
+  Detail,
+  InsightMeta,
+  Learning,
+  LearningStatus,
+  TruncatedField,
+  WasteItem,
+} from "./types.js";
 import {
   type OversizedReturn,
   opportunitiesToWaste,
@@ -301,7 +308,21 @@ export function buildBriefing(input: BuildBriefingInput): Briefing {
   const winsLimit = input.detail === "concise" ? CONCISE_WINS_LIMIT : wins.length;
   const waste = allWaste.slice(0, wasteLimit);
   const shownWins = wins.slice(0, winsLimit);
-  const truncated = waste.length < allWaste.length || shownWins.length < wins.length;
+
+  const truncatedFields: TruncatedField[] = [];
+  if (waste.length < allWaste.length) {
+    truncatedFields.push({ path: "waste", shown: waste.length, total: allWaste.length });
+  }
+  if (shownWins.length < wins.length) {
+    truncatedFields.push({ path: "wins", shown: shownWins.length, total: wins.length });
+  }
+  if (learnings.recent.length < input.learnings.length) {
+    truncatedFields.push({
+      path: "learnings.recent",
+      shown: learnings.recent.length,
+      total: input.learnings.length,
+    });
+  }
 
   const payload: Omit<Briefing, "_meta"> = {
     ...(input.repo !== undefined && { repo: input.repo }),
@@ -317,7 +338,7 @@ export function buildBriefing(input: BuildBriefingInput): Briefing {
   return {
     ...payload,
     _meta: buildMeta(payload, {
-      ...(truncated && { truncated: true }),
+      ...(truncatedFields.length > 0 && { truncatedFields }),
       nextSteps: briefingNextSteps(summary, allWaste),
     }),
   };

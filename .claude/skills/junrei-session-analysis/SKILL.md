@@ -184,13 +184,19 @@ only when it's been enabled.)
 Every capped field in Junrei's responses says so: a `*Truncated: true` flag
 alongside a `*FullCharCount` (e.g. `resultText` → `textTruncated` +
 `textFullCharCount`; a record's `contentTruncated` + `originalCharCount`), and
-`_meta.truncated: true` when `detail: 'concise'` dropped list entries. Never
-quote a truncated string as if it were complete, and never silently drop the
-fact it was cut. If the cut text matters, re-call with `detail: 'full'` (raises
-`get_evidence`'s per-field cap) rather than inferring the rest. A field still
-short of its `*FullCharCount` even after `detail: 'full'` means the underlying
-recovery itself couldn't complete (rare) — say so rather than treating the
-shorter text as whole.
+`_meta.truncated: true` when `detail: 'concise'` (or a hard cap) dropped list
+entries. Never quote a truncated string as if it were complete, and never
+silently drop the fact it was cut. On `briefing` / `analyze_session` /
+`find_patterns`, `_meta.truncatedFields` lists exactly which arrays were cut,
+as `{path, shown, total}` per array — read it to decide whether `detail:
+'full'` will recover the rest (its `total` is within the full-detail cap for
+that field) or the query must be narrowed/paged instead of blindly retrying
+with `detail: 'full'`. `_meta.truncated: true` remains the coarse flag and is
+always set whenever `truncatedFields` is present. If the cut text matters,
+re-call with `detail: 'full'` (raises `get_evidence`'s per-field cap) rather
+than inferring the rest. A field still short of its `*FullCharCount` even
+after `detail: 'full'` means the underlying recovery itself couldn't complete
+(rare) — say so rather than treating the shorter text as whole.
 
 ### Closing the loop honestly
 

@@ -14,7 +14,7 @@ import type { BashThreadGroup } from "../shared/bash-stats.js";
 import type { DelegationSummary } from "../shared/delegation.js";
 import type { SessionSource } from "../shared/session-analysis.js";
 import { buildMeta } from "./meta.js";
-import type { Detail, InsightMeta, LearningSource, WasteItem } from "./types.js";
+import type { Detail, InsightMeta, LearningSource, TruncatedField, WasteItem } from "./types.js";
 import {
   OVERSIZED_RETURN_CHARS,
   type OversizedReturn,
@@ -221,7 +221,25 @@ export function buildSessionInsight(input: SessionInsightInput): SessionInsight 
   const costDrivers = buildCostDrivers(input.byThread, driversLimit);
   const delegation = buildDelegationHealth(input);
   const recommendations = buildRecommendations(input, allWaste);
-  const truncated = waste.length < allWaste.length || costDrivers.length < input.byThread.length;
+
+  const truncatedFields: TruncatedField[] = [];
+  if (waste.length < allWaste.length) {
+    truncatedFields.push({ path: "waste", shown: waste.length, total: allWaste.length });
+  }
+  if (costDrivers.length < input.byThread.length) {
+    truncatedFields.push({
+      path: "costDrivers",
+      shown: costDrivers.length,
+      total: input.byThread.length,
+    });
+  }
+  if (recommendations.length < allWaste.length) {
+    truncatedFields.push({
+      path: "recommendations",
+      shown: recommendations.length,
+      total: allWaste.length,
+    });
+  }
 
   const payload: Omit<SessionInsight, "_meta"> = {
     sessionId: input.sessionId,
@@ -240,7 +258,7 @@ export function buildSessionInsight(input: SessionInsightInput): SessionInsight 
   return {
     ...payload,
     _meta: buildMeta(payload, {
-      ...(truncated && { truncated: true }),
+      ...(truncatedFields.length > 0 && { truncatedFields }),
       nextSteps: sessionInsightNextSteps(allWaste),
     }),
   };

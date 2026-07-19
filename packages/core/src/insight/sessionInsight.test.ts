@@ -146,6 +146,25 @@ describe("buildSessionInsight", () => {
     const insight = buildSessionInsight(input({ detail: "concise", opportunities }));
     expect(insight.waste).toHaveLength(5);
     expect(insight._meta.truncated).toBe(true);
+    expect(insight._meta.truncatedFields).toContainEqual({
+      path: "waste",
+      shown: 5,
+      total: 7,
+    });
+  });
+
+  it("reports a truncatedFields entry for a full-detail cap (costDrivers beyond the 10-thread full-detail limit)", () => {
+    const byThread = Array.from({ length: 11 }, (_, i) =>
+      thread({ thread: `agent-${i}`, model: "haiku", estUsd: 11 - i, resultChars: 100 }),
+    );
+    const insight = buildSessionInsight(input({ detail: "full", byThread }));
+    expect(insight.costDrivers).toHaveLength(10);
+    expect(insight._meta.truncated).toBe(true);
+    expect(insight._meta.truncatedFields).toContainEqual({
+      path: "costDrivers",
+      shown: 10,
+      total: 11,
+    });
   });
 
   it("passes through notAvailable and always supplies nextSteps", () => {

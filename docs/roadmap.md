@@ -18,9 +18,11 @@ Learnings web IA. Shipped as five sequential, unstacked PRs.
 - ✅ Core (PR1): `@junrei/core`'s `insight/` layer —
   `buildBriefing` / `buildSessionInsight` / `findPatterns` / `selectEvidence`,
   each pure over injected inputs and carrying a `_meta` envelope
-  (`approxTokens` / `truncated` / `nextSteps`) — plus the repo-local learnings
-  ledger (`insight/learningsStore.ts`, one JSON file per learning under
-  `<repoRoot>/.junrei/learnings/`, atomic tmp+rename, id `L-YYYYMMDD-<slug>`).
+  (`approxTokens` / `truncated` / `truncatedFields` / `nextSteps`) — plus the
+  repo-local learnings ledger (`insight/learningsStore.ts`, one JSON file per
+  learning under `<repoRoot>/.junrei/learnings/`, atomic tmp+rename, id
+  `L-YYYYMMDD-<slug>`). `truncatedFields` (`{path, shown, total}` per capped
+  array) lets a caller tell exactly what a `truncated: true` response cut.
 - ✅ Server (PR2): MCP surface rewritten to the six loop tools
   (`briefing` / `analyze_session` / `find_patterns` / `get_evidence` /
   `log_learning` / `review_learnings`) + two `JUNREI_DIAGNOSTICS=1`-gated

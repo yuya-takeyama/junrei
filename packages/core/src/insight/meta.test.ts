@@ -32,4 +32,19 @@ describe("buildMeta", () => {
     expect("nextSteps" in buildMeta({}, { nextSteps: [] })).toBe(false);
     expect(buildMeta({}, { nextSteps: ["do x"] }).nextSteps).toEqual(["do x"]);
   });
+
+  it("omits truncatedFields when empty or absent", () => {
+    expect("truncatedFields" in buildMeta({})).toBe(false);
+    expect("truncatedFields" in buildMeta({}, { truncatedFields: [] })).toBe(false);
+  });
+
+  it("includes truncatedFields when non-empty", () => {
+    const fields = [{ path: "waste", shown: 5, total: 8 }];
+    expect(buildMeta({}, { truncatedFields: fields }).truncatedFields).toEqual(fields);
+  });
+
+  it("forces truncated: true when truncatedFields is non-empty, even without opts.truncated", () => {
+    const meta = buildMeta({}, { truncatedFields: [{ path: "waste", shown: 5, total: 8 }] });
+    expect(meta.truncated).toBe(true);
+  });
 });
