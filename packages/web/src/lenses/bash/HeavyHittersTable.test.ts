@@ -91,7 +91,8 @@ function findHeaderOnClick(node: ReactNode, labelPrefix: string): (() => void) |
     if (!isValidElement(n)) return;
     const props = n.props as Record<string, unknown>;
     if (
-      n.type === "th" &&
+      n.type === "div" &&
+      props.role === "columnheader" &&
       typeof props["aria-sort"] === "string" &&
       isValidElement(props.children)
     ) {
