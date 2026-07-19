@@ -88,6 +88,28 @@ describe("InsightCallout", () => {
     expect(readOnly).not.toContain("Log learning");
   });
 
+  it("shows the armed confirm step only for the armed recommendation", () => {
+    // Two-step write guard: the first click arms ("Confirm log?"), and only the
+    // confirming second click POSTs — a stray click must not create a ledger entry.
+    const armed = render(
+      <InsightCallout
+        insight={insight()}
+        sessionRef={ref}
+        onLog={() => undefined}
+        armedKey="Subagent returns avg 8.2k chars"
+      />,
+    );
+    expect(armed).toContain("Confirm log?");
+    expect(armed).toContain('class="ghost armed"');
+    expect(armed).not.toContain("Log learning");
+    const unarmed = render(
+      <InsightCallout insight={insight()} sessionRef={ref} onLog={() => undefined} />,
+    );
+    expect(unarmed).toContain("Log learning");
+    expect(unarmed).not.toContain("Confirm log?");
+    expect(unarmed).not.toContain("armed");
+  });
+
   it("shows the pending state for the recommendation being logged", () => {
     const logging = render(
       <InsightCallout

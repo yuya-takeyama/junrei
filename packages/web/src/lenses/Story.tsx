@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type AnySessionJson,
   fetchSessionInsight,
@@ -17,6 +17,9 @@ interface Props {
   onOpenRecord: (line: number) => void;
 }
 
+/** How long an armed "Confirm log?" button waits before disarming itself. */
+export const CONFIRM_TIMEOUT_MS = 4000;
+
 /**
  * Story lens (L1, PR4) — the conclusion-first read of a session: the
  * FROM-THIS-SESSION insight callout (`GET /api/sessions/<source>/:id/insight`)
@@ -27,14 +30,21 @@ interface Props {
  *
  * Owns the callout's Log-learning writes: a recommendation's "Log learning"
  * button POSTs `POST /api/learnings` (the same upsert `log_learning` runs) with
- * this session as the learning's `sourceSessions` provenance. The insight fetch
- * is best-effort — a failure (or a 404 for an unresolved analysis) simply hides
- * the callout, leaving the Timeline; it's an enhancement, not a dependency.
+ * this session as the learning's `sourceSessions` provenance. The write is
+ * two-step: the first click only arms the button ("Confirm log?") and the POST
+ * fires on the second click, with the armed state timing out after
+ * `CONFIRM_TIMEOUT_MS` — a ledger entry is a real `.junrei/learnings/*.json`
+ * file with no undo, so a single stray click must not create one. The insight
+ * fetch is best-effort — a failure (or a 404 for an unresolved analysis) simply
+ * hides the callout, leaving the Timeline; it's an enhancement, not a
+ * dependency.
  */
 export function Story({ session, sessionRef, onOpenRecord }: Props) {
   const [insight, setInsight] = useState<SessionInsight | undefined>(undefined);
+  const [armedKey, setArmedKey] = useState<string | undefined>(undefined);
   const [loggingKey, setLoggingKey] = useState<string | undefined>(undefined);
   const [loggedKeys, setLoggedKeys] = useState<ReadonlySet<string>>(new Set());
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Re-fetch (and reset logged state) whenever the session identity changes —
   // depend on the primitive parts, not the freshly-rebuilt `sessionRef` object
@@ -45,6 +55,8 @@ export function Story({ session, sessionRef, onOpenRecord }: Props) {
     let stale = false;
     setInsight(undefined);
     setLoggedKeys(new Set());
+    setArmedKey(undefined);
+    if (disarmTimer.current !== undefined) clearTimeout(disarmTimer.current);
     const ref: SessionRef =
       source === "codex" ? { source: "codex", id } : { source: "claude-code", id };
     fetchSessionInsight(ref)
@@ -56,12 +68,26 @@ export function Story({ session, sessionRef, onOpenRecord }: Props) {
       });
     return () => {
       stale = true;
+      // Also covers unmount — a pending disarm timeout must not fire setState.
+      if (disarmTimer.current !== undefined) clearTimeout(disarmTimer.current);
     };
   }, [source, id]);
 
   const onLog = useCallback(
     (rec: SessionInsightRecommendation) => {
       const key = recommendationKey(rec);
+      if (disarmTimer.current !== undefined) clearTimeout(disarmTimer.current);
+      // First click only arms the button (and re-arms onto a different row);
+      // the POST below runs on the confirming second click.
+      if (armedKey !== key) {
+        setArmedKey(key);
+        disarmTimer.current = setTimeout(() => {
+          disarmTimer.current = undefined;
+          setArmedKey(undefined);
+        }, CONFIRM_TIMEOUT_MS);
+        return;
+      }
+      setArmedKey(undefined);
       setLoggingKey(key);
       postLearning({
         source,
@@ -83,7 +109,7 @@ export function Story({ session, sessionRef, onOpenRecord }: Props) {
           setLoggingKey(undefined);
         });
     },
-    [source, id],
+    [armedKey, source, id],
   );
 
   return (
@@ -93,6 +119,7 @@ export function Story({ session, sessionRef, onOpenRecord }: Props) {
           insight={insight}
           sessionRef={sessionRef}
           onLog={onLog}
+          armedKey={armedKey}
           loggingKey={loggingKey}
           loggedKeys={loggedKeys}
         />
