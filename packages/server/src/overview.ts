@@ -336,12 +336,64 @@ export function computeRepoOverview(
 }
 
 /**
+ * `getRepoOverview` memoization (perf fix, PR C review finding + v2 PR D) —
+ * `bash-percentile.ts`'s `resolveBashPercentile` calls `getRepoOverview` on
+ * EVERY session-detail request (both the `GET /api/sessions/{source}/:id`
+ * routes and, as of PR D, the `get_bash_stats` MCP tool),
+ * and `getRepoOverview` itself was an unconditional `listSessions(500,
+ * "all")` — a full directory sweep across every session-file store — plus a
+ * repo-key filter/aggregation pass over the result, on EVERY call, even when
+ * ten requests in a row ask about the SAME repo within the same second (e.g.
+ * an agent walking a repo's recent sessions one at a time via MCP).
+ *
+ * Per-file ANALYSIS is already mtime-keyed-cached one layer down (see
+ * `sources/claude.ts`'s `analyzeCached` / `sources/codex.ts`'s
+ * `analyzeCodexCached`), so a repeat `listSessions` call doesn't re-parse
+ * unchanged transcripts — but it still re-walks the directory tree, re-reads
+ * every ref's stat info, and re-runs `computeRepoOverview`'s full filter +
+ * aggregation pass over up to `MAX_LIST_LIMIT` (500) items. That's the cost
+ * this cache actually removes.
+ *
+ * Chosen invalidation: a plain TTL (`REPO_OVERVIEW_CACHE_TTL_MS`, keyed by
+ * `repoKey`) rather than a session-list "version" signal — `listSessions`
+ * exposes no cheap change signal of its own (no directory mtime, no
+ * generation counter; each adapter's `listItems` re-walks its own store on
+ * every call), so the only invalidation cheaper than "just re-list" would be
+ * inventing and maintaining a new signal purely for this cache. A flat TTL is
+ * the honest, minimal choice: STALENESS BOUND — this function's result can
+ * lag real filesystem state by up to `REPO_OVERVIEW_CACHE_TTL_MS` (currently
+ * 30s), so a session that just landed on disk may not appear in a repo's
+ * `bash.distribution`/`sessionCount`/etc. for up to 30s. Acceptable here
+ * because every caller of this path (percentile ranking, the repo-overview
+ * screen, the MCP tool) is itself a "roughly how does this compare" read,
+ * never a source of truth for an individual session's own numbers (those
+ * come straight from that session's own, unmemoized, mtime-fresh analysis).
+ *
+ * `nowMs` is an optional override (same "override X for tests" convention
+ * `sources/reconstruction.ts`'s filesystem providers use for their root dirs)
+ * so tests can assert the TTL boundary deterministically instead of racing a
+ * real 30-second clock — see `overview.test.ts`'s memoization test. Defaults
+ * to `Date.now()` for every real caller.
+ */
+const REPO_OVERVIEW_CACHE_TTL_MS = 30_000;
+
+interface RepoOverviewCacheEntry {
+  overview: RepoOverview;
+  expiresAtMs: number;
+}
+
+const repoOverviewCache = new Map<string, RepoOverviewCacheEntry>();
+
+/**
  * The one listing+aggregation path every repo-overview surface calls through
- * — `GET /api/overview` (app.ts) and the `get_repo_overview` MCP tool
- * (mcp.ts) both just forward `repoKey` here, so there's no risk of the two
+ * — `GET /api/overview` (app.ts), `bash-percentile.ts`'s
+ * `resolveBashPercentile` (called from both the `GET /api/sessions/{source}/:id`
+ * routes and the `get_bash_stats` MCP tool), and the `get_repo_overview` MCP
+ * tool (mcp.ts) all just forward `repoKey` here, so there's no risk of the
  * surfaces silently drifting (e.g. one forgetting the `MAX_LIST_LIMIT`
- * ceiling or filtering by source). See `computeRepoOverview`'s doc comment
- * for the accepted `repoKey` forms.
+ * ceiling or filtering by source) — AND all of them automatically share the
+ * memoization above, being the same module-level cache. See
+ * `computeRepoOverview`'s doc comment for the accepted `repoKey` forms.
  *
  * Note this is a repo-scoped ALL-TIME rollup (newest `MAX_LIST_LIMIT`
  * window) with no notion of the web UI's date/search filters — the
@@ -350,7 +402,15 @@ export function computeRepoOverview(
  * `computeFilteredOverview`, kept in lockstep with `computeRepoOverview`
  * above).
  */
-export async function getRepoOverview(repoKey: string): Promise<RepoOverview> {
+export async function getRepoOverview(
+  repoKey: string,
+  nowMs: number = Date.now(),
+): Promise<RepoOverview> {
+  const cached = repoOverviewCache.get(repoKey);
+  if (cached !== undefined && cached.expiresAtMs > nowMs) return cached.overview;
+
   const { sessions } = await listSessions(MAX_LIST_LIMIT, "all");
-  return computeRepoOverview(sessions, repoKey);
+  const overview = computeRepoOverview(sessions, repoKey);
+  repoOverviewCache.set(repoKey, { overview, expiresAtMs: nowMs + REPO_OVERVIEW_CACHE_TTL_MS });
+  return overview;
 }

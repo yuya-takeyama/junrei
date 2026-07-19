@@ -1566,6 +1566,169 @@ describe("MCP tools", () => {
       expect(body.totals.calls).toBe(3);
     });
 
+    it("adds a byThread rollup (v2 PR D) — one row per thread, model/estUsd/share fields present", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        byThread: {
+          items: Array<{
+            thread: string;
+            model?: string;
+            calls: number;
+            estUsd?: number;
+            charsSharePct: number;
+            usdSharePct?: number;
+          }>;
+          totalCount: number;
+          truncated: boolean;
+        };
+      };
+      // This fixture's only subagent has no Bash calls (see the comment atop
+      // this describe block), so byThread has exactly one row: "main".
+      expect(body.byThread.items).toEqual([
+        expect.objectContaining({
+          thread: "main",
+          model: "claude-fable-5",
+          calls: 3,
+          charsSharePct: 100,
+          usdSharePct: 100,
+        }),
+      ]);
+      expect(body.byThread.items[0]?.estUsd).toBeGreaterThan(0);
+      expect(body.byThread.totalCount).toBe(1);
+      expect(body.byThread.truncated).toBe(false);
+    });
+
+    it("totals carries estUsd (BashTotals.estUsd flows through unchanged)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as { totals: { estUsd?: number } };
+      expect(body.totals.estUsd).toBeGreaterThan(0);
+    });
+
+    it("returns a ranked opportunities list with copy-ready fixText, capped by topOpportunities", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        opportunities: {
+          items: Array<{
+            class: string;
+            title: string;
+            lever: string;
+            fixText: string;
+            titleTruncated: boolean;
+            fixTextTruncated: boolean;
+            estUsdSaved?: number;
+            savingsBasis: string;
+            occurrenceCount: number;
+            totalChars: number;
+            threads: string[];
+            evidence: Array<{ thread: string; line: number; resultChars: number; estUsd?: number }>;
+          }>;
+          totalCount: number;
+          truncated: boolean;
+        };
+      };
+      // This fixture's only waste is the rerun-after-error group already
+      // asserted on above (waste.rerunAfterError) — exactly one opportunity.
+      expect(body.opportunities.totalCount).toBe(1);
+      expect(body.opportunities.truncated).toBe(false);
+      const [opportunity] = body.opportunities.items;
+      expect(opportunity).toMatchObject({
+        class: "rerun-after-error",
+        lever: "investigate",
+        savingsBasis: "measured",
+        occurrenceCount: 1,
+        totalChars: 25,
+        threads: ["main"],
+        titleTruncated: false,
+        fixTextTruncated: false,
+      });
+      // fixText is copy-ready, templated, DATA-FILLED prose — never LLM
+      // advice, always derived from this session's own observed command/
+      // pattern/thread.
+      expect(opportunity?.fixText).toContain("pnpm test");
+      expect(opportunity?.fixText.length).toBeGreaterThan(0);
+      expect(opportunity?.estUsdSaved).toBeGreaterThan(0);
+      expect(opportunity?.evidence).toEqual([
+        { thread: "main", line: 8, resultChars: 25, estUsd: expect.any(Number) },
+      ]);
+    });
+
+    it("caps opportunities to topOpportunities while totalCount/truncated stay accurate", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topOpportunities: 1 },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        opportunities: { items: unknown[]; totalCount: number; truncated: boolean };
+      };
+      // This fixture has exactly 1 real opportunity, so a cap of 1 doesn't
+      // truncate anything — see the isolated 2-opportunity fixture below for
+      // a case where the cap actually cuts the list.
+      expect(body.opportunities.items).toHaveLength(1);
+      expect(body.opportunities.totalCount).toBe(1);
+      expect(body.opportunities.truncated).toBe(false);
+    });
+
+    it("rejects topOpportunities out of bounds (min 1, max 50)", async () => {
+      client = await connect();
+      const tooSmall = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topOpportunities: 0 },
+      });
+      expect(tooSmall.isError).toBe(true);
+      expect(textOf(tooSmall)).toContain("topOpportunities");
+
+      const tooLarge = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID, topOpportunities: 51 },
+      });
+      expect(tooLarge.isError).toBe(true);
+      expect(textOf(tooLarge)).toContain("topOpportunities");
+    });
+
+    // The fixtures' repos never reach the >= 5-Bash-tracked-sessions gate
+    // `computeSessionBashPercentile` requires (see bash-percentile.ts /
+    // bash-percentile.test.ts for the gate itself, unit-tested directly
+    // there with a synthetic distribution) — so `bashPercentile` is ABSENT
+    // here for both harnesses, never present-but-zero/null.
+    it("omits bashPercentile when the repo has fewer than 5 Bash-tracked sessions (Claude fixture)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: CLAUDE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as Record<string, unknown>;
+      expect(body.bashPercentile).toBeUndefined();
+    });
+
+    it("omits bashPercentile when the repo has fewer than 5 Bash-tracked sessions (Codex fixture)", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "codex", sessionId: CODEX_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as Record<string, unknown>;
+      expect(body.bashPercentile).toBeUndefined();
+    });
+
     it("rejects topCommands out of bounds (min 1, max 100)", async () => {
       // Zod schema validation failures surface as a resolved CallToolResult
       // with isError: true (the MCP client wraps the JSON-RPC InvalidParams
@@ -2183,6 +2346,225 @@ describe("MCP tools", () => {
         toolUseId: "toolu_sub_bash1",
         family: "ls",
       });
+    });
+  });
+
+  describe("get_bash_stats — opportunities truncation (isolated fixture with 2 waste categories)", () => {
+    // The shared CLAUDE_SESSION_ID fixture produces exactly ONE opportunity
+    // (rerun-after-error, asserted on above) — not enough to exercise
+    // `topOpportunities` actually CUTTING the list. This block builds a
+    // small, self-contained session with TWO distinct waste categories (a
+    // rerun-after-error AND a bash-as-read call) in a temp dir merged into
+    // CLAUDE_CONFIG_DIR, same isolation pattern as the subagent fixture
+    // above — never touches the fixtures the rest of this file depends on.
+    const OPP_FIXTURE_SESSION_ID = "88888888-8888-8888-8888-888888888888";
+    const OPP_FIXTURE_PROJECT_DIR = "-tmp-opportunities-fixture-proj";
+
+    let oppFixtureDir: string | undefined;
+    let previousConfigDirForOppFixture: string | undefined;
+
+    beforeAll(async () => {
+      previousConfigDirForOppFixture = process.env.CLAUDE_CONFIG_DIR;
+      oppFixtureDir = await mkdtemp(join(tmpdir(), "junrei-mcp-opportunities-fixture-"));
+      const projectDir = join(oppFixtureDir, "projects", OPP_FIXTURE_PROJECT_DIR);
+      await mkdir(projectDir, { recursive: true });
+
+      const lines = [
+        {
+          type: "user",
+          uuid: "ou1",
+          parentUuid: null,
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:00.000Z",
+          isSidechain: false,
+          cwd: "/tmp/opportunities-fixture",
+          version: "2.1.202",
+          message: { role: "user", content: "run some commands" },
+        },
+        // Call 1: "pnpm test" fails.
+        {
+          type: "assistant",
+          uuid: "oa1",
+          parentUuid: "ou1",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:01.000Z",
+          isSidechain: false,
+          requestId: "opp_req_1",
+          message: {
+            id: "opp_msg_1",
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [
+              { type: "tool_use", id: "tu_opp_1", name: "Bash", input: { command: "pnpm test" } },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: "user",
+          uuid: "ou2",
+          parentUuid: "oa1",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:02.000Z",
+          isSidechain: false,
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "tu_opp_1", is_error: true, content: "FAIL" },
+            ],
+          },
+        },
+        // Call 2: same "pnpm test" re-run immediately after the failure —
+        // rerun-after-error opportunity #1.
+        {
+          type: "assistant",
+          uuid: "oa2",
+          parentUuid: "ou2",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:03.000Z",
+          isSidechain: false,
+          requestId: "opp_req_2",
+          message: {
+            id: "opp_msg_2",
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [
+              { type: "tool_use", id: "tu_opp_2", name: "Bash", input: { command: "pnpm test" } },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: "user",
+          uuid: "ou3",
+          parentUuid: "oa2",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:04.000Z",
+          isSidechain: false,
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "tu_opp_2", is_error: null, content: "PASS ok" },
+            ],
+          },
+        },
+        // Call 3: "cat notes.txt" — a Bash call reading a file the way the
+        // Read tool would — bash-as-read opportunity #2.
+        {
+          type: "assistant",
+          uuid: "oa3",
+          parentUuid: "ou3",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:05.000Z",
+          isSidechain: false,
+          requestId: "opp_req_3",
+          message: {
+            id: "opp_msg_3",
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [
+              {
+                type: "tool_use",
+                id: "tu_opp_3",
+                name: "Bash",
+                input: { command: "cat notes.txt" },
+              },
+            ],
+            usage: {
+              input_tokens: 10,
+              output_tokens: 5,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: "user",
+          uuid: "ou4",
+          parentUuid: "oa3",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          timestamp: "2026-07-18T01:00:06.000Z",
+          isSidechain: false,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tu_opp_3",
+                is_error: null,
+                content: "line one\nline two\nline three\n",
+              },
+            ],
+          },
+        },
+      ];
+      await writeFile(
+        join(projectDir, `${OPP_FIXTURE_SESSION_ID}.jsonl`),
+        `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      );
+
+      process.env.CLAUDE_CONFIG_DIR = `${CLAUDE_FIXTURES_DIR},${oppFixtureDir}`;
+    });
+
+    afterAll(async () => {
+      if (previousConfigDirForOppFixture === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDirForOppFixture;
+      }
+      if (oppFixtureDir !== undefined) {
+        await rm(oppFixtureDir, { recursive: true, force: true });
+      }
+    });
+
+    it("reports 2 distinct opportunities (rerun-after-error + bash-as-read) uncapped", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: { source: "claude-code", sessionId: OPP_FIXTURE_SESSION_ID },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        opportunities: {
+          items: Array<{ class: string }>;
+          totalCount: number;
+          truncated: boolean;
+        };
+      };
+      expect(body.opportunities.totalCount).toBe(2);
+      expect(body.opportunities.truncated).toBe(false);
+      expect(body.opportunities.items.map((o) => o.class).sort()).toEqual(
+        ["bash-as-read", "rerun-after-error"].sort(),
+      );
+    });
+
+    it("caps opportunities to topOpportunities=1, truncated:true, totalCount stays 2", async () => {
+      client = await connect();
+      const result = await client.callTool({
+        name: "get_bash_stats",
+        arguments: {
+          source: "claude-code",
+          sessionId: OPP_FIXTURE_SESSION_ID,
+          topOpportunities: 1,
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const body = JSON.parse(textOf(result)) as {
+        opportunities: { items: unknown[]; totalCount: number; truncated: boolean };
+      };
+      expect(body.opportunities.items).toHaveLength(1);
+      expect(body.opportunities.totalCount).toBe(2);
+      expect(body.opportunities.truncated).toBe(true);
     });
   });
 

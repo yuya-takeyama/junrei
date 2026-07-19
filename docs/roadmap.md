@@ -144,9 +144,25 @@ subagent), estimated-token figures always marked as estimates
     toggle). The four v1 waste subsections and the four stat tiles are
     gone — the Fix Queue and header strip replace them respectively; heavy
     hitters survives as a collapsed-by-default Evidence drill-down.
-  - ⬜ MCP mirror — `get_bash_stats`/`get_trends`-style tools exposing
-    `opportunities`/`byThread`/`estUsd` to analyzing agents the same way
-    the web tab now does (part D)
+  - ✅ MCP mirror (part D) — `get_bash_stats` gains `byThread` (capped at
+    50), a ranked `opportunities` list (new `topOpportunities` param,
+    default 10/max 50, standard `{items,totalCount,truncated}` shape; each
+    item carries the full `BashOpportunity` fields including a copy-ready
+    `fixText`, with `title`/`fixText`/`heuristicNote` under the same
+    explicit `capTextField` truncation contract every other MCP text field
+    uses), and `totals.estUsd` (already flowed through unchanged — verified,
+    no code change needed), so an orchestrator agent can self-diagnose a
+    session's Bash spend in the same call. `bashPercentile` reuses the v2 PR
+    C seam (`bash-percentile.ts`'s `resolveBashPercentile`, moved there from
+    `app.ts` so both the HTTP detail routes and this MCP tool share it) —
+    same >=5-Bash-tracked-sessions gate, same Codex main-thread-only basis
+    (plus an explicit `note` field on a Codex response explaining the
+    basis). Perf fix alongside it: `getRepoOverview` (`overview.ts`) now
+    memoizes per `repoKey` with a 30s TTL — `resolveBashPercentile` was
+    triggering a full `listSessions(500)` sweep on every session-detail
+    request (HTTP or MCP); the per-file analysis one layer down was already
+    mtime-cached, but the directory sweep + repo aggregation pass was not.
+    Bash-analysis v2 is now complete (parts A-D).
 
 ## Open items
 

@@ -17,7 +17,7 @@
  * own bash figure and that session's repo's `RepoOverviewBash`.
  */
 import { percentileRank } from "@junrei/core";
-import type { RepoOverviewBash } from "./overview.js";
+import { getRepoOverview, type RepoOverviewBash, repoKeyOfSession } from "./overview.js";
 
 /**
  * `pct` — 0-100, one decimal (see `percentileRank`'s own "mean rank" method).
@@ -126,4 +126,35 @@ export function computeSessionBashPercentile(
     ...(medianRatio !== undefined && { medianRatio }),
     sampleCount: sorted.length,
   };
+}
+
+/**
+ * The Bash tab v2 header strip's percentile chip ("pNN for this repo · M.Mx
+ * median") — the one small server addition the redesign needed, since the
+ * web layer never imports `@junrei/core` directly (see this file's module
+ * doc comment). As of v2 PR D, also the seam the `get_bash_stats` MCP tool
+ * (mcp.ts) shares, so an agent sees "this session is p99 for this repo" in
+ * the same call that hands it the session's own Bash figures — same
+ * >= 5-sessions gate, same basis-choice rule, same Codex main-thread-only
+ * caveat, whichever surface calls it.
+ *
+ * Resolves the SAME repo bucket `GET /api/overview`/`get_repo_overview`
+ * already aggregate for this session's own list row (`repoKeyOfSession`,
+ * kept in lockstep with `repoKeyOf`), re-lists that repo (memoized — see
+ * `getRepoOverview`'s own doc comment for the TTL/staleness bound), and ranks
+ * `ownFigure` against it — `undefined` (chip/field hidden) when the repo
+ * doesn't yet have enough Bash-tracked sessions to rank against (see
+ * `computeSessionBashPercentile`'s own gate).
+ *
+ * `ownFigure` is the caller's responsibility to get right — see
+ * `computeSessionBashPercentile`'s doc comment for why a Codex session must
+ * pass its main-thread-only figure, never its detail view's
+ * (possibly forest-inclusive) `bashStats.totals`.
+ */
+export async function resolveBashPercentile(
+  session: Parameters<typeof repoKeyOfSession>[0],
+  ownFigure: SessionBashFigure,
+): Promise<SessionBashPercentile | undefined> {
+  const overview = await getRepoOverview(repoKeyOfSession(session));
+  return computeSessionBashPercentile(ownFigure, overview.bash);
 }
