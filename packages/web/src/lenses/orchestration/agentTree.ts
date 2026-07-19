@@ -272,10 +272,12 @@ export interface AgentTreeRow {
 export type GroupedTreeRow = WorkflowHeaderRow | WorkflowPhaseHeaderRow | AgentTreeRow;
 
 /**
- * Earliest `startedAt` among a run's member nodes, `undefined` when none has
- * one — the sort key for orphan run groups in `groupedTreeRows` (deterministic
- * render position without an authoritative `launchLine`/run order to fall
- * back on, since an orphan run by definition has no run-state file).
+ * Earliest `startedAt` among a run's member nodes (root-level only —
+ * intentionally NOT the recursive descendant walk `memberSpanDurationMs`
+ * uses, since a run's own launch order is set by its ROOT members, not by
+ * however deep a member's own children happen to nest), `undefined` when none
+ * has one. The primary signal `runStartOrderMs` reads for a run group's
+ * chronological sort position in `groupedTreeRows` — see that function.
  */
 function earliestStartedAt(nodes: readonly SubagentNodeJson[]): string | undefined {
   let earliest: string | undefined;
@@ -284,6 +286,45 @@ function earliestStartedAt(nodes: readonly SubagentNodeJson[]): string | undefin
     if (earliest === undefined || n.startedAt < earliest) earliest = n.startedAt;
   }
   return earliest;
+}
+
+/**
+ * Chronological sort key (epoch ms) for one workflow run group in
+ * `groupedTreeRows` — this, not `workflowRuns`' input order or `runId`
+ * lexicographic order, is what determines a run group's render position
+ * among its siblings. Both sidecar-backed AND still-in-flight (synthesized,
+ * no `workflows/<runId>.json` yet) runs resolve through the SAME priority
+ * chain, so a run's position doesn't jump the moment its sidecar is written:
+ *  1. The earliest `startedAt` among the run's own member nodes (see
+ *     `earliestStartedAt`) — real evidence from the member transcripts
+ *     themselves, available for a synthesized run exactly as much as a
+ *     sidecar-backed one (Claude Code writes agent sidecars under
+ *     `subagents/workflows/<runId>/` as it goes, well before
+ *     `workflows/<runId>.json` is written on completion).
+ *  2. `run.earliestAgentStartMs` (`ClaudeWorkflowRunSummary`, `@junrei/core`)
+ *     — the run-state file's OWN record of when it dispatched its agents,
+ *     read only when NO member node carries a usable `startedAt` (most
+ *     commonly: zero member nodes were actually discovered for this run,
+ *     e.g. every one of its agent sidecar transcripts failed to parse, but
+ *     the run-state file's `workflowProgress` still lists them). Always
+ *     `undefined` for a synthesized run (no run-state file to read
+ *     `earliestAgentStartMs` from in the first place — see that field's own
+ *     doc comment), which is fine: a synthesized run's members are exactly
+ *     the case (1) is built for.
+ *  3. `undefined` — genuinely no start-time evidence at all. The caller sorts
+ *     these last, tie-broken by `runId` for a still-deterministic render
+ *     order (never "whatever order the inputs happened to arrive in").
+ */
+function runStartOrderMs(
+  run: Pick<WorkflowRunSummaryJson, "earliestAgentStartMs">,
+  members: readonly SubagentNodeJson[],
+): number | undefined {
+  const memberStart = earliestStartedAt(members);
+  if (memberStart !== undefined) {
+    const parsed = Date.parse(memberStart);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return run.earliestAgentStartMs;
 }
 
 /**
@@ -377,9 +418,16 @@ export function memberSpanDurationMs(nodes: readonly SubagentNodeJson[]): number
  *    run with no named phases at all (an orphan group) hangs its members
  *    straight under the header, where there's nothing to misattribute them
  *    to.
- *  - Run groups for runs present in `workflowRuns` are appended after every
- *    classic row, in the order `workflowRuns` is given; a run with zero
- *    discovered member nodes contributes nothing (no empty header).
+ *  - Run groups (for runs present in `workflowRuns`, AND true orphan groups —
+ *    see the INVARIANT below) all render after every classic row, but among
+ *    THEMSELVES they're ordered chronologically by `runStartOrderMs` — see
+ *    that function's doc comment for the full start-time priority chain and
+ *    why this matters (a run used to render in whatever order `workflowRuns`
+ *    happened to arrive in, which was filesystem/directory-listing order on
+ *    the run-state sidecar FILENAME — no relationship to actual launch
+ *    order, and a run could even visibly jump position once its sidecar was
+ *    finally written). A run with zero discovered member nodes contributes
+ *    nothing (no empty header).
  *  - INVARIANT: every discovered agent is rendered. A member node whose
  *    `workflowRunId` has NO matching entry in `workflowRuns` still gets a
  *    group — a `WorkflowHeaderRow` synthesized with `name`/`status`
@@ -392,9 +440,9 @@ export function memberSpanDurationMs(nodes: readonly SubagentNodeJson[]): number
  *    `workflowRunId` seen among `subagents`. This branch is what keeps that
  *    true even for a stale cached analysis, or any other gap between the two
  *    lists — a member agent must NEVER silently vanish just because its run
- *    has no summary. Orphan groups are appended after every run present in
- *    `workflowRuns`, ordered by their earliest member's `startedAt`
- *    (undefined last) then `runId`.
+ *    has no summary. These true orphan groups fall into the SAME
+ *    chronological sort as every other run group above, not a separate
+ *    always-last bucket.
  */
 export function groupedTreeRows(
   subagents: readonly SubagentNodeJson[],
@@ -411,23 +459,36 @@ export function groupedTreeRows(
   const knownRunIds = new Set(workflowRuns.map((run) => run.runId));
   const orphanRuns: WorkflowRunSummaryJson[] = [...membersByRun.keys()]
     .filter((runId) => !knownRunIds.has(runId))
-    .sort((a, b) => {
-      const aStart = earliestStartedAt(membersByRun.get(a) ?? []);
-      const bStart = earliestStartedAt(membersByRun.get(b) ?? []);
-      if (aStart === undefined && bStart === undefined) return a.localeCompare(b);
-      if (aStart === undefined) return 1;
-      if (bStart === undefined) return -1;
-      return aStart.localeCompare(bStart) || a.localeCompare(b);
-    })
     .map((runId) => ({
       runId,
       agentCount: (membersByRun.get(runId) ?? []).length,
       phases: [],
     }));
 
+  // ONE merged, chronologically sorted list — known (sidecar-backed or
+  // still-in-flight-synthesized, both already folded into `workflowRuns` by
+  // `analyze.ts`'s `buildWorkflowRunSummaries`) and true orphan runs (no
+  // `workflowRuns` entry at all — see the INVARIANT note below) interleave by
+  // `runStartOrderMs` rather than orphans always trailing behind every known
+  // run. This is what fixes runs rendering out of launch order: previously
+  // `workflowRuns`' own order (ultimately filesystem/directory-listing order
+  // on the `workflows/<runId>.json` sidecar FILENAME, see `workflows.ts`'s
+  // `listWorkflowRuns`) decided position, so a run could visibly jump places
+  // the moment its sidecar was written. `runStartOrderMs`'s `undefined` case
+  // (genuinely no start-time evidence anywhere) sorts last, tie-broken by
+  // `runId` for a still-fully-deterministic order.
   const runGroups = [...workflowRuns, ...orphanRuns]
     .map((run) => ({ run, members: membersByRun.get(run.runId) ?? [] }))
-    .filter((group) => group.members.length > 0);
+    .filter((group) => group.members.length > 0)
+    .sort((a, b) => {
+      const aStart = runStartOrderMs(a.run, a.members);
+      const bStart = runStartOrderMs(b.run, b.members);
+      if (aStart === undefined && bStart === undefined)
+        return a.run.runId.localeCompare(b.run.runId);
+      if (aStart === undefined) return 1;
+      if (bStart === undefined) return -1;
+      return aStart - bStart || a.run.runId.localeCompare(b.run.runId);
+    });
 
   const classicRoots = subagents.filter((n) => n.workflowRunId === undefined);
   const out: GroupedTreeRow[] = flattenSubagents(classicRoots, [], runGroups.length > 0).map(

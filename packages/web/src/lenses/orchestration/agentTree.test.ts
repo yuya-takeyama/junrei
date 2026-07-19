@@ -377,9 +377,21 @@ describe("groupedTreeRows", () => {
     expect(agentRow.row.id).toBe("wf-agent-1");
   });
 
-  it("appends orphan run groups after every run present in workflowRuns, leaving known runs' rendering unchanged", () => {
-    const known: SubagentNodeJson = { ...node("wf-known", 0.1), workflowRunId: "wf_run1" };
-    const orphan: SubagentNodeJson = { ...node("wf-orphan", 0.2), workflowRunId: "wf_run_orphan" };
+  it("interleaves orphan and known run groups chronologically instead of always trailing orphans behind known runs", () => {
+    // Regression coverage for the old behavior this replaces: `known` and
+    // `orphan` used to render in that fixed order (workflowRuns first,
+    // orphans after) regardless of when either actually started. Here the
+    // orphan starts EARLIER, so it must render FIRST.
+    const known: SubagentNodeJson = {
+      ...node("wf-known", 0.1),
+      workflowRunId: "wf_run1",
+      startedAt: "2026-07-10T01:00:00.000Z",
+    };
+    const orphan: SubagentNodeJson = {
+      ...node("wf-orphan", 0.2),
+      workflowRunId: "wf_run_orphan",
+      startedAt: "2026-07-10T00:00:00.000Z",
+    };
     const knownRun: WorkflowRunSummaryJson = {
       runId: "wf_run1",
       name: "widget-research",
@@ -388,9 +400,9 @@ describe("groupedTreeRows", () => {
     };
     const rows = groupedTreeRows([known, orphan], [knownRun]);
     const headers = rows.filter((r) => r.kind === "workflow-header");
-    expect(headers.map((h) => h.runId)).toEqual(["wf_run1", "wf_run_orphan"]);
-    expect(headers[0]?.name).toBe("widget-research");
-    expect(headers[1]?.name).toBeUndefined();
+    expect(headers.map((h) => h.runId)).toEqual(["wf_run_orphan", "wf_run1"]);
+    expect(headers[0]?.name).toBeUndefined();
+    expect(headers[1]?.name).toBe("widget-research");
   });
 
   it("orders multiple orphan runs by their earliest member's startedAt, undefined-started runs last", () => {
@@ -408,6 +420,117 @@ describe("groupedTreeRows", () => {
     const rows = groupedTreeRows([later, earlier, noStart], []);
     const headerRunIds = rows.filter((r) => r.kind === "workflow-header").map((r) => r.runId);
     expect(headerRunIds).toEqual(["wf_run_a", "wf_run_b", "wf_run_c"]);
+  });
+
+  it("orders workflow run groups by start time, even when that's the exact reverse of runId lexicographic order", () => {
+    // Reproduces the real bug (session 77bd3b76-fa3a-4ad2-b3e4-d05e375c7ad2):
+    // runs wf_a3ec... and wf_d2a6... rendered out of launch order because
+    // 'a3ec…' < 'd2a6…' lexicographically even though wf_d2a6 actually
+    // started first. Here three runIds sort alphabetically as
+    // wf_a, wf_b, wf_c but must render in the OPPOSITE order chronologically.
+    const runC: SubagentNodeJson = {
+      ...node("agent-c", 0.1),
+      workflowRunId: "wf_c",
+      startedAt: "2026-07-10T00:00:00.000Z", // earliest
+    };
+    const runB: SubagentNodeJson = {
+      ...node("agent-b", 0.1),
+      workflowRunId: "wf_b",
+      startedAt: "2026-07-10T01:00:00.000Z", // middle
+    };
+    const runA: SubagentNodeJson = {
+      ...node("agent-a", 0.1),
+      workflowRunId: "wf_a",
+      startedAt: "2026-07-10T02:00:00.000Z", // latest
+    };
+    const runs: WorkflowRunSummaryJson[] = [
+      { runId: "wf_a", agentCount: 1, phases: [] },
+      { runId: "wf_b", agentCount: 1, phases: [] },
+      { runId: "wf_c", agentCount: 1, phases: [] },
+    ];
+    const rows = groupedTreeRows([runA, runB, runC], runs);
+    const headerRunIds = rows.filter((r) => r.kind === "workflow-header").map((r) => r.runId);
+    expect(headerRunIds).toEqual(["wf_c", "wf_b", "wf_a"]);
+  });
+
+  it("slots a synthesized in-progress run (no sidecar, phases: [], no status) chronologically between two sidecar-backed runs, not appended after both", () => {
+    // `analyze.ts`'s `buildWorkflowRunSummaries` appends synthesized (still
+    // in-flight, no `workflows/<runId>.json` yet) entries AFTER every parsed
+    // entry in `workflowRuns` — so the raw input order here mirrors that
+    // real shape: two sidecar-backed runs first, the synthesized run last.
+    // Its members started in between the other two, so it must render in
+    // between them too.
+    const early: SubagentNodeJson = {
+      ...node("agent-early", 0.1),
+      workflowRunId: "wf_early",
+      startedAt: "2026-07-10T00:00:00.000Z",
+    };
+    const mid: SubagentNodeJson = {
+      ...node("agent-mid", 0.1),
+      workflowRunId: "wf_mid_synthesized",
+      startedAt: "2026-07-10T01:00:00.000Z",
+    };
+    const late: SubagentNodeJson = {
+      ...node("agent-late", 0.1),
+      workflowRunId: "wf_late",
+      startedAt: "2026-07-10T02:00:00.000Z",
+    };
+    const runs: WorkflowRunSummaryJson[] = [
+      { runId: "wf_early", status: "completed", agentCount: 1, phases: [] },
+      { runId: "wf_late", status: "completed", agentCount: 1, phases: [] },
+      // Synthesized shape: no status/durationMs, empty phases, listed last.
+      { runId: "wf_mid_synthesized", agentCount: 1, phases: [] },
+    ];
+    const rows = groupedTreeRows([early, mid, late], runs);
+    const headerRunIds = rows.filter((r) => r.kind === "workflow-header").map((r) => r.runId);
+    expect(headerRunIds).toEqual(["wf_early", "wf_mid_synthesized", "wf_late"]);
+  });
+
+  it("sorts a run with no start-time evidence at all last, tie-broken by runId among other unknown-start runs", () => {
+    const knownStart: SubagentNodeJson = {
+      ...node("agent-known", 0.1),
+      workflowRunId: "wf_known",
+      startedAt: "2026-07-10T00:00:00.000Z",
+    };
+    const unknownZ: SubagentNodeJson = { ...node("agent-z", 0.1), workflowRunId: "wf_zzz_unknown" };
+    const unknownA: SubagentNodeJson = { ...node("agent-a", 0.1), workflowRunId: "wf_aaa_unknown" };
+    const runs: WorkflowRunSummaryJson[] = [
+      { runId: "wf_known", agentCount: 1, phases: [] },
+      { runId: "wf_zzz_unknown", agentCount: 1, phases: [] },
+      { runId: "wf_aaa_unknown", agentCount: 1, phases: [] },
+    ];
+    const rows = groupedTreeRows([knownStart, unknownZ, unknownA], runs);
+    const headerRunIds = rows.filter((r) => r.kind === "workflow-header").map((r) => r.runId);
+    expect(headerRunIds).toEqual(["wf_known", "wf_aaa_unknown", "wf_zzz_unknown"]);
+  });
+
+  it("falls back to the run summary's earliestAgentStartMs when no member node carries a startedAt", () => {
+    // A run whose members exist (so the group still renders) but whose
+    // sidecar transcripts carry no usable startedAt at all — the run-state
+    // file's own workflowProgress-derived earliestAgentStartMs is the only
+    // remaining start-time evidence, and it must still slot the run
+    // chronologically rather than sorting it as "unknown".
+    const knownStart: SubagentNodeJson = {
+      ...node("agent-known", 0.1),
+      workflowRunId: "wf_known",
+      startedAt: "2026-07-10T02:00:00.000Z",
+    };
+    const noMemberStart: SubagentNodeJson = {
+      ...node("agent-no-start", 0.1),
+      workflowRunId: "wf_fallback",
+    };
+    const runs: WorkflowRunSummaryJson[] = [
+      { runId: "wf_known", agentCount: 1, phases: [] },
+      {
+        runId: "wf_fallback",
+        agentCount: 1,
+        phases: [],
+        earliestAgentStartMs: Date.parse("2026-07-10T00:00:00.000Z"),
+      },
+    ];
+    const rows = groupedTreeRows([knownStart, noMemberStart], runs);
+    const headerRunIds = rows.filter((r) => r.kind === "workflow-header").map((r) => r.runId);
+    expect(headerRunIds).toEqual(["wf_fallback", "wf_known"]);
   });
 
   it("still returns [] for a session with no subagents and no workflow runs at all", () => {

@@ -49,7 +49,12 @@ import {
 import { type ClaudeSessionStore, localClaudeSessionStore } from "./store.js";
 import { listSubagentRefs, type SubagentRef } from "./subagents.js";
 import { computeToolUsageStats } from "./tool-usage-stats.js";
-import { listWorkflowRuns, type WorkflowPhase, type WorkflowRun } from "./workflows.js";
+import {
+  listWorkflowRuns,
+  type WorkflowAgentProgress,
+  type WorkflowPhase,
+  type WorkflowRun,
+} from "./workflows.js";
 
 /** Sentinel owner id for nodes launched directly from the main transcript. */
 const MAIN_OWNER = "main";
@@ -100,6 +105,21 @@ export interface ClaudeWorkflowRunSummary {
   toolUseId?: string;
   /** Source line of that same tool_use. */
   launchLine?: number;
+  /**
+   * Epoch ms — the earliest `startedAt`/`queuedAt` among this run's
+   * `workflows/<runId>.json` `workflowProgress` entries (`WorkflowRun.agents`
+   * in `workflows.ts`), i.e. the harness's OWN record of when it dispatched
+   * the run's agents. This is a FALLBACK start-time signal only: the web
+   * tree's chronological run ordering (`@junrei/web`'s
+   * `agentTree.ts:groupedTreeRows`) prefers the member `SubagentNode`s' own
+   * transcript `startedAt` whenever any member was actually discovered, and
+   * only reaches for this field when a run has no discovered member at all
+   * (e.g. a run-state file recording agents whose sidecar transcripts never
+   * parsed). Always `undefined` for a synthesized run (no run-state file —
+   * see this interface's own doc comment), since there's no
+   * `workflowProgress` to read from in that case.
+   */
+  earliestAgentStartMs?: number;
 }
 
 /**
@@ -556,6 +576,7 @@ function buildWorkflowRunSummaries(
 
   const parsed = workflowRuns.map((run) => {
     const launch = findWorkflowLaunch(mainData, run.runId);
+    const earliestAgentStartMs = earliestAgentProgressStartMs(run.agents);
     return {
       runId: run.runId,
       ...(run.workflowName !== undefined && { name: run.workflowName }),
@@ -564,6 +585,7 @@ function buildWorkflowRunSummaries(
       phases: run.phases,
       agentCount: agentCountByRunId.get(run.runId) ?? 0,
       ...(launch !== undefined && { toolUseId: launch.toolUseId, launchLine: launch.line }),
+      ...(earliestAgentStartMs !== undefined && { earliestAgentStartMs }),
     };
   });
 
@@ -588,6 +610,25 @@ function buildWorkflowRunSummaries(
     );
 
   return [...parsed, ...synthesized];
+}
+
+/**
+ * Earliest `startedAt` (falling back to `queuedAt` per agent) across a run's
+ * `workflowProgress` entries — the basis for `ClaudeWorkflowRunSummary.
+ * earliestAgentStartMs` (see that field's doc comment for why this is only a
+ * fallback signal, not the preferred one). `undefined` when the run has no
+ * agent entries, or none carries either timestamp.
+ */
+function earliestAgentProgressStartMs(
+  agents: ReadonlyMap<string, WorkflowAgentProgress>,
+): number | undefined {
+  let earliest: number | undefined;
+  for (const agent of agents.values()) {
+    const candidate = agent.startedAt ?? agent.queuedAt;
+    if (candidate === undefined) continue;
+    if (earliest === undefined || candidate < earliest) earliest = candidate;
+  }
+  return earliest;
 }
 
 /**
