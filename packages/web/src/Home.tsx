@@ -11,7 +11,6 @@ import {
   parseRepoParam,
 } from "./router.js";
 import { LIST_WINDOW_LIMIT, repoOptionsFor, sessionsListQuery } from "./sessionListHelpers.js";
-import { RailLayout } from "./shell/RailLayout.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -133,7 +132,7 @@ export function Home() {
   });
 
   return (
-    <RailLayout active="briefing">
+    <>
       <div className="masthead">
         <div>
           <div className="dateline mono">{today}</div>
@@ -190,6 +189,6 @@ export function Home() {
           loggingKey={loggingKey}
         />
       )}
-    </RailLayout>
+    </>
   );
 }

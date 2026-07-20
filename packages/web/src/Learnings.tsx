@@ -13,7 +13,6 @@ import {
 import { LearningsBoard } from "./learnings/LearningsBoard.js";
 import { ALL_REPOS, parseRepoParam } from "./router.js";
 import { LIST_WINDOW_LIMIT, repoOptionsFor, sessionsListQuery } from "./sessionListHelpers.js";
-import { RailLayout } from "./shell/RailLayout.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** The board's Measure feed and its verified-effect windows both read a 14-day briefing — the loop's natural cadence. */
@@ -139,7 +138,7 @@ export function Learnings() {
   );
 
   return (
-    <RailLayout active="learnings">
+    <>
       <div className="fx ac jb hpad gap12" style={{ padding: "22px 28px 14px", flexWrap: "wrap" }}>
         <div>
           <h1 className="ttl" style={{ fontSize: "20px" }}>
@@ -185,6 +184,6 @@ export function Learnings() {
           pendingKey={pendingKey}
         />
       )}
-    </RailLayout>
+    </>
   );
 }

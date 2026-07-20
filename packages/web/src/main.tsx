@@ -18,6 +18,7 @@ import {
 } from "./router.js";
 import { SessionList } from "./SessionList.js";
 import { SessionShell } from "./SessionShell.js";
+import { RailShell } from "./shell/RailShell.js";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -73,21 +74,30 @@ const router = createBrowserRouter([
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <HomeOrRedirect /> },
-      { path: SESSIONS_ROUTE_PATH, element: <SessionList /> },
-      { path: LEARNINGS_ROUTE_PATH, element: <Learnings /> },
-      // Trends was folded into the Briefing home (PR3) — its bookmark redirects there.
-      { path: TRENDS_ROUTE_PATH, element: <Navigate replace to="/" /> },
-      // The agent routes' static "agent" segment outranks the session routes'
-      // optional ":lens?" — react-router's route ranking scores static segments
-      // higher than dynamic ones regardless of declaration order, so
-      // `/session/claude-code/id/agent/x` always matches the agent route rather
-      // than being parsed as CLAUDE_SESSION_ROUTE_PATH with lens="agent" (see router.test.ts).
-      { path: CLAUDE_AGENT_ROUTE_PATH, element: <AgentShell source="claude-code" /> },
-      { path: CODEX_AGENT_ROUTE_PATH, element: <AgentShell source="codex" /> },
-      { path: CLAUDE_SESSION_ROUTE_PATH, element: <SessionShell source="claude-code" /> },
-      { path: CODEX_SESSION_ROUTE_PATH, element: <SessionShell source="codex" /> },
-      { path: "*", element: <CatchAll /> },
+      // Pathless layout route — renders the left nav rail (RailShell) around
+      // EVERY child below, including session/agent detail, so no screen in
+      // the app can render outside the rail or wrap itself in it a second
+      // time (see shell/RailShell.tsx, RailLayout.tsx).
+      {
+        element: <RailShell />,
+        children: [
+          { index: true, element: <HomeOrRedirect /> },
+          { path: SESSIONS_ROUTE_PATH, element: <SessionList /> },
+          { path: LEARNINGS_ROUTE_PATH, element: <Learnings /> },
+          // Trends was folded into the Briefing home (PR3) — its bookmark redirects there.
+          { path: TRENDS_ROUTE_PATH, element: <Navigate replace to="/" /> },
+          // The agent routes' static "agent" segment outranks the session routes'
+          // optional ":lens?" — react-router's route ranking scores static segments
+          // higher than dynamic ones regardless of declaration order, so
+          // `/session/claude-code/id/agent/x` always matches the agent route rather
+          // than being parsed as CLAUDE_SESSION_ROUTE_PATH with lens="agent" (see router.test.ts).
+          { path: CLAUDE_AGENT_ROUTE_PATH, element: <AgentShell source="claude-code" /> },
+          { path: CODEX_AGENT_ROUTE_PATH, element: <AgentShell source="codex" /> },
+          { path: CLAUDE_SESSION_ROUTE_PATH, element: <SessionShell source="claude-code" /> },
+          { path: CODEX_SESSION_ROUTE_PATH, element: <SessionShell source="codex" /> },
+          { path: "*", element: <CatchAll /> },
+        ],
+      },
     ],
   },
 ]);

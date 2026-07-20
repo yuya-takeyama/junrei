@@ -516,6 +516,36 @@ export const NAV_ITEMS: readonly { key: NavKey; label: string; path: string }[] 
 ];
 
 /**
+ * Which rail nav item (if any) is "active" for a given pathname — used by
+ * `RailShell` (see shell/RailShell.tsx), the layout route that now wraps
+ * EVERY screen in the left nav rail, not just the three L0 pages.
+ *
+ * `/` is Briefing. `/sessions` (the list) AND `/session/…` (singular — the
+ * L1/L3 session/agent detail routes, `CLAUDE_SESSION_ROUTE_PATH` &
+ * friends) both count as "Sessions", since a session/agent detail screen is
+ * reached BY drilling into the sessions list and should keep that nav item
+ * highlighted even though its URL doesn't literally start with `/sessions`.
+ * `/learnings…` is Learnings. Anything else (a redirect-only path like
+ * `/trends`, or an unmatched URL that falls to the catch-all) is `null` — no
+ * nav item lights up.
+ */
+export function activeNavKey(pathname: string): NavKey | null {
+  if (pathname === "/") return "briefing";
+  if (
+    pathname === `/${SESSIONS_ROUTE_PATH}` ||
+    pathname.startsWith(`/${SESSIONS_ROUTE_PATH}/`) ||
+    pathname === "/session" ||
+    pathname.startsWith("/session/")
+  ) {
+    return "sessions";
+  }
+  if (pathname === `/${LEARNINGS_ROUTE_PATH}` || pathname.startsWith(`/${LEARNINGS_ROUTE_PATH}/`)) {
+    return "learnings";
+  }
+  return null;
+}
+
+/**
  * The Briefing masthead's period toggle (Today = 1 / 7d / 30d) — the `days`
  * window passed straight to `GET /api/briefing`.
  */

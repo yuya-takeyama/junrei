@@ -4,18 +4,22 @@ import { NAV_ITEMS, type NavKey } from "../router.js";
 import { ThemeToggle } from "./ThemeToggle.js";
 
 /**
- * Left nav rail + main content shell for the three top-level L0 screens —
- * Briefing (`/`), Sessions (`/sessions`), Learnings (`/learnings`) — per the
- * PR3 IA (Pattern A/B's nav rail). Session/agent detail keep the top `Band`
- * (PR4 restructures those), so this deliberately isn't hoisted into the root
- * `App` layout; each L0 page wraps its own content in `<RailLayout active=…>`.
+ * Left nav rail + main content shell for EVERY screen in the app — the three
+ * top-level L0 pages (Briefing `/`, Sessions `/sessions`, Learnings
+ * `/learnings`) per the PR3 IA (Pattern A/B's nav rail), and, as of the rail
+ * layout hoist, every deep route too (session/agent detail keep their own
+ * `Band` breadcrumb strip nested inside this shell's content area — see
+ * SessionShell/AgentShell). Rendered once by the `RailShell` layout route
+ * (see shell/RailShell.tsx / main.tsx) rather than per-page, so no screen can
+ * double-wrap or omit it. `active` is `null` for a route `activeNavKey`
+ * doesn't recognize — no nav item lights up.
  *
  * The rail carries the JUNREI wordmark, the three destinations (amber active
  * marker), the `local · ~/.claude · ~/.codex` provenance footer, and the theme
  * toggle. On a narrow viewport the rail collapses to a horizontal top bar
  * (`.rail-layout` flips to a column) so the content keeps the full width.
  */
-export function RailLayout({ active, children }: { active: NavKey; children: ReactNode }) {
+export function RailLayout({ active, children }: { active: NavKey | null; children: ReactNode }) {
   return (
     <div className="rail-layout">
       <nav className="rail" aria-label="Primary">
