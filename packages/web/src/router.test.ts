@@ -2,6 +2,7 @@ import { matchRoutes, type RouteObject } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
   ALL_REPOS,
+  activeNavKey,
   agentLensesFor,
   agentPath,
   agentRecordPath,
@@ -483,6 +484,32 @@ describe("NAV_ITEMS", () => {
     expect(NAV_ITEMS[0]?.path).toBe("/");
     expect(NAV_ITEMS.find((i) => i.key === "sessions")?.path).toBe(`/${SESSIONS_ROUTE_PATH}`);
     expect(NAV_ITEMS.find((i) => i.key === "learnings")?.path).toBe(`/${LEARNINGS_ROUTE_PATH}`);
+  });
+});
+
+describe("activeNavKey", () => {
+  it("is briefing for the bare root", () => {
+    expect(activeNavKey("/")).toBe("briefing");
+  });
+
+  it("is sessions for the session list and its query-bearing form", () => {
+    expect(activeNavKey("/sessions")).toBe("sessions");
+    expect(activeNavKey("/sessions/")).toBe("sessions");
+  });
+
+  it("is sessions for a session/agent detail route (singular /session/…), not just the list", () => {
+    expect(activeNavKey("/session/claude-code/abc123")).toBe("sessions");
+    expect(activeNavKey("/session/claude-code/abc123/evidence/tools/bash")).toBe("sessions");
+    expect(activeNavKey("/session/codex/abc123/agent/def456")).toBe("sessions");
+  });
+
+  it("is learnings for the learnings board", () => {
+    expect(activeNavKey("/learnings")).toBe("learnings");
+  });
+
+  it("is null for an unrecognized path — no nav item lights up", () => {
+    expect(activeNavKey("/trends")).toBeNull();
+    expect(activeNavKey("/nope")).toBeNull();
   });
 });
 

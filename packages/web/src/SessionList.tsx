@@ -33,7 +33,6 @@ import {
   sourceBadgeLabel,
   subagentCellText,
 } from "./sessionListHelpers.js";
-import { RailLayout } from "./shell/RailLayout.js";
 
 /**
  * Rows per CLIENT-side page. The fetch itself is always the whole listable
@@ -214,7 +213,7 @@ export function SessionList() {
   };
 
   return (
-    <RailLayout active="sessions">
+    <>
       <div className="fx ac jb hpad gap12" style={{ padding: "22px 28px 14px", flexWrap: "wrap" }}>
         <h1 className="ttl" style={{ fontSize: "20px" }}>
           Sessions
@@ -451,6 +450,6 @@ export function SessionList() {
           </button>
         </div>
       )}
-    </RailLayout>
+    </>
   );
 }
