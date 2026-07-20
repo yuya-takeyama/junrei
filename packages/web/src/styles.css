@@ -1815,10 +1815,33 @@ button.fb {
   padding: 22px 18px;
   border-right: 1px dotted var(--bd);
 }
+.rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .rail-wm {
   font-size: 15px;
   letter-spacing: 0.22em;
   font-weight: 600;
+}
+.rail-toggle {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  color: var(--mut);
+  font-size: 13px;
+  line-height: 1;
+  border-radius: var(--rad);
+}
+.rail-toggle:hover {
+  color: var(--tx);
+  background: var(--pan);
+}
+.rail-item-letter {
+  display: none;
 }
 .rail-nav {
   margin-top: 30px;
@@ -1871,6 +1894,41 @@ button.fb {
   display: flex;
   flex-direction: column;
 }
+/* Collapsed rail (desktop only — `useRailCollapsed` toggles this class on
+   `.rail-layout`). The <720px media query below resets every one of these
+   properties back to the expanded look, since collapse never applies to the
+   mobile top bar. */
+.rail-layout.collapsed .rail {
+  flex: 0 0 60px;
+  padding: 22px 8px;
+  align-items: center;
+}
+.rail-layout.collapsed .rail-head {
+  justify-content: center;
+}
+.rail-layout.collapsed .rail-wm {
+  display: none;
+}
+.rail-layout.collapsed .rail-nav {
+  align-items: center;
+}
+.rail-layout.collapsed .rail-item {
+  padding: 9px 0;
+  width: 32px;
+  text-align: center;
+}
+.rail-layout.collapsed .rail-item-full {
+  display: none;
+}
+.rail-layout.collapsed .rail-item-letter {
+  display: inline;
+}
+.rail-layout.collapsed .rail-foot {
+  align-items: center;
+}
+.rail-layout.collapsed .rail-foot span {
+  display: none;
+}
 /* Narrow viewport: the rail collapses to a horizontal top bar so the content
    keeps full width. */
 @media (max-width: 720px) {
@@ -1901,6 +1959,38 @@ button.fb {
     flex-direction: row;
     align-items: center;
     gap: 8px;
+  }
+  /* The collapse toggle only affects the desktop side-rail; the top bar
+     always shows full labels and never offers the toggle. */
+  .rail-toggle {
+    display: none;
+  }
+  .rail-layout.collapsed .rail {
+    flex-basis: auto;
+    padding: 12px 18px;
+  }
+  .rail-layout.collapsed .rail-head {
+    justify-content: space-between;
+  }
+  .rail-layout.collapsed .rail-wm {
+    display: inline;
+  }
+  .rail-layout.collapsed .rail-nav {
+    align-items: normal;
+  }
+  .rail-layout.collapsed .rail-item {
+    padding: 9px 12px;
+    width: auto;
+    text-align: left;
+  }
+  .rail-layout.collapsed .rail-item-full {
+    display: inline;
+  }
+  .rail-layout.collapsed .rail-item-letter {
+    display: none;
+  }
+  .rail-layout.collapsed .rail-foot span {
+    display: inline;
   }
   .rail-foot .theme-toggle {
     margin-top: 0;
