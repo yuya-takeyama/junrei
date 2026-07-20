@@ -192,15 +192,20 @@ export interface BashNearDuplicateGroup {
   examples: string[];
   /**
    * One entry per occurrence, in detection order — which thread it came
-   * from, its line number, and its own `resultChars` (since occurrences here
-   * are folded across every thread, see the module doc comment;
-   * `resultChars` lets `computeBashOpportunities` price each occurrence
-   * individually). `resultChars` is OPTIONAL on the type only for backward
-   * compatibility with existing hand-built literals elsewhere in the
-   * monorepo that predate it (e.g. presentational formatting tests that never
-   * read it) — `computeBashStats` itself always sets a real value here.
+   * from, its line number, its own `resultChars`, and its own concrete
+   * (un-normalized) `command` text (since occurrences here are folded across
+   * every thread, see the module doc comment; `resultChars`/`command` let
+   * `computeBashOpportunities` price each occurrence individually — and, as
+   * of the near-duplicate tightening, re-partition a shape group by exact
+   * concrete command before pricing it, since two calls sharing a
+   * normalized SHAPE but different concrete arguments are legitimate,
+   * non-redundant work, not repetition). Both fields are OPTIONAL on the
+   * type only for backward compatibility with existing hand-built literals
+   * elsewhere in the monorepo that predate them (e.g. presentational
+   * formatting tests that never read them) — `computeBashStats` itself
+   * always sets real values here.
    */
-  occurrences: Array<{ thread: string; line: number; resultChars?: number }>;
+  occurrences: Array<{ thread: string; line: number; resultChars?: number; command?: string }>;
 }
 
 export interface BashLargeResult {
@@ -740,7 +745,7 @@ function computeNearDuplicates(entries: readonly BashEntry[]): BashNearDuplicate
     count: number;
     exampleSeen: Set<string>;
     examples: string[];
-    occurrences: Array<{ thread: string; line: number; resultChars: number }>;
+    occurrences: Array<{ thread: string; line: number; resultChars: number; command: string }>;
   }
   const groups = new Map<string, Acc>();
   for (const entry of entries) {
@@ -755,6 +760,7 @@ function computeNearDuplicates(entries: readonly BashEntry[]): BashNearDuplicate
       thread: entry.thread,
       line: entry.line,
       resultChars: entry.resultChars,
+      command: entry.command,
     });
     if (acc.examples.length < MAX_SAMPLE_COMMANDS && !acc.exampleSeen.has(entry.command)) {
       acc.exampleSeen.add(entry.command);
