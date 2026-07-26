@@ -1,6 +1,6 @@
 {
   "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-  "fetchedAt": "2026-07-13T00:09:11.310Z",
+  "fetchedAt": "2026-07-26T20:56:36.781Z",
   "models": {
     "claude-haiku-4-5-20251001": {
       "input_cost_per_token": 0.000001,
@@ -169,6 +169,13 @@
       "cache_creation_input_token_cost": 0.0000125,
       "cache_read_input_token_cost": 0.000001,
       "cache_creation_input_token_cost_above_1hr": 0.00002
+    },
+    "claude-opus-5": {
+      "input_cost_per_token": 0.000005,
+      "output_cost_per_token": 0.000025,
+      "cache_creation_input_token_cost": 0.00000625,
+      "cache_read_input_token_cost": 5e-7,
+      "cache_creation_input_token_cost_above_1hr": 0.00001
     },
     "claude-opus-4-8": {
       "input_cost_per_token": 0.000005,
