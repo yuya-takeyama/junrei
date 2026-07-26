@@ -92,9 +92,15 @@ against Junrei's pricing snapshot at
 | Model | Input | Output | vs Fable |
 |---|---:|---:|---:|
 | Claude Fable 5 (`fable`) | $10 | $50 | 1.0x |
-| Claude Opus 4.8 (`opus`) | $5 | $25 | 0.5x |
+| Claude Opus 5 / 4.8 (`opus`) | $5 | $25 | 0.5x |
 | Claude Sonnet 5 (`sonnet`) | $2 | $10 | 0.2x |
 | Claude Haiku 4.5 (`haiku`) | $1 | $5 | 0.1x |
+
+Opus 5 and Opus 4.8 price identically, so every opus-tier rule below applies
+to both; the `opus` alias resolves to whichever Opus the running harness
+pins — the recorded model in Junrei, not the alias, is the source of truth.
+Sonnet 5's $2/$10 is introductory pricing through 2026-08-31 ($3/$15 after,
+0.3x Fable).
 
 On a fat main context, cache writes can be the single largest line item —
 multipliers and a measured example are in `references/claude-code.md`.
