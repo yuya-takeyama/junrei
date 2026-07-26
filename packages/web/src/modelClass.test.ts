@@ -4,6 +4,7 @@ import { classifyModel, MODEL_CLASS_ORDER, modelShortLabel } from "./modelClass.
 describe("classifyModel", () => {
   it("keeps the Claude three-tier mapping", () => {
     expect(classifyModel("claude-fable-5")).toBe("f");
+    expect(classifyModel("claude-opus-5")).toBe("f");
     expect(classifyModel("claude-opus-4-8")).toBe("f");
     expect(classifyModel("claude-sonnet-4-5-20250929")).toBe("s");
     expect(classifyModel("claude-haiku-4-5")).toBe("h");
@@ -37,6 +38,7 @@ describe("classifyModel", () => {
 describe("modelShortLabel", () => {
   it("combines the family codename with the version", () => {
     expect(modelShortLabel("claude-fable-5")).toBe("fable 5");
+    expect(modelShortLabel("claude-opus-5")).toBe("opus 5");
     expect(modelShortLabel("claude-opus-4-8")).toBe("opus 4.8");
     expect(modelShortLabel("claude-sonnet-4-5-20250929")).toBe("sonnet 4.5");
     expect(modelShortLabel("claude-haiku-4-5")).toBe("haiku 4.5");
