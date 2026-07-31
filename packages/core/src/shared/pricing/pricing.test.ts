@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TokenUsage } from "../types.js";
+import pricesJson from "./prices.json" with { type: "json" };
 import {
   cacheReadRatePerToken,
   estimateCostComponents,
@@ -292,13 +293,18 @@ describe("findModelPricing (GPT-5.6 Luna/Terra price cut, effective 2026-07-30)"
     expect(
       findModelPricing("gpt-5.6-terra", "2026-07-01T00:00:00.000Z")?.input_cost_per_token,
     ).toBe(0.0000025);
-    const after = findModelPricing("gpt-5.6-terra", "2026-08-01T00:00:00.000Z");
+    const after = findModelPricing("gpt-5.6-terra", "2026-07-31T00:00:00.000Z");
     expect(after?.input_cost_per_token).toBe(0.000002);
     expect(after?.output_cost_per_token).toBe(0.000012);
   });
 
   it("uses the newest rates when no timestamp is given (undated callers)", () => {
-    expect(findModelPricing("gpt-5.6-luna")?.input_cost_per_token).toBe(2e-7);
+    // "No timestamp" must mean "the newest entry" — pinned against a far-future
+    // dated lookup instead of a literal rate so future appended entries don't
+    // turn this test into a moving target.
+    expect(findModelPricing("gpt-5.6-luna")).toEqual(
+      findModelPricing("gpt-5.6-luna", "2099-01-01T00:00:00.000Z"),
+    );
   });
 
   it("estimateCostUsd reflects the boundary end-to-end", () => {
@@ -309,7 +315,7 @@ describe("findModelPricing (GPT-5.6 Luna/Terra price cut, effective 2026-07-30)"
       0.004575,
       10,
     );
-    expect(estimateCostUsd("gpt-5.6-luna", USAGE, "2026-08-01T00:00:00.000Z")).toBeCloseTo(
+    expect(estimateCostUsd("gpt-5.6-luna", USAGE, "2026-07-31T00:00:00.000Z")).toBeCloseTo(
       0.001375,
       10,
     );
@@ -317,12 +323,43 @@ describe("findModelPricing (GPT-5.6 Luna/Terra price cut, effective 2026-07-30)"
 
   it("Sol and base gpt-5.6 are unchanged by the cut (still one entry)", () => {
     expect(findModelPricing("gpt-5.6-sol", "2026-07-01T00:00:00.000Z")).toEqual(
-      findModelPricing("gpt-5.6-sol", "2026-08-01T00:00:00.000Z"),
+      findModelPricing("gpt-5.6-sol", "2026-07-31T00:00:00.000Z"),
     );
   });
 
   it("cacheReadRatePerToken accepts a timestamp (equal values today — cache rates carried over)", () => {
     expect(cacheReadRatePerToken("gpt-5.6-luna", 1000, "2026-07-01T00:00:00.000Z")).toBe(1e-7);
-    expect(cacheReadRatePerToken("gpt-5.6-luna", 1000, "2026-08-01T00:00:00.000Z")).toBe(1e-7);
+    expect(cacheReadRatePerToken("gpt-5.6-luna", 1000, "2026-07-31T00:00:00.000Z")).toBe(1e-7);
+  });
+});
+
+describe("prices.json structural invariants", () => {
+  // The file is now machine-edited (daily sync appends); these invariants are
+  // what selectPricingEntry and the migration rely on. A history that lost its
+  // null entry would silently render pre-first-date sessions as unpriced.
+  const snapshot = pricesJson as unknown as {
+    source: string;
+    models: Record<string, PricingHistoryEntry[]>;
+  };
+
+  it("every model has a non-empty history with exactly one valid_from:null entry", () => {
+    for (const [model, entries] of Object.entries(snapshot.models)) {
+      expect(entries.length, model).toBeGreaterThan(0);
+      expect(entries.filter((e) => e.valid_from === null).length, model).toBe(1);
+    }
+  });
+
+  it("valid_from values are unique YYYY-MM-DD dates (or null) and every entry is priceable", () => {
+    for (const [model, entries] of Object.entries(snapshot.models)) {
+      const dated = entries.filter((e) => e.valid_from !== null);
+      expect(new Set(dated.map((e) => e.valid_from)).size, model).toBe(dated.length);
+      for (const entry of entries) {
+        if (entry.valid_from !== null)
+          expect(entry.valid_from, model).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(typeof entry.fetched_at, model).toBe("string");
+        expect(typeof entry.input_cost_per_token, model).toBe("number");
+        expect(typeof entry.output_cost_per_token, model).toBe("number");
+      }
+    }
   });
 });

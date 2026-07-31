@@ -678,7 +678,7 @@ describe("computeUsage — effective-dated pricing", () => {
         messageId: "m2",
         model: "gpt-5.6-luna",
         usage,
-        timestamp: "2026-08-01T00:00:00.000Z",
+        timestamp: "2026-07-31T00:00:00.000Z",
         line: 2,
       },
     ]);
