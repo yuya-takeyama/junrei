@@ -422,7 +422,7 @@ function buildAssistantTextEntry(
   const { text, truncated } = truncate(block.text, ASSISTANT_TEXT_LIMIT);
   const costUsd =
     showUsage && record.model !== undefined && usage !== undefined
-      ? estimateCostUsd(record.model, usage)
+      ? estimateCostUsd(record.model, usage, record.timestamp)
       : undefined;
   return {
     kind: "assistant-text",
@@ -758,7 +758,7 @@ function buildAssistantTextDetail(
   const usage = resolveMessageUsage(record, new Map(data.apiMessages.map((m) => [m.messageId, m])));
   const costUsd =
     record.model !== undefined && usage !== undefined
-      ? estimateCostUsd(record.model, usage)
+      ? estimateCostUsd(record.model, usage, record.timestamp)
       : undefined;
   return {
     kind: "assistant-text",

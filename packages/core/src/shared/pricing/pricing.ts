@@ -13,10 +13,22 @@ export interface ModelPricing {
   cache_creation_input_token_cost_above_1hr?: number;
 }
 
+/**
+ * One effective-dated price snapshot for a model. Entries are COMPLETE — no
+ * field inheritance from earlier entries — so each one is readable and
+ * priceable standalone. `valid_from` is a YYYY-MM-DD UTC date taking effect
+ * at 00:00:00Z that day (inclusive); `null` means "since forever" (the
+ * pre-history baseline every migrated model starts with). `fetched_at` is
+ * the instant the values were fetched from LiteLLM or recorded manually.
+ */
+export interface PricingHistoryEntry extends ModelPricing {
+  valid_from: string | null;
+  fetched_at: string;
+}
+
 interface PricingSnapshot {
   source: string;
-  fetchedAt: string;
-  models: Record<string, ModelPricing>;
+  models: Record<string, PricingHistoryEntry[]>;
 }
 
 const snapshot = pricesJson as PricingSnapshot;
@@ -46,31 +58,57 @@ function normalizeBedrockModelId(model: string): string {
 }
 
 /**
+ * Pick the history entry in effect at `timestamp`: the entry with the
+ * greatest `valid_from` that is <= the timestamp's UTC date, where `null`
+ * compares as "before everything". Without a timestamp, the latest entry —
+ * which is what every pre-history caller got from the flat snapshot, so
+ * undated call sites keep their existing behavior. The scan is
+ * order-independent (greatest applicable wins), so file order is cosmetic.
+ * Returns `undefined` only for an empty history.
+ */
+export function selectPricingEntry(
+  entries: readonly PricingHistoryEntry[],
+  timestamp?: string,
+): PricingHistoryEntry | undefined {
+  const date = timestamp?.slice(0, 10);
+  let best: PricingHistoryEntry | undefined;
+  for (const entry of entries) {
+    if (date !== undefined && entry.valid_from !== null && entry.valid_from > date) continue;
+    if (best === undefined || (entry.valid_from ?? "") >= (best.valid_from ?? "")) {
+      best = entry;
+    }
+  }
+  return best;
+}
+
+/**
  * Find pricing for a model id. Lookup order:
  * 0. normalize a Bedrock-style id (region/anthropic prefix + `-v<N>:<M>`
  *    suffix stripped) down to the plain id — a no-op for non-Bedrock ids,
  * 1. exact match,
  * 2. exact match after stripping a trailing `-YYYYMMDD` date suffix,
  * 3. longest snapshot key that prefixes the model id (date/revision variants).
+ * Each hit resolves through the model's history to the entry in effect at
+ * `timestamp` via `selectPricingEntry`.
  */
-export function findModelPricing(model: string): ModelPricing | undefined {
+export function findModelPricing(model: string, timestamp?: string): ModelPricing | undefined {
   const models = snapshot.models;
   const normalized = normalizeBedrockModelId(model);
 
   const exact = models[normalized];
-  if (exact !== undefined) return exact;
+  if (exact !== undefined) return selectPricingEntry(exact, timestamp);
 
   const dateless = normalized.replace(/-\d{8}$/, "");
   const datelessHit = models[dateless];
-  if (datelessHit !== undefined) return datelessHit;
+  if (datelessHit !== undefined) return selectPricingEntry(datelessHit, timestamp);
 
-  let best: { key: string; pricing: ModelPricing } | undefined;
-  for (const [key, pricing] of Object.entries(models)) {
+  let best: { key: string; entries: PricingHistoryEntry[] } | undefined;
+  for (const [key, entries] of Object.entries(models)) {
     if (normalized.startsWith(key) && (best === undefined || key.length > best.key.length)) {
-      best = { key, pricing };
+      best = { key, entries };
     }
   }
-  return best?.pricing;
+  return best === undefined ? undefined : selectPricingEntry(best.entries, timestamp);
 }
 
 export interface CostComponents {
@@ -101,6 +139,7 @@ export interface CostComponents {
 export function estimateCostComponents(
   model: string,
   usage: TokenUsage,
+  timestamp?: string,
 ): CostComponents | undefined {
   // Zero tokens cost exactly $0 no matter what — even for a model with no
   // pricing entry (e.g. Claude Code's "<synthetic>" harness stub messages,
@@ -116,7 +155,7 @@ export function estimateCostComponents(
     return { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheCreationCost: 0, totalCost: 0 };
   }
 
-  const pricing = findModelPricing(model);
+  const pricing = findModelPricing(model, timestamp);
   if (pricing?.input_cost_per_token === undefined || pricing.output_cost_per_token === undefined) {
     return undefined;
   }
@@ -164,8 +203,12 @@ export function estimateCostComponents(
 }
 
 /** Estimate total USD cost for one API message's usage. See `estimateCostComponents`. */
-export function estimateCostUsd(model: string, usage: TokenUsage): number | undefined {
-  return estimateCostComponents(model, usage)?.totalCost;
+export function estimateCostUsd(
+  model: string,
+  usage: TokenUsage,
+  timestamp?: string,
+): number | undefined {
+  return estimateCostComponents(model, usage, timestamp)?.totalCost;
 }
 
 /**
@@ -179,8 +222,12 @@ export function estimateCostUsd(model: string, usage: TokenUsage): number | unde
  * price a counterfactual context series at the SAME rate the real cost
  * accrued at, without duplicating the tiered-rate logic.
  */
-export function cacheReadRatePerToken(model: string, contextTokens: number): number | undefined {
-  const pricing = findModelPricing(model);
+export function cacheReadRatePerToken(
+  model: string,
+  contextTokens: number,
+  timestamp?: string,
+): number | undefined {
+  const pricing = findModelPricing(model, timestamp);
   if (pricing?.input_cost_per_token === undefined) return undefined;
   const above = contextTokens > TIER_THRESHOLD;
   return (
@@ -191,9 +238,15 @@ export function cacheReadRatePerToken(model: string, contextTokens: number): num
 }
 
 export function pricingSnapshotInfo(): { source: string; fetchedAt: string; modelCount: number } {
+  let fetchedAt = "";
+  for (const entries of Object.values(snapshot.models)) {
+    for (const entry of entries) {
+      if (entry.fetched_at > fetchedAt) fetchedAt = entry.fetched_at;
+    }
+  }
   return {
     source: snapshot.source,
-    fetchedAt: snapshot.fetchedAt,
+    fetchedAt,
     modelCount: Object.keys(snapshot.models).length,
   };
 }

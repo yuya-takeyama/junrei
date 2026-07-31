@@ -657,3 +657,36 @@ describe("computeSkillInvocations", () => {
     });
   });
 });
+
+describe("computeUsage — effective-dated pricing", () => {
+  it("prices each message at the table entry in effect at its timestamp", () => {
+    const usage = {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 2000,
+      cacheCreationTokens: 300,
+    };
+    const data = sessionDataWithMessages([
+      {
+        messageId: "m1",
+        model: "gpt-5.6-luna",
+        usage,
+        timestamp: "2026-07-01T00:00:00.000Z",
+        line: 1,
+      },
+      {
+        messageId: "m2",
+        model: "gpt-5.6-luna",
+        usage,
+        timestamp: "2026-07-31T00:00:00.000Z",
+        line: 2,
+      },
+    ]);
+    const summary = computeUsage(data);
+    const luna = summary.byModel.find((m) => m.model === "gpt-5.6-luna");
+    // Pre-cut message $0.004575 + post-cut message $0.001375 — NOT 2x either
+    // (which is what a single flat table would produce).
+    expect(luna?.costUsd).toBeCloseTo(0.00595, 10);
+    expect(summary.total.costIsComplete).toBe(true);
+  });
+});

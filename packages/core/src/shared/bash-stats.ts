@@ -383,6 +383,16 @@ function cap(text: string, limit = SAMPLE_COMMAND_LIMIT): string {
  * `undefined` — NEVER `0` — whenever `model` is unknown or has no priced
  * `input_cost_per_token` entry (`findModelPricing`), so callers can tell
  * "genuinely free" apart from "can't estimate".
+ *
+ * `findModelPricing` is called here with NO timestamp, so this always prices
+ * at the model's LATEST table entry, deliberately — Bash calls carry no
+ * per-call timestamp to look up an effective-dated rate against (see the
+ * effective-dated pricing spec's exception for undated call sites). The
+ * practical effect: bash-$ figures for a session that predates a price
+ * change are computed at CURRENT rates, while that same session's headline
+ * cost (priced per-message via `estimateCostUsd`, which does have a
+ * timestamp) uses the CONTEMPORANEOUS rates in effect when it ran — so the
+ * two figures can diverge after a price change, by design.
  */
 export function estUsdForChars(chars: number, model: string | undefined): number | undefined {
   if (model === undefined) return undefined;

@@ -7,6 +7,17 @@ file tracks only what is in progress or ahead.
 
 ## In progress
 
+### Effective-dated model pricing landed (2026-07-31)
+
+Effective-dated pricing history (schema + selection, Claude/Codex/what-if cost
+paths priced at their timestamps) and a daily LiteLLM sync workflow that opens
+append-only diff PRs — see
+[2026-07-31-effective-dated-pricing-design.md](./superpowers/specs/2026-07-31-effective-dated-pricing-design.md).
+Next: ⬜ trigger `workflow_dispatch` once post-merge to prove the cron path
+end to end and ⬜ fold LiteLLM's post-cut Luna/Terra cache rates into the
+existing `valid_from: "2026-07-30"` entries when published (amend, don't
+append).
+
 ### Cost-performance study landed (2026-07-20)
 
 The external + internal cost-performance research landed as durable docs

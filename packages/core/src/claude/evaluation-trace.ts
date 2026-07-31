@@ -338,13 +338,18 @@ function buildSubagentLaunchEvent(
   };
 }
 
-/** Per-message pricing-table cost estimate — same formula every other cost-bearing tool uses, applied to one `ApiMessage`. */
+/**
+ * Per-message pricing-table cost estimate — same formula every other
+ * cost-bearing tool uses, applied to one `ApiMessage`. `timestamp` selects
+ * the price-table entry in effect at that time (undefined ⇒ latest entry).
+ */
 function pricingEstimateOf(
   model: string | undefined,
   usage: TokenUsage | undefined,
+  timestamp: string | undefined,
 ): { costUsd: number; costIsComplete: boolean } {
   if (model === undefined || usage === undefined) return { costUsd: 0, costIsComplete: false };
-  const costUsd = estimateCostUsd(model, usage);
+  const costUsd = estimateCostUsd(model, usage, timestamp);
   return costUsd === undefined
     ? { costUsd: 0, costIsComplete: false }
     : { costUsd, costIsComplete: true };
@@ -360,7 +365,7 @@ function buildRequestEvent(
     ...(requestId !== undefined && { requestId }),
     ...(message.model !== undefined && { model: message.model }),
     ...(message.usage !== undefined && { usage: message.usage }),
-    pricingEstimate: pricingEstimateOf(message.model, message.usage),
+    pricingEstimate: pricingEstimateOf(message.model, message.usage, message.timestamp),
     ...(requestCapture !== undefined && {
       capture: {
         ...(requestCapture.latencyMs !== undefined && { latencyMs: requestCapture.latencyMs }),
