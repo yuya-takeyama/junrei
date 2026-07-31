@@ -68,11 +68,14 @@ requires wiring only, no pipeline restructuring.
   enough. An entry becomes effective at `00:00:00Z` on its `valid_from`
   date — a message timestamped anywhere on that date already uses the new
   entry.
-- Entries per model are sorted ascending by `valid_from` (`null` first);
-  loader re-sorts defensively. Duplicate `valid_from` for one model is
-  rejected by the update script.
+- Entries per model are kept sorted ascending by `valid_from` (`null`
+  first) for readability; selection is order-independent (it picks the
+  greatest applicable `valid_from`), so file order is cosmetic. Duplicate
+  `valid_from` for one model is rejected by the update script.
 - The existing `ModelPricing` interface
   (`packages/core/src/shared/pricing/pricing.ts:4-14`) is unchanged.
+- `pricingSnapshotInfo()` keeps its return shape; its `fetchedAt` becomes
+  the maximum per-entry `fetched_at` across all models.
 - Migration: wrap the current snapshot of each model as its single
   `valid_from: null` entry, preserving today's `fetchedAt` as `fetched_at`.
   The top-level `fetchedAt` moves into per-entry `fetched_at`.
@@ -85,15 +88,28 @@ returns the **last entry with `valid_from <= timestamp`**:
 - `timestamp` earlier than every dated entry → the `valid_from: null` entry.
 - `timestamp` missing/undefined → the latest entry (matches current
   behavior).
-- Callers updated to pass the record timestamp (all already have it):
+- Callers updated to pass the record timestamp:
   - `packages/core/src/claude/timeline.ts` (per-message entries)
   - `packages/core/src/claude/metrics.ts` (`computeUsage`,
     `computeTurnUsage`)
   - `packages/core/src/claude/evaluation-trace.ts`
-  - `packages/core/src/codex/analyze.ts`
+  - `packages/core/src/codex/analyze.ts` — Codex costs are computed on
+    per-model aggregates, not per message, so the accumulator records its
+    first-seen record timestamp and the aggregate is priced at it. A
+    session spanning a price boundary misprices its tail; acceptable at
+    day granularity against multi-hour sessions.
   - `packages/core/src/insight/whatIf.ts` (what-if simulation of a past
-    session now correctly uses that session's contemporaneous rates)
-  - `packages/core/src/shared/bash-stats.ts`
+    session now correctly uses that session's contemporaneous rates;
+    `WhatIfTimelinePoint` gains an optional `timestamp` copied from
+    `ContextPoint` by the server's `whatIfTimelineOf`)
+
+Exception: `packages/core/src/shared/bash-stats.ts` (`estUsdForChars`) and
+its downstream aggregates (`tool-usage-stats.ts`, `bash-opportunities.ts`)
+stay on latest-entry pricing. Their entry types carry no timestamps, the
+figures are explicitly heuristic ("compare deltas, not absolute dollars"),
+and relative weighting within one session is unaffected by which single
+table prices it — threading per-call timestamps through those aggregate
+types isn't worth the surface.
 
 Unknown-model handling is unchanged: no matching model → `undefined` →
 caller marks usage `unpriced`, aggregate sets `costIsComplete = false`, web
