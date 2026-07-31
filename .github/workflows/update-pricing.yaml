@@ -14,6 +14,9 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Sync pricing from LiteLLM
@@ -42,6 +45,7 @@ jobs:
             echo "## Before merging"
             echo "- [ ] Verify each \`valid_from\` against the provider's announced effective date; amend the entry if LiteLLM ingested the change late."
             echo "- [ ] If a change belongs to an existing same-dated manual entry (e.g. cache rates published after a cut), fold it into that entry instead of keeping a separate appended one."
+            echo "- [ ] If the fetched rates match an EARLIER entry in that model's history, upstream has not ingested a known change yet — close this PR rather than merging a revert."
             echo
             echo "_PRs opened with the default GITHUB_TOKEN don't trigger CI — close and reopen this PR (or push an empty commit) to start checks._"
           } > /tmp/pr-body.md
