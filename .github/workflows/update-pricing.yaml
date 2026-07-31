@@ -1,0 +1,48 @@
+name: update-pricing
+
+on:
+  schedule:
+    # Daily — keeps the worst-case "valid_from = fetch date" error small,
+    # given LiteLLM has no ingestion SLA for provider price changes.
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Sync pricing from LiteLLM
+        run: node scripts/update-pricing.mjs | tee /tmp/pricing-summary.md
+      - name: Open PR when prices diverged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No pricing changes — nothing to do."
+            exit 0
+          fi
+          day="$(date -u +%Y-%m-%d)"
+          branch="chore/pricing-update-$(date -u +%Y%m%d)"
+          git checkout -b "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/core/src/shared/pricing/prices.json
+          git commit -m "chore(pricing): sync LiteLLM price changes ($day)"
+          git push -u origin "$branch"
+          {
+            echo "Automated LiteLLM pricing sync — appended effective-dated entries:"
+            echo
+            cat /tmp/pricing-summary.md
+            echo
+            echo "## Before merging"
+            echo "- [ ] Verify each \`valid_from\` against the provider's announced effective date; amend the entry if LiteLLM ingested the change late."
+            echo "- [ ] If a change belongs to an existing same-dated manual entry (e.g. cache rates published after a cut), fold it into that entry instead of keeping a separate appended one."
+            echo
+            echo "_PRs opened with the default GITHUB_TOKEN don't trigger CI — close and reopen this PR (or push an empty commit) to start checks._"
+          } > /tmp/pr-body.md
+          gh pr create --title "chore(pricing): LiteLLM price sync $day" --body-file /tmp/pr-body.md
