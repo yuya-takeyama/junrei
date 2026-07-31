@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TokenUsage } from "../types.js";
-import { estimateCostComponents, estimateCostUsd, findModelPricing } from "./pricing.js";
+import {
+  estimateCostComponents,
+  estimateCostUsd,
+  findModelPricing,
+  type PricingHistoryEntry,
+  selectPricingEntry,
+} from "./pricing.js";
 
 const USAGE: TokenUsage = {
   inputTokens: 1000,
@@ -195,5 +201,71 @@ describe("findModelPricing (Bedrock-style Claude model ids)", () => {
     // the unmodified pipeline would (i.e. undefined — these aren't real keys).
     expect(findModelPricing("claude-anthropic-experimental-4-5")).toBeUndefined();
     expect(findModelPricing("not.anthropic.claude-sonnet-4-5-20250929-v1:0")).toBeUndefined();
+  });
+});
+
+describe("selectPricingEntry", () => {
+  const HISTORY: PricingHistoryEntry[] = [
+    {
+      valid_from: null,
+      fetched_at: "2026-01-01T00:00:00.000Z",
+      input_cost_per_token: 1e-6,
+      output_cost_per_token: 2e-6,
+    },
+    {
+      valid_from: "2026-03-01",
+      fetched_at: "2026-03-02T00:00:00.000Z",
+      input_cost_per_token: 3e-6,
+      output_cost_per_token: 4e-6,
+    },
+    {
+      valid_from: "2026-06-01",
+      fetched_at: "2026-06-02T00:00:00.000Z",
+      input_cost_per_token: 5e-6,
+      output_cost_per_token: 6e-6,
+    },
+  ];
+
+  it("returns the latest entry when no timestamp is given", () => {
+    expect(selectPricingEntry(HISTORY)?.input_cost_per_token).toBe(5e-6);
+  });
+
+  it("returns the null entry for a timestamp before every dated entry", () => {
+    expect(selectPricingEntry(HISTORY, "2026-02-15T12:00:00.000Z")?.input_cost_per_token).toBe(
+      1e-6,
+    );
+  });
+
+  it("applies a dated entry from 00:00:00Z on its valid_from day (inclusive boundary)", () => {
+    expect(selectPricingEntry(HISTORY, "2026-03-01T00:00:00.000Z")?.input_cost_per_token).toBe(
+      3e-6,
+    );
+    expect(selectPricingEntry(HISTORY, "2026-02-28T23:59:59.999Z")?.input_cost_per_token).toBe(
+      1e-6,
+    );
+  });
+
+  it("picks the greatest applicable valid_from between entries", () => {
+    expect(selectPricingEntry(HISTORY, "2026-04-10T09:00:00.000Z")?.input_cost_per_token).toBe(
+      3e-6,
+    );
+  });
+
+  it("uses the last entry for timestamps after every valid_from", () => {
+    expect(selectPricingEntry(HISTORY, "2027-01-01T00:00:00.000Z")?.input_cost_per_token).toBe(
+      5e-6,
+    );
+  });
+
+  it("is order-independent — an unsorted history gives identical answers", () => {
+    const shuffled = [HISTORY[2], HISTORY[0], HISTORY[1]] as PricingHistoryEntry[];
+    expect(selectPricingEntry(shuffled, "2026-04-10T00:00:00.000Z")?.input_cost_per_token).toBe(
+      3e-6,
+    );
+    expect(selectPricingEntry(shuffled)?.input_cost_per_token).toBe(5e-6);
+  });
+
+  it("returns undefined for an empty history", () => {
+    expect(selectPricingEntry([])).toBeUndefined();
   });
 });
