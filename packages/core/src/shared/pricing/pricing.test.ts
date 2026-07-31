@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TokenUsage } from "../types.js";
 import {
+  cacheReadRatePerToken,
   estimateCostComponents,
   estimateCostUsd,
   findModelPricing,
@@ -267,5 +268,61 @@ describe("selectPricingEntry", () => {
 
   it("returns undefined for an empty history", () => {
     expect(selectPricingEntry([])).toBeUndefined();
+  });
+});
+
+describe("findModelPricing (GPT-5.6 Luna/Terra price cut, effective 2026-07-30)", () => {
+  it("prices Luna at the old rates for messages before 2026-07-30", () => {
+    const pricing = findModelPricing("gpt-5.6-luna", "2026-07-29T23:59:59.000Z");
+    expect(pricing?.input_cost_per_token).toBe(0.000001);
+    expect(pricing?.output_cost_per_token).toBe(0.000006);
+  });
+
+  it("prices Luna at the cut rates from 2026-07-30T00:00:00Z", () => {
+    const pricing = findModelPricing("gpt-5.6-luna", "2026-07-30T00:00:00.000Z");
+    expect(pricing?.input_cost_per_token).toBe(2e-7);
+    expect(pricing?.output_cost_per_token).toBe(0.0000012);
+    // Cache rates were NOT in the announcement — carried over from the prior
+    // entry until LiteLLM publishes real post-cut values (see the spec).
+    expect(pricing?.cache_creation_input_token_cost).toBe(0.00000125);
+    expect(pricing?.cache_read_input_token_cost).toBe(1e-7);
+  });
+
+  it("prices Terra at old/new rates across the boundary", () => {
+    expect(
+      findModelPricing("gpt-5.6-terra", "2026-07-01T00:00:00.000Z")?.input_cost_per_token,
+    ).toBe(0.0000025);
+    const after = findModelPricing("gpt-5.6-terra", "2026-08-01T00:00:00.000Z");
+    expect(after?.input_cost_per_token).toBe(0.000002);
+    expect(after?.output_cost_per_token).toBe(0.000012);
+  });
+
+  it("uses the newest rates when no timestamp is given (undated callers)", () => {
+    expect(findModelPricing("gpt-5.6-luna")?.input_cost_per_token).toBe(2e-7);
+  });
+
+  it("estimateCostUsd reflects the boundary end-to-end", () => {
+    // USAGE = 1000 in / 500 out / 2000 cacheRead / 300 cacheCreate.
+    // Old: 1000*1e-6 + 500*6e-6 + 2000*1e-7 + 300*1.25e-6 = 0.004575
+    // New: 1000*2e-7 + 500*1.2e-6 + 2000*1e-7 + 300*1.25e-6 = 0.001375
+    expect(estimateCostUsd("gpt-5.6-luna", USAGE, "2026-07-01T00:00:00.000Z")).toBeCloseTo(
+      0.004575,
+      10,
+    );
+    expect(estimateCostUsd("gpt-5.6-luna", USAGE, "2026-08-01T00:00:00.000Z")).toBeCloseTo(
+      0.001375,
+      10,
+    );
+  });
+
+  it("Sol and base gpt-5.6 are unchanged by the cut (still one entry)", () => {
+    expect(findModelPricing("gpt-5.6-sol", "2026-07-01T00:00:00.000Z")).toEqual(
+      findModelPricing("gpt-5.6-sol", "2026-08-01T00:00:00.000Z"),
+    );
+  });
+
+  it("cacheReadRatePerToken accepts a timestamp (equal values today — cache rates carried over)", () => {
+    expect(cacheReadRatePerToken("gpt-5.6-luna", 1000, "2026-07-01T00:00:00.000Z")).toBe(1e-7);
+    expect(cacheReadRatePerToken("gpt-5.6-luna", 1000, "2026-08-01T00:00:00.000Z")).toBe(1e-7);
   });
 });
