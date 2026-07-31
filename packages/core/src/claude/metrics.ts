@@ -37,7 +37,7 @@ export function computeUsage(data: SessionData): UsageSummary {
     entry.outputTokens += message.usage.outputTokens;
     entry.cacheReadTokens += message.usage.cacheReadTokens;
     entry.cacheCreationTokens += message.usage.cacheCreationTokens;
-    const cost = estimateCostComponents(model, message.usage);
+    const cost = estimateCostComponents(model, message.usage, message.timestamp);
     if (cost === undefined) {
       entry.unpriced = true;
     } else {
@@ -155,7 +155,9 @@ export function computeTurnUsage(data: SessionData): ClaudeTurnUsage[] {
     // when the model is known, so a missing model reads as "no cost data"
     // rather than falling back to some default rate.
     const costUsd =
-      message.model !== undefined ? estimateCostUsd(message.model, message.usage) : undefined;
+      message.model !== undefined
+        ? estimateCostUsd(message.model, message.usage, message.timestamp)
+        : undefined;
     turn.steps.push({
       line: message.line,
       ...(message.timestamp !== undefined && { timestamp: message.timestamp }),
