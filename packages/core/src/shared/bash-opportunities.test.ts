@@ -42,9 +42,9 @@ describe("computeBashOpportunities", () => {
           count: 3,
           examples: ["pnpm test"],
           occurrences: [
-            { thread: "main", line: 1, resultChars: 40 },
-            { thread: "main", line: 2, resultChars: 40 },
-            { thread: "main", line: 3, resultChars: 40 },
+            { thread: "main", line: 1, resultChars: 40, command: "pnpm test" },
+            { thread: "main", line: 2, resultChars: 40, command: "pnpm test" },
+            { thread: "main", line: 3, resultChars: 40, command: "pnpm test" },
           ],
         },
       ],
@@ -81,7 +81,7 @@ describe("computeBashOpportunities", () => {
     }
   });
 
-  it("produces the exact fixText for one near-duplicate case", () => {
+  it("produces the exact fixText for one near-duplicate case confined to a single thread (reuse wording)", () => {
     const byThread = [threadRow("main", "claude-fable-5")];
     const waste: BashWaste = {
       ...EMPTY_WASTE,
@@ -91,16 +91,16 @@ describe("computeBashOpportunities", () => {
           count: 3,
           examples: ["pnpm test"],
           occurrences: [
-            { thread: "main", line: 6, resultChars: 40 },
-            { thread: "main", line: 8, resultChars: 40 },
-            { thread: "main", line: 10, resultChars: 40 },
+            { thread: "main", line: 6, resultChars: 40, command: "pnpm test" },
+            { thread: "main", line: 8, resultChars: 40, command: "pnpm test" },
+            { thread: "main", line: 10, resultChars: 40, command: "pnpm test" },
           ],
         },
       ],
     };
     const [opportunity] = computeBashOpportunities({ byThread, waste });
     expect(opportunity?.fixText).toBe(
-      "Batch or cache `pnpm test` in main — it ran 3 times with the same shape; combine the calls into one, or reuse the first result instead of re-running it.",
+      "Batch or cache `pnpm test` in main — it ran 3 times with identical output; combine the calls into one, or reuse the first result instead of re-running it.",
     );
     expect(opportunity?.lever).toBe("spawn-prompt");
     expect(opportunity?.occurrenceCount).toBe(3);
@@ -108,6 +108,95 @@ describe("computeBashOpportunities", () => {
     expect(opportunity?.threads).toEqual(["main"]);
     // First occurrence forgiven; the other 2 (40 chars each) are the measured waste.
     expect(opportunity?.estUsdSaved).toBe(2 * Math.ceil(40 / 4) * FABLE_INPUT_RATE);
+  });
+
+  it("produces spawn-prompt-embedding fixText when a confirmed near-duplicate spans multiple threads", () => {
+    const byThread = [
+      threadRow("sub1", "claude-fable-5"),
+      threadRow("sub2", "claude-fable-5"),
+      threadRow("sub3", "claude-fable-5"),
+    ];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      nearDuplicates: [
+        {
+          pattern: "git diff <PATH>",
+          count: 3,
+          examples: ["git diff a.ts"],
+          occurrences: [
+            { thread: "sub1", line: 1, resultChars: 9812, command: "git diff a.ts" },
+            { thread: "sub2", line: 1, resultChars: 9812, command: "git diff a.ts" },
+            { thread: "sub3", line: 1, resultChars: 9812, command: "git diff a.ts" },
+          ],
+        },
+      ],
+    };
+    const [opportunity] = computeBashOpportunities({ byThread, waste });
+    expect(opportunity?.fixText).toContain("spawn prompt");
+    expect(opportunity?.fixText).toContain("git diff a.ts");
+    expect(opportunity?.threads).toEqual(["sub1", "sub2", "sub3"]);
+    expect(opportunity?.occurrenceCount).toBe(3);
+  });
+
+  it("does NOT price a shape-only near-duplicate group whose occurrences have different concrete commands", () => {
+    const byThread = [threadRow("main", "claude-fable-5")];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      nearDuplicates: [
+        {
+          pattern: "git diff <PATH>",
+          count: 3,
+          examples: ["git diff a.ts", "git diff b.ts", "git diff c.ts"],
+          occurrences: [
+            { thread: "main", line: 1, resultChars: 1200, command: "git diff a.ts" },
+            { thread: "main", line: 2, resultChars: 3400, command: "git diff b.ts" },
+            { thread: "main", line: 3, resultChars: 800, command: "git diff c.ts" },
+          ],
+        },
+      ],
+    };
+    expect(computeBashOpportunities({ byThread, waste })).toEqual([]);
+  });
+
+  it("does NOT price an identical-concrete-command near-duplicate group with unequal resultChars", () => {
+    const byThread = [threadRow("main", "claude-fable-5")];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      nearDuplicates: [
+        {
+          pattern: "pnpm test",
+          count: 3,
+          examples: ["pnpm test"],
+          occurrences: [
+            { thread: "main", line: 1, resultChars: 40, command: "pnpm test" },
+            { thread: "main", line: 2, resultChars: 41, command: "pnpm test" },
+            { thread: "main", line: 3, resultChars: 40, command: "pnpm test" },
+          ],
+        },
+      ],
+    };
+    expect(computeBashOpportunities({ byThread, waste })).toEqual([]);
+  });
+
+  it("does NOT price near-duplicate occurrences with missing resultChars or missing command, and does not crash", () => {
+    const byThread = [threadRow("main", "claude-fable-5")];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      nearDuplicates: [
+        {
+          pattern: "pnpm test",
+          count: 3,
+          examples: ["pnpm test"],
+          occurrences: [
+            { thread: "main", line: 1, command: "pnpm test" }, // missing resultChars
+            { thread: "main", line: 2, resultChars: 40 }, // missing command
+            { thread: "main", line: 3, resultChars: 40, command: "pnpm test" },
+          ],
+        },
+      ],
+    };
+    expect(() => computeBashOpportunities({ byThread, waste })).not.toThrow();
+    expect(computeBashOpportunities({ byThread, waste })).toEqual([]);
   });
 
   it("produces the exact fixText for one rerun-after-error case", () => {
@@ -184,6 +273,66 @@ describe("computeBashOpportunities", () => {
     );
   });
 
+  it("suggests JSON field selection (not --quiet/tail) for a large-result command invoking jq", () => {
+    const byThread = [threadRow("main", "claude-fable-5")];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      largeResults: [
+        {
+          command: `cat report.json | jq 'to_entries[] | select(.value.type != "array" and .value.type != "object")'`,
+          resultChars: 29_467,
+          line: 4,
+          thread: "main",
+          truncatedByHarness: false,
+        },
+      ],
+    };
+    const [opportunity] = computeBashOpportunities({ byThread, waste });
+    expect(opportunity?.fixText).toContain("del(");
+    expect(opportunity?.fixText).not.toContain("--quiet");
+    expect(opportunity?.fixText).not.toContain("| tail");
+    expect(opportunity?.heuristicNote).not.toContain("quiet/tail");
+  });
+
+  it("suggests JSON field selection for a large-result command that cats a .json file directly", () => {
+    const byThread = [threadRow("main", "claude-fable-5")];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      largeResults: [
+        {
+          command: "cat workflow-run.json",
+          resultChars: 25_000,
+          line: 4,
+          thread: "main",
+          truncatedByHarness: false,
+        },
+      ],
+    };
+    const [opportunity] = computeBashOpportunities({ byThread, waste });
+    expect(opportunity?.fixText).toContain("del(");
+    expect(opportunity?.fixText).not.toContain("--quiet");
+  });
+
+  it("keeps the quiet/tail suggestion for a large-result command that doesn't touch JSON", () => {
+    const byThread = [threadRow("main", "claude-fable-5")];
+    const waste: BashWaste = {
+      ...EMPTY_WASTE,
+      largeResults: [
+        {
+          command: "pnpm run build:verbose",
+          resultChars: 30_000,
+          line: 10,
+          thread: "main",
+          truncatedByHarness: false,
+        },
+      ],
+    };
+    const [opportunity] = computeBashOpportunities({ byThread, waste });
+    expect(opportunity?.fixText).toContain("--quiet");
+    expect(opportunity?.fixText).not.toContain("del(");
+    expect(opportunity?.heuristicNote).toContain("quiet/tail");
+  });
+
   it("sorts priced opportunities by estUsdSaved desc, then unpriced ones by basis tier (measured before heuristic) then totalChars desc", () => {
     const byThread = [threadRow("known", "claude-fable-5"), threadRow("unknown")];
     const waste: BashWaste = {
@@ -193,9 +342,9 @@ describe("computeBashOpportunities", () => {
           count: 3,
           examples: ["nd-known"],
           occurrences: [
-            { thread: "known", line: 1, resultChars: 40 },
-            { thread: "known", line: 2, resultChars: 40 },
-            { thread: "known", line: 3, resultChars: 40 },
+            { thread: "known", line: 1, resultChars: 40, command: "nd-known" },
+            { thread: "known", line: 2, resultChars: 40, command: "nd-known" },
+            { thread: "known", line: 3, resultChars: 40, command: "nd-known" },
           ],
         },
         {
@@ -203,9 +352,9 @@ describe("computeBashOpportunities", () => {
           count: 3,
           examples: ["nd-unknown"],
           occurrences: [
-            { thread: "unknown", line: 1, resultChars: 1000 },
-            { thread: "unknown", line: 2, resultChars: 1000 },
-            { thread: "unknown", line: 3, resultChars: 1000 },
+            { thread: "unknown", line: 1, resultChars: 1000, command: "nd-unknown" },
+            { thread: "unknown", line: 2, resultChars: 1000, command: "nd-unknown" },
+            { thread: "unknown", line: 3, resultChars: 1000, command: "nd-unknown" },
           ],
         },
       ],
@@ -257,16 +406,18 @@ describe("computeBashOpportunities", () => {
   });
 
   it("caps evidence at 10 entries, largest resultChars first", () => {
+    // Uses bash-as-read (shape-grouped, no equal-resultChars requirement)
+    // rather than near-duplicate, since near-duplicate now requires every
+    // occurrence in a priced partition to share the SAME resultChars — this
+    // test is about generic evidence-capping/sorting, not that rule.
     const byThread = [threadRow("main")];
-    const occurrences = Array.from({ length: 12 }, (_, i) => ({
-      thread: "main",
-      line: i + 1,
+    const calls = Array.from({ length: 12 }, (_, i) => ({
+      command: "cat foo.log",
       resultChars: (i + 1) * 10,
+      line: i + 1,
+      thread: "main",
     }));
-    const waste: BashWaste = {
-      ...EMPTY_WASTE,
-      nearDuplicates: [{ pattern: "x", count: 12, examples: ["x"], occurrences }],
-    };
+    const waste: BashWaste = { ...EMPTY_WASTE, bashAsRead: calls };
     const [opportunity] = computeBashOpportunities({ byThread, waste });
     expect(opportunity?.evidence).toHaveLength(10);
     expect(opportunity?.evidence[0]?.resultChars).toBe(120);

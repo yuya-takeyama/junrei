@@ -13,7 +13,28 @@
  *
  * ## Savings rules (product-owner decisions, not re-litigated here)
  *
- * `near-duplicate` and `rerun-after-error` are MEASURED: every group already
+ * `near-duplicate` is MEASURED, but narrower than the raw
+ * `waste.nearDuplicates` grouping it reads from: a shape-only match
+ * (`normalizeCommandForDedup` — paths/numbers/quoted strings collapsed to
+ * placeholders) is NOT enough to price as waste on its own. Two calls that
+ * share a shape but differ in concrete arguments (`git diff a.ts` vs.
+ * `git diff b.ts`, `cd <worktree-1> && pnpm test` vs. `cd <worktree-2> &&
+ * pnpm test`) are legitimate, non-redundant work, not repetition — pricing
+ * them as waste is a false positive (verified against real session data: 3
+ * of the top 4 briefing items were exactly this). So each shape group is
+ * FIRST re-partitioned by exact concrete command text, and a partition is
+ * only priced when it (a) has >=3 occurrences with identical command text
+ * AND (b) every occurrence's `resultChars` is known and STRICTLY EQUAL
+ * across the partition — a byte-identical result is the actual confirming
+ * signal of redundant work, not just a matching command shape. A shape
+ * group can therefore yield zero, one, or several priced opportunities (one
+ * per confirmed partition); partitions that don't confirm are silently
+ * DROPPED, not surfaced as some lower-confidence placeholder — the raw
+ * shape-only groups remain visible via `BashStats.waste.nearDuplicates` for
+ * anyone who wants the unfiltered signal. See
+ * `buildNearDuplicateOpportunities`/`confirmDuplicatePartition`.
+ *
+ * `rerun-after-error` is MEASURED the ordinary way: every group already
  * names its own occurrences with a real `resultChars`, so "what would fixing
  * this actually have saved" is a real sum, not a guess — see
  * `measuredSkipFirstSavings`'s own doc comment for exactly which occurrences
@@ -168,11 +189,14 @@ function buildEvidence(
 }
 
 /**
- * The MEASURED savings rule for `near-duplicate`: the FIRST occurrence in
- * the group is forgiven (it established the pattern — a first Bash call is
- * normal), and every occurrence AFTER it is priced as avoidable waste.
- * All-or-nothing per the module doc comment: `undefined` the moment any of
- * `occurrences[1..]` can't be priced, rather than a partial sum.
+ * The MEASURED savings rule for a CONFIRMED `near-duplicate` partition (see
+ * `confirmDuplicatePartition` — this is called only after a shape group has been
+ * re-partitioned by exact concrete command and confirmed byte-identical):
+ * the FIRST occurrence in the partition is forgiven (it established the
+ * pattern — a first Bash call is normal), and every occurrence AFTER it is
+ * priced as avoidable waste. All-or-nothing per the module doc comment:
+ * `undefined` the moment any of `occurrences[1..]` can't be priced (its
+ * thread's model is unknown/unpriced), rather than a partial sum.
  */
 function measuredSkipFirstSavings(
   occurrences: readonly { thread: string; resultChars: number }[],
@@ -237,31 +261,101 @@ function charsOf(occurrence: { resultChars?: number }): number {
   return occurrence.resultChars ?? 0;
 }
 
+/** Same threshold semantics as `nearDuplicates` itself (see `NEAR_DUPLICATE_MIN_COUNT` in `./bash-stats.ts`) — applied here to a concrete-command PARTITION rather than the raw shape group. */
+const NEAR_DUPLICATE_CONFIRM_MIN = 3;
+
+type NearDuplicateOccurrence = BashNearDuplicateGroup["occurrences"][number];
+
+interface ConfirmedDuplicatePartition {
+  command: string;
+  occurrences: ReadonlyArray<{ thread: string; line: number; resultChars: number }>;
+}
+
+/**
+ * Re-partitions a shape group's occurrences by EXACT concrete `command`
+ * text — see the module doc comment's near-duplicate section. An occurrence
+ * with no known `command` (backward-compat data — see
+ * `BashNearDuplicateGroup.occurrences`'s own doc comment) can never be
+ * identified with a partition, so it's dropped here rather than folded into
+ * some catch-all "unknown" bucket.
+ */
+function partitionByConcreteCommand(
+  occurrences: readonly NearDuplicateOccurrence[],
+): Map<string, NearDuplicateOccurrence[]> {
+  const partitions = new Map<string, NearDuplicateOccurrence[]>();
+  for (const occurrence of occurrences) {
+    if (occurrence.command === undefined) continue;
+    const list = partitions.get(occurrence.command);
+    if (list === undefined) partitions.set(occurrence.command, [occurrence]);
+    else list.push(occurrence);
+  }
+  return partitions;
+}
+
+/**
+ * Confirms (or rejects) one concrete-command partition as real (not just
+ * shape-only) near-duplicate waste — see the module doc comment. Requires
+ * >=3 occurrences (`NEAR_DUPLICATE_CONFIRM_MIN`) AND every occurrence's
+ * `resultChars` known and STRICTLY EQUAL across the whole partition; a
+ * partition with even one unknown result can never confirm. Returns
+ * `undefined` for "doesn't qualify" rather than a boolean, since the caller
+ * needs `resultChars` narrowed to non-optional for pricing anyway — this
+ * shape sidesteps `noUncheckedIndexedAccess` friction a plain type-predicate
+ * guard would hit when re-reading `partition[0]` after narrowing.
+ */
+function confirmDuplicatePartition(
+  partition: readonly NearDuplicateOccurrence[],
+): ConfirmedDuplicatePartition | undefined {
+  if (partition.length < NEAR_DUPLICATE_CONFIRM_MIN) return undefined;
+  const first = partition[0];
+  if (first === undefined || first.resultChars === undefined || first.command === undefined) {
+    return undefined;
+  }
+  const confirmedChars = first.resultChars;
+  const command = first.command;
+  const occurrences: Array<{ thread: string; line: number; resultChars: number }> = [];
+  for (const o of partition) {
+    if (o.resultChars !== confirmedChars) return undefined;
+    occurrences.push({ thread: o.thread, line: o.line, resultChars: o.resultChars });
+  }
+  return { command, occurrences };
+}
+
+/** `"Run once and embed in spawn prompts"` (multi-thread) vs. `"reuse the first result"` (single-thread) — see the module doc comment: isolated subagent contexts can't reuse a result fetched in another thread, so the fix has to say so instead of suggesting reuse. */
+function nearDuplicateFixText(command: string, threads: readonly string[], count: number): string {
+  if (threads.length > 1) {
+    return `Run \`${command}\` once in the orchestrator and embed the result in the spawn prompts for ${describeThreads(threads)} — it returned byte-identical output ${count} times across separate threads; isolated subagent contexts can't reuse a result fetched elsewhere.`;
+  }
+  return `Batch or cache \`${command}\` in ${describeThreads(threads)} — it ran ${count} times with identical output; combine the calls into one, or reuse the first result instead of re-running it.`;
+}
+
 function buildNearDuplicateOpportunities(
   groups: readonly BashNearDuplicateGroup[],
   modelOf: (thread: string) => string | undefined,
 ): BashOpportunity[] {
-  return groups.map((group) => {
-    const occurrences = group.occurrences.map((o) => ({
-      thread: o.thread,
-      line: o.line,
-      resultChars: charsOf(o),
-    }));
-    const threads = uniqueThreads(occurrences);
-    const estUsdSaved = measuredSkipFirstSavings(occurrences, modelOf);
-    return {
-      class: "near-duplicate",
-      title: `${group.count}× "${group.pattern}" repeated across ${describeThreads(threads)}`,
-      lever: "spawn-prompt",
-      fixText: `Batch or cache \`${group.pattern}\` in ${describeThreads(threads)} — it ran ${group.count} times with the same shape; combine the calls into one, or reuse the first result instead of re-running it.`,
-      ...(estUsdSaved !== undefined && { estUsdSaved }),
-      savingsBasis: "measured",
-      occurrenceCount: group.count,
-      totalChars: sumChars(occurrences),
-      threads,
-      evidence: buildEvidence(occurrences, modelOf),
-    };
-  });
+  const opportunities: BashOpportunity[] = [];
+  for (const group of groups) {
+    for (const partition of partitionByConcreteCommand(group.occurrences).values()) {
+      const confirmed = confirmDuplicatePartition(partition);
+      if (confirmed === undefined) continue;
+      const { command, occurrences } = confirmed;
+      const threads = uniqueThreads(occurrences);
+      const estUsdSaved = measuredSkipFirstSavings(occurrences, modelOf);
+      opportunities.push({
+        class: "near-duplicate",
+        title: `${occurrences.length}× "${command}" repeated across ${describeThreads(threads)}`,
+        lever: "spawn-prompt",
+        fixText: nearDuplicateFixText(command, threads, occurrences.length),
+        ...(estUsdSaved !== undefined && { estUsdSaved }),
+        savingsBasis: "measured",
+        occurrenceCount: occurrences.length,
+        totalChars: sumChars(occurrences),
+        threads,
+        evidence: buildEvidence(occurrences, modelOf),
+      });
+    }
+  }
+  return opportunities;
 }
 
 function buildRerunAfterErrorOpportunities(
@@ -348,6 +442,46 @@ function buildBashAsReadOpportunities(
   return result;
 }
 
+/**
+ * Whether `command` is a JSON-extraction pipeline — invokes `jq` (as its own
+ * token/segment, not a substring match — e.g. `jqsomething` doesn't count),
+ * or `cat`s a `.json` file. A quiet-reporter/`--quiet`/`| tail` suggestion is
+ * the wrong fix for this shape: the oversized output is typically ONE large
+ * string field (verified against a real 29,467-char result where ~29k was
+ * two embedded `script` fields that passed a `type != array/object` jq
+ * filter) that a volume-trimming flag wouldn't touch — the real fix is
+ * excluding/selecting fields. See `buildLargeResultOpportunities`.
+ */
+function isJsonExtractionCommand(command: string): boolean {
+  const segments = parseShellCommand(command).segments;
+  return segments.some((segment) => {
+    if (segment.executable === "jq") return true;
+    if (segment.executable === "cat") return segment.args.some((arg) => /\.json$/i.test(arg));
+    return false;
+  });
+}
+
+function largeResultFixText(
+  command: string,
+  resultChars: number,
+  count: number,
+  totalChars: number,
+  threads: readonly string[],
+): string {
+  const sizeDescription = `it returned ${resultChars.toLocaleString()} chars (${count} call(s) of this shape totaling ${totalChars.toLocaleString()} chars in ${describeThreads(threads)}).`;
+  if (isJsonExtractionCommand(command)) {
+    return `Exclude the large JSON fields from \`${command}\` — drop the large string fields with \`del(...)\` or select only the fields you need — ${sizeDescription}`;
+  }
+  return `Pipe \`${command}\` through a quiet reporter or add a \`--quiet\`/\`| tail\` filter — ${sizeDescription}`;
+}
+
+function largeResultHeuristicNote(command: string): string {
+  const volumeNote = isJsonExtractionCommand(command)
+    ? "Assumes excluding the large JSON fields keeps"
+    : "Assumes a quiet/tail'd version keeps";
+  return `${volumeNote} ~${Math.round((1 - LARGE_RESULT_AVOIDABLE) * 100)}% of the volume — ${Math.round(LARGE_RESULT_AVOIDABLE * 100)}% of resultChars is booked as avoidable (LARGE_RESULT_AVOIDABLE=${LARGE_RESULT_AVOIDABLE}).`;
+}
+
 function buildLargeResultOpportunities(
   calls: readonly BashLargeResult[],
   modelOf: (thread: string) => string | undefined,
@@ -365,10 +499,16 @@ function buildLargeResultOpportunities(
       class: "large-result",
       title: `${formatCharsShort(largest.resultChars)}-char ${family} result inside ${largest.thread}${modelSuffix(largest.thread, modelOf)}`,
       lever: "command-flag",
-      fixText: `Pipe \`${largest.command}\` through a quiet reporter or add a \`--quiet\`/\`| tail\` filter — it returned ${largest.resultChars.toLocaleString()} chars (${members.length} call(s) of this shape totaling ${totalChars.toLocaleString()} chars in ${describeThreads(threads)}).`,
+      fixText: largeResultFixText(
+        largest.command,
+        largest.resultChars,
+        members.length,
+        totalChars,
+        threads,
+      ),
       ...(estUsdSaved !== undefined && { estUsdSaved }),
       savingsBasis: "heuristic",
-      heuristicNote: `Assumes a quiet/tail'd version keeps ~${Math.round((1 - LARGE_RESULT_AVOIDABLE) * 100)}% of the volume — ${Math.round(LARGE_RESULT_AVOIDABLE * 100)}% of resultChars is booked as avoidable (LARGE_RESULT_AVOIDABLE=${LARGE_RESULT_AVOIDABLE}).`,
+      heuristicNote: largeResultHeuristicNote(largest.command),
       occurrenceCount: members.length,
       totalChars,
       threads,

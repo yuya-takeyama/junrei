@@ -118,9 +118,9 @@ describe("computeBashStats (shared engine)", () => {
         count: 3,
         examples: ["pnpm test"],
         occurrences: [
-          { thread: "main", line: 1, resultChars: 1 },
-          { thread: "main", line: 2, resultChars: 1 },
-          { thread: "sub1", line: 1, resultChars: 1 },
+          { thread: "main", line: 1, resultChars: 1, command: "pnpm test" },
+          { thread: "main", line: 2, resultChars: 1, command: "pnpm test" },
+          { thread: "sub1", line: 1, resultChars: 1, command: "pnpm test" },
         ],
       },
     ]);
