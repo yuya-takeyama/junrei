@@ -95,6 +95,22 @@ test("a manual early append is not duplicated when upstream catches up", () => {
   assert.deepEqual(appended, []);
 });
 
+test("a future-dated entry is ignored when choosing the comparison baseline", () => {
+  const withFuture = {
+    "gpt-x": [
+      ...HISTORY["gpt-x"],
+      { valid_from: "2099-01-01", fetched_at: "2026-07-01T00:00:00.000Z", ...NEW },
+    ],
+  };
+  const { appended } = mergePricingHistory(
+    withFuture,
+    { "gpt-x": { ...OLD } },
+    "2026-08-05",
+    "2026-08-05T05:00:00.000Z",
+  );
+  assert.deepEqual(appended, []);
+});
+
 test("extractCurrentRates filters, normalizes and aliases like the legacy script", () => {
   const raw = {
     "gpt-5.4": {

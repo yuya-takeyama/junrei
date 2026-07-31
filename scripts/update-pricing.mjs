@@ -105,6 +105,12 @@ function ratesEqual(a, b) {
  * already carries valid_from === fetchDate with DIFFERENT rates is a
  * conflict (same-day manual entry vs upstream) and throws — fold the
  * correction into that entry by hand instead.
+ *
+ * The comparison baseline is the entry in effect at `fetchDate`, not the
+ * greatest `valid_from` overall — a future-dated entry (e.g. a manually
+ * pre-staged price change) is ignored when choosing it, so a cron run
+ * between today and that future date doesn't compare against rates that
+ * aren't in effect yet and append a redundant duplicate entry daily.
  */
 export function mergePricingHistory(existing, fetched, fetchDate, fetchedAtIso) {
   const models = { ...existing };
@@ -116,7 +122,9 @@ export function mergePricingHistory(existing, fetched, fetchDate, fetchedAtIso) 
       appended.push({ model, valid_from: null });
       continue;
     }
-    const latest = latestEntryOf(history);
+    const latest = latestEntryOf(
+      history.filter((entry) => entry.valid_from === null || entry.valid_from <= fetchDate),
+    );
     if (latest !== undefined && ratesEqual(latest, rates)) continue;
     if (latest?.valid_from === fetchDate) {
       throw new Error(
