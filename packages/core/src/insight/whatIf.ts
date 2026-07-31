@@ -45,6 +45,8 @@ export interface WhatIfTimelinePoint {
   contextTokens: number;
   /** Owning model, when derivable; else the builder's `fallbackModel` prices this point. */
   model?: string;
+  /** Record timestamp (`ContextPoint.timestamp`) — selects the price-table entry in effect for this point; omitted ⇒ latest entry. */
+  timestamp?: string;
   /** 1-based source line — anchors where a heavy result appeared on the series (scenario 2). */
   line?: number;
 }
@@ -159,9 +161,13 @@ function tokensOf(resultChars: number): number {
  * when the resolved model has no pricing — the caller then marks the scenario
  * partial rather than inventing a dollar figure.
  */
-function priceMessage(contextTokens: number, model: string | undefined): number | undefined {
+function priceMessage(
+  contextTokens: number,
+  model: string | undefined,
+  timestamp: string | undefined,
+): number | undefined {
   if (model === undefined) return undefined;
-  const rate = cacheReadRatePerToken(model, contextTokens);
+  const rate = cacheReadRatePerToken(model, contextTokens, timestamp);
   return rate === undefined ? undefined : contextTokens * rate;
 }
 
@@ -202,8 +208,8 @@ function summarize(
     totalRealTokens += real;
     estSavedTokens += real - counter;
     const model = point.model ?? fallbackModel;
-    const realPriced = priceMessage(real, model);
-    const cfPriced = priceMessage(counter, model);
+    const realPriced = priceMessage(real, model, point.timestamp);
+    const cfPriced = priceMessage(counter, model, point.timestamp);
     if (realPriced === undefined || cfPriced === undefined) {
       pricingComplete = false;
       continue;

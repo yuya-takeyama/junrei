@@ -100,6 +100,22 @@ describe("buildWhatIf — compaction policy (D1)", () => {
     expect(c.resetCount).toBe(1);
     expect(c.estSavedTokens).toBe(115);
   });
+
+  it("timestamps on timeline points don't change pricing for single-entry models", () => {
+    // Value-level date sensitivity is covered by pricing.test.ts (Luna/Terra
+    // boundary tests); real models currently have identical cache-read rates
+    // across entries, so this locks in the pass-through + no-regression.
+    const timeline = [10, 50, 110, 150, 210, 250].map((t, i) => ({
+      contextTokens: t,
+      model: MODEL,
+      timestamp: `2026-07-0${i + 1}T00:00:00.000Z`,
+    }));
+    const c = compaction(
+      buildWhatIf({ timeline, compactionThresholdTokens: 100, compactionBaselineTokens: 10 }),
+    );
+    expect(c.estSavedTokens).toBe(600);
+    expect(c.estSavedUsd).toBeCloseTo(600 * RATE, 12);
+  });
 });
 
 describe("buildWhatIf — evict heavy results (D5)", () => {

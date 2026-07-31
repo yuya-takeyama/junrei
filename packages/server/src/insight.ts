@@ -253,10 +253,16 @@ function toPatternSessionInput(a: AnyAnalysis): PatternSessionInput {
  * The what-if simulator's context series (study D1/D5) — `contextTokens` +
  * source `line` per message. A `ContextPoint` carries no model, so the builder
  * prices every point at the session's dominant model (see `whatIfFallbackModel`
- * below); this is exact for the study's single-model target sessions.
+ * below); this is exact for the study's single-model target sessions. Each
+ * point's `timestamp`, when present, is forwarded so the builder can select
+ * the price-table entry in effect at that point instead of always the latest.
  */
 function whatIfTimelineOf(a: AnyAnalysis): WhatIfTimelinePoint[] {
-  return a.contextTimeline.map((p) => ({ contextTokens: p.contextTokens, line: p.line }));
+  return a.contextTimeline.map((p) => ({
+    contextTokens: p.contextTokens,
+    line: p.line,
+    ...(p.timestamp !== undefined && { timestamp: p.timestamp }),
+  }));
 }
 
 /**
