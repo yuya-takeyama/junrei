@@ -119,8 +119,8 @@ so keep adversarial review on opus until it is.
 | Model | Input | Output | vs Sol | Role |
 |---|---:|---:|---:|---|
 | GPT-5.6 Sol (`gpt-5.6-sol`) | $5 | $30 | 1.0x | Orchestrator and hardest reasoning |
-| GPT-5.6 Terra (`gpt-5.6-terra`) | $2.50 | $15 | 0.5x | Default implementation/research worker |
-| GPT-5.6 Luna (`gpt-5.6-luna`) | $1 | $6 | 0.2x | Fast scout and mechanical worker |
+| GPT-5.6 Terra (`gpt-5.6-terra`) | $2 | $12 | 0.4x | Default implementation/research worker |
+| GPT-5.6 Luna (`gpt-5.6-luna`) | $0.20 | $1.20 | 0.04x | Fast scout and mechanical worker |
 
 Subagents spend many tokens reading context and returning results. Four broad
 workers on the orchestrator model can erase the benefit of parallelism even
