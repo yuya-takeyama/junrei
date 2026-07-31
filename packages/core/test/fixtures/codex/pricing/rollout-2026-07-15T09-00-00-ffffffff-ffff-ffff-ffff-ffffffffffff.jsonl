@@ -1,0 +1,5 @@
+{"timestamp":"2026-07-15T09:00:00.000Z","type":"session_meta","payload":{"id":"ffffffff-ffff-ffff-ffff-ffffffffffff","cwd":"/Users/test/codex-proj","originator":"codex_cli_rs","cli_version":"0.144.2","source":"exec"}}
+{"timestamp":"2026-07-15T09:00:01.000Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/Users/test/codex-proj","model":"gpt-5.6-luna","effort":"medium"}}
+{"timestamp":"2026-07-15T09:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"Quick check."}}
+{"timestamp":"2026-07-15T09:00:05.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":300,"reasoning_output_tokens":50,"total_tokens":1300},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":300,"reasoning_output_tokens":50,"total_tokens":1300}}}}
+{"timestamp":"2026-07-15T09:00:06.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":"Done.","duration_ms":6000}}

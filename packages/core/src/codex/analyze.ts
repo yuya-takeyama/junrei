@@ -110,6 +110,14 @@ interface ModelAccumulator {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /**
+   * Timestamp of the first usage-bearing record this accumulator absorbed.
+   * Codex costs are computed on per-model AGGREGATES (not per message), so
+   * the whole aggregate is priced at this instant — a deliberate
+   * approximation: a session spanning a price boundary misprices its tail,
+   * acceptable at day-granularity price changes vs. hours-long sessions.
+   */
+  firstTimestamp?: string;
 }
 
 function addUsage(acc: ModelAccumulator, delta: CodexTokenUsageRaw): void {
@@ -139,7 +147,7 @@ function buildUsageSummary(accumulators: ReadonlyMap<string, ModelAccumulator>):
       cacheReadTokens: acc.cacheReadTokens,
       cacheCreationTokens: acc.cacheCreationTokens,
     };
-    const cost = estimateCostComponents(acc.model, usage);
+    const cost = estimateCostComponents(acc.model, usage, acc.firstTimestamp);
     byModel.push({
       model: acc.model,
       messageCount: acc.messageCount,
@@ -334,6 +342,8 @@ export function analyzeCodexSession(
             if (openTurn === undefined) openTurnFor(currentModel, undefined, record.timestamp);
             const active = openTurn as OpenTurn;
             addUsage(active.accumulator, delta);
+            if (record.timestamp !== undefined)
+              active.accumulator.firstTimestamp ??= record.timestamp;
             active.usage.inputTokens += Math.max(0, delta.inputTokens - delta.cachedInputTokens);
             active.usage.outputTokens += delta.outputTokens;
             active.usage.cacheReadTokens += delta.cachedInputTokens;

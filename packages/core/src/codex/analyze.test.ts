@@ -331,3 +331,18 @@ describe("analyzeCodexSession — sub-agent orchestration", () => {
     expect(analysis.codex.parentThreadId).toBe("77777777-7777-7777-7777-777777777777");
   });
 });
+
+describe("effective-dated pricing (GPT-5.6 Luna cut, 2026-07-30)", () => {
+  it("prices a pre-cut Luna session at the rates in effect at its first-seen timestamp", async () => {
+    const analysis = await analyzeFixtureAt(
+      "../../test/fixtures/codex/pricing/rollout-2026-07-15T09-00-00-ffffffff-ffff-ffff-ffff-ffffffffffff.jsonl",
+      "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    );
+    const luna = analysis.usage.byModel.find((m) => m.model === "gpt-5.6-luna");
+    // Old (pre-cut) rates: input 800 (1000 - 200 cached) * 1e-6
+    //   + output 300 * 6e-6 + cacheRead 200 * 1e-7
+    //   = 0.0008 + 0.0018 + 0.00002 = 0.00262.
+    // An undated lookup would price at the latest (post-cut) entry: 0.00054.
+    expect(luna?.costUsd).toBeCloseTo(0.00262, 10);
+  });
+});
