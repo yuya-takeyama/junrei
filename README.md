@@ -1,3 +1,6 @@
+
+</think>
+
 # Junrei
 
 **Zero-config self-improvement-loop infrastructure for Claude Code and Codex**
@@ -73,10 +76,10 @@ pnpm start
   `JUNREI_SERVER_PORT` is accepted as an alias)
 - MCP endpoint: http://localhost:7867/mcp
 
-For local development, `pnpm dev` instead searches upward from port 7868
-(API) and 5874 (Web) for the first free ports, and prints the resolved Web,
-API, and MCP URLs at startup. Both commands run the API server and web UI
-with hot reload enabled.
+For local development, `pnpm dev` instead tries sequentially starting from port
+7868 (API) and 5874 (Web) for the first free ports, and prints the resolved Web,
+API, and MCP URLs at startup. Both commands run the API server and web UI with
+hot reload enabled.
 
 ## Web UI
 
