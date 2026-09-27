@@ -2,7 +2,7 @@
 # Codex counterpart of .claude/agents/preview-verifier.md
 name = "preview-verifier"
 description = "Verify a UI change in the running Junrei dev preview against explicit pass/fail criteria and return a compact text verdict. Verifier, not fixer."
-model = "gpt-5.6-terra"
+model = "gpt-6-sol"
 model_reasoning_effort = "medium"
 
 developer_instructions = """

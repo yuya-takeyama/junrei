@@ -1,8 +1,8 @@
 # Adversarial review from fresh context.
-# Strongest tier: see .claude/skills/cost-efficient-delegation/references/codex.md
+# Sol at high effort: see .claude/skills/cost-efficient-delegation/references/codex.md
 name = "reviewer"
-description = "Adversarial reviewer on the strongest tier: tries to refute a diff or claim from fresh context. Read-only; reports ranked findings, never edits."
-model = "gpt-5.6-sol"
+description = "Adversarial reviewer: tries to refute a diff or claim from fresh context. Read-only; reports ranked findings, never edits."
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 

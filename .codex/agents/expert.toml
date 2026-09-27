@@ -1,10 +1,11 @@
 # Escalation target: hard implementation, tricky debugging.
-# Strongest tier — spawn only after a cheaper role failed for reasoning-related
-# causes, or the task is known-hard. See references/codex.md in the
+# Sol at xhigh effort — spawn only after a cheaper role failed for
+# reasoning-related causes, or the task is known-hard. Astra is a per-call
+# override on top of this role, not its default. See references/codex.md in the
 # cost-efficient-delegation skill.
 name = "expert"
-description = "Escalation worker on the strongest tier: hard implementation and tricky debugging that a Terra-tier worker failed or is expected to fail."
-model = "gpt-5.6-sol"
+description = "Escalation worker at maximum effort: hard implementation and tricky debugging that a high-effort worker failed or is expected to fail."
+model = "gpt-6-sol"
 model_reasoning_effort = "xhigh"
 
 developer_instructions = """
