@@ -378,6 +378,9 @@ a.l0g:hover {
 .c-h {
   background: var(--h);
 }
+.c-astra {
+  background: var(--astra);
+}
 .c-sol {
   background: var(--sol);
 }

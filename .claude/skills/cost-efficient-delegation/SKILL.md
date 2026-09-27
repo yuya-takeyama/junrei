@@ -91,16 +91,16 @@ against Junrei's pricing snapshot at
 
 | Model | Input | Output | vs Fable |
 |---|---:|---:|---:|
-| Claude Fable 5 (`fable`) | $10 | $50 | 1.0x |
-| Claude Opus 5 / 4.8 (`opus`) | $5 | $25 | 0.5x |
+| Claude Fable 5.1 / 5 (`fable`) | $10 | $50 | 1.0x |
+| Claude Opus 5.5 (`opus`) | $4 | $20 | 0.4x |
+| Claude Opus 5 / 4.8 | $5 | $25 | 0.5x |
 | Claude Sonnet 5 (`sonnet`) | $2 | $10 | 0.2x |
 | Claude Haiku 4.5 (`haiku`) | $1 | $5 | 0.1x |
 
-Opus 5 and Opus 4.8 price identically, so every opus-tier rule below applies
-to both; the `opus` alias resolves to whichever Opus the running harness
-pins — the recorded model in Junrei, not the alias, is the source of truth.
-Sonnet 5's $2/$10 is introductory pricing through 2026-08-31 ($3/$15 after,
-0.3x Fable).
+Opus 5.5, Opus 5 and Opus 4.8 share one tier (5.5 is 20% cheaper), so every
+opus-tier rule below applies to all three; the `opus` alias resolves to
+whichever Opus the running harness pins — the recorded model in Junrei, not
+the alias, is the source of truth.
 
 On a fat main context, cache writes can be the single largest line item —
 multipliers and a measured example are in `references/claude-code.md`.
@@ -118,9 +118,9 @@ so keep adversarial review on opus until it is.
 
 | Model | Input | Output | vs Sol | Role |
 |---|---:|---:|---:|---|
-| GPT-5.6 Sol (`gpt-5.6-sol`) | $5 | $30 | 1.0x | Orchestrator and hardest reasoning |
-| GPT-5.6 Terra (`gpt-5.6-terra`) | $2 | $12 | 0.4x | Default implementation/research worker |
-| GPT-5.6 Luna (`gpt-5.6-luna`) | $0.20 | $1.20 | 0.04x | Fast scout and mechanical worker |
+| GPT-5.6 Sol (`gpt-5.6-sol`) | $4 | $20 | 1.0x | Orchestrator and hardest reasoning |
+| GPT-5.6 Terra (`gpt-5.6-terra`) | $2 | $12 | 0.6x | Default implementation/research worker |
+| GPT-5.6 Luna (`gpt-5.6-luna`) | $0.20 | $1.20 | 0.06x | Fast scout and mechanical worker |
 
 Subagents spend many tokens reading context and returning results. Four broad
 workers on the orchestrator model can erase the benefit of parallelism even

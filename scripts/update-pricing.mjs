@@ -51,7 +51,7 @@ function keptFieldsOf(entry) {
 
 /**
  * LiteLLM's raw table -> { bareModelId: kept-rate-fields } for the models
- * junrei tracks (Claude + gpt-5* + the alias list). Aliases absent upstream
+ * junrei tracks (Claude + gpt-5-and-later + the alias list). Aliases absent upstream
  * are filled from their target's rates; an upstream entry with the alias's
  * own key wins if LiteLLM ever adds one.
  */
@@ -62,9 +62,9 @@ export function extractCurrentRates(raw) {
     const isClaude = model.startsWith("claude") || model.includes("anthropic/claude");
     // Codex CLI sessions report bare OpenAI ids (e.g. "gpt-5.5") with no
     // provider prefix, so only the unprefixed litellm keys are relevant here.
-    const isOpenAiGpt5 = /^gpt-5/.test(model);
+    const isOpenAiGpt = /^gpt-([5-9]|\d{2})/.test(model);
     const isKnownAlias = Object.hasOwn(MODEL_ALIASES, model);
-    if (!isClaude && !isOpenAiGpt5 && !isKnownAlias) continue;
+    if (!isClaude && !isOpenAiGpt && !isKnownAlias) continue;
     const kept = keptFieldsOf(entry);
     if (kept.input_cost_per_token !== undefined && kept.output_cost_per_token !== undefined) {
       // Normalize provider-prefixed keys (e.g. "anthropic/claude-...") to bare ids.

@@ -684,9 +684,9 @@ describe("computeUsage — effective-dated pricing", () => {
     ]);
     const summary = computeUsage(data);
     const luna = summary.byModel.find((m) => m.model === "gpt-5.6-luna");
-    // Pre-cut message $0.004575 + post-cut message $0.001375 — NOT 2x either
+    // Pre-cut message $0.004575 + post-cut message $0.000915 — NOT 2x either
     // (which is what a single flat table would produce).
-    expect(luna?.costUsd).toBeCloseTo(0.00595, 10);
+    expect(luna?.costUsd).toBeCloseTo(0.00549, 10);
     expect(summary.total.costIsComplete).toBe(true);
   });
 });
