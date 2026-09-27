@@ -26,6 +26,7 @@
   --s: #7aa8e0;
   --h: #66c2a6;
   /* model-family accents (see web/src/modelClass.ts master data) */
+  --astra: #e08e5c;
   --sol: #d4b95a;
   --terra: #a4b06a;
   --luna: #b7b1cc;
@@ -49,6 +50,7 @@
   --f: #b58ce0;
   --s: #7aa8e0;
   --h: #66c2a6;
+  --astra: #e08e5c;
   --sol: #d4b95a;
   --terra: #a4b06a;
   --luna: #b7b1cc;
@@ -68,6 +70,7 @@
   --f: #7a56b8;
   --s: #3470bd;
   --h: #178a70;
+  --astra: #b0562a;
   --sol: #8f7a1e;
   --terra: #66752a;
   --luna: #6d6688;
@@ -88,6 +91,7 @@
     --f: #7a56b8;
     --s: #3470bd;
     --h: #178a70;
+    --astra: #b0562a;
     --sol: #8f7a1e;
     --terra: #66752a;
     --luna: #6d6688;

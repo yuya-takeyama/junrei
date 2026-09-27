@@ -127,6 +127,24 @@ test("extractCurrentRates filters, normalizes and aliases like the legacy script
   assert.deepEqual(current["codex-auto-review"], current["gpt-5.4"]);
 });
 
+test("extractCurrentRates tracks gpt-5 and later generations, not legacy gpt-4/3.5", () => {
+  const rates = { input_cost_per_token: 1e-6, output_cost_per_token: 2e-6 };
+  const raw = {
+    "gpt-5.4": rates,
+    "gpt-6-sol": rates,
+    "gpt-10-x": rates,
+    "gpt-4o": rates,
+    "gpt-3.5-turbo": rates,
+  };
+  const current = extractCurrentRates(raw);
+  assert.deepEqual(Object.keys(current).sort(), [
+    "codex-auto-review",
+    "gpt-10-x",
+    "gpt-5.4",
+    "gpt-6-sol",
+  ]);
+});
+
 test("formatSummary renders old→new per-MTok cells for appended models", () => {
   const merged = mergePricingHistory(
     HISTORY,

@@ -11,7 +11,17 @@
  */
 
 /** Color-accent key — pairs with the `--<key>` token / `.c-<key>` class; "mut" = unclassified. */
-export type ModelClass = "f" | "s" | "h" | "sol" | "terra" | "luna" | "rev" | "gpt" | "mut";
+export type ModelClass =
+  | "f"
+  | "s"
+  | "h"
+  | "astra"
+  | "sol"
+  | "terra"
+  | "luna"
+  | "rev"
+  | "gpt"
+  | "mut";
 
 interface ModelFamily {
   /** Accent key shared by every family rendered in this color. */
@@ -27,7 +37,7 @@ interface ModelFamily {
   /**
    * How to extract the version shown next to the codename — "claude" reads
    * digits around the family word ("claude-sonnet-4-5" → "sonnet 4.5"),
-   * "gpt" reads the digits after the gpt prefix ("gpt-5.6-sol" → "5.6 sol").
+   * "gpt" reads the digits after the gpt prefix ("gpt-6-astra" → "6 astra").
    * Omitted = codename alone (e.g. auto-review has no version).
    */
   version?: "claude" | "gpt";
@@ -45,7 +55,8 @@ const MODEL_FAMILIES: readonly ModelFamily[] = [
   { cls: "f", match: seg("opus"), label: "opus", version: "claude" },
   { cls: "s", match: seg("sonnet"), label: "sonnet", version: "claude" },
   { cls: "h", match: seg("haiku"), label: "haiku", version: "claude" },
-  // Codex GPT-5.6 codenames.
+  // Codex GPT codenames (GPT-5.6 sol/terra/luna, GPT-6 astra/sol/luna).
+  { cls: "astra", match: seg("astra"), label: "astra", version: "gpt" },
   { cls: "sol", match: seg("sol"), label: "sol", version: "gpt" },
   { cls: "terra", match: seg("terra"), label: "terra", version: "gpt" },
   { cls: "luna", match: seg("luna"), label: "luna", version: "gpt" },

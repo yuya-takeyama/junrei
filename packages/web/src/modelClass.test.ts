@@ -8,12 +8,20 @@ describe("classifyModel", () => {
     expect(classifyModel("claude-opus-4-8")).toBe("f");
     expect(classifyModel("claude-sonnet-4-5-20250929")).toBe("s");
     expect(classifyModel("claude-haiku-4-5")).toBe("h");
+    expect(classifyModel("claude-fable-5-1")).toBe("f");
+    expect(classifyModel("claude-opus-5-5")).toBe("f");
   });
 
   it("gives each GPT-5.6 codename its own accent", () => {
     expect(classifyModel("gpt-5.6-sol")).toBe("sol");
     expect(classifyModel("gpt-5.6-terra")).toBe("terra");
     expect(classifyModel("gpt-5.6-luna")).toBe("luna");
+  });
+
+  it("maps GPT-6 codenames onto the codename accents", () => {
+    expect(classifyModel("gpt-6-astra")).toBe("astra");
+    expect(classifyModel("gpt-6-sol")).toBe("sol");
+    expect(classifyModel("gpt-6-luna")).toBe("luna");
   });
 
   it("separates the Codex auto-reviewer from the generic gpt bucket", () => {
@@ -27,6 +35,7 @@ describe("classifyModel", () => {
     // "sol" must not fire inside another word (e.g. Upstage's solar models).
     expect(classifyModel("solar-pro")).toBe("mut");
     expect(classifyModel("terraform-helper")).toBe("mut");
+    expect(classifyModel("astral-7b")).toBe("mut");
   });
 
   it("falls back to mut for unknown vendors", () => {
@@ -45,6 +54,11 @@ describe("modelShortLabel", () => {
     expect(modelShortLabel("gpt-5.6-sol")).toBe("5.6 sol");
     expect(modelShortLabel("gpt-5.6-terra")).toBe("5.6 terra");
     expect(modelShortLabel("gpt-5.6-luna")).toBe("5.6 luna");
+    expect(modelShortLabel("claude-fable-5-1")).toBe("fable 5.1");
+    expect(modelShortLabel("claude-opus-5-5")).toBe("opus 5.5");
+    expect(modelShortLabel("gpt-6-astra")).toBe("6 astra");
+    expect(modelShortLabel("gpt-6-sol")).toBe("6 sol");
+    expect(modelShortLabel("gpt-6-luna")).toBe("6 luna");
     expect(modelShortLabel("codex-auto-review")).toBe("auto-review");
   });
 
