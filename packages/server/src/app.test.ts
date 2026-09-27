@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 
 // resolveClaudeProjectsDirs() joins `${CLAUDE_CONFIG_DIR}/projects`, so pointing it
@@ -773,45 +773,72 @@ describe("GET /api/trends", () => {
     expect(body.window.timeZone).toBe("Asia/Tokyo");
   });
 
-  it("200s with a full trend report over the fixtures — zero-filled buckets, internally consistent totals", async () => {
-    const app = createApp();
-    // 30 days comfortably covers the fixtures' 2026-07-01..09 session dates
-    // from whenever this suite actually runs (see FIXTURES_DIR/CODEX_HOME).
-    const res = await app.request("/api/trends?days=30");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      buckets: Array<{ date: string; sessionCount: number; totalCostUsd: number }>;
-      summary: { current: { sessionCount: number; totalCostUsd: number } };
-    };
-    expect(body.buckets).toHaveLength(30);
-    const bucketSessionSum = body.buckets.reduce((sum, b) => sum + b.sessionCount, 0);
-    expect(bucketSessionSum).toBe(body.summary.current.sessionCount);
-    expect(body.summary.current.sessionCount).toBeGreaterThan(0);
-    const bucketCostSum = body.buckets.reduce((sum, b) => sum + b.totalCostUsd, 0);
-    expect(bucketCostSum).toBeCloseTo(body.summary.current.totalCostUsd);
-  });
+  describe("over the fixtures' 2026-07-01..09 session dates", () => {
+    // Pin the clock inside the fixtures' range: the windows are relative to
+    // `Date.now()`, so a real clock ages the fixtures out of every window.
+    // The Claude adapter also preselects by file mtime/birthtime (see
+    // `claudeListItems`), and a checkout stamps fixtures with "now" — so this
+    // block reads a copy whose mtimes are pinned to the fixtures' own dates.
+    let stampedDir: string;
+    beforeAll(async () => {
+      stampedDir = await mkdtemp(join(tmpdir(), "junrei-trends-fixtures-"));
+      await cp(FIXTURES_DIR, stampedDir, { recursive: true });
+      const stamp = new Date("2026-07-09T12:00:00.000Z");
+      for (const entry of await readdir(stampedDir, { recursive: true, withFileTypes: true })) {
+        if (entry.isFile()) await utimes(join(entry.parentPath, entry.name), stamp, stamp);
+      }
+      process.env.CLAUDE_CONFIG_DIR = stampedDir;
+    });
+    afterAll(async () => {
+      process.env.CLAUDE_CONFIG_DIR = FIXTURES_DIR;
+      await rm(stampedDir, { recursive: true, force: true });
+    });
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-  it("`repo` narrows the report to one repo's sessions, same key semantics as /api/overview", async () => {
-    const app = createApp();
-    const all = await app.request("/api/trends?days=30");
-    const allBody = (await all.json()) as { summary: { current: { sessionCount: number } } };
+    it("200s with a full trend report over the fixtures — zero-filled buckets, internally consistent totals", async () => {
+      const app = createApp();
+      const res = await app.request("/api/trends?days=30");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        buckets: Array<{ date: string; sessionCount: number; totalCostUsd: number }>;
+        summary: { current: { sessionCount: number; totalCostUsd: number } };
+      };
+      expect(body.buckets).toHaveLength(30);
+      const bucketSessionSum = body.buckets.reduce((sum, b) => sum + b.sessionCount, 0);
+      expect(bucketSessionSum).toBe(body.summary.current.sessionCount);
+      expect(body.summary.current.sessionCount).toBeGreaterThan(0);
+      const bucketCostSum = body.buckets.reduce((sum, b) => sum + b.totalCostUsd, 0);
+      expect(bucketCostSum).toBeCloseTo(body.summary.current.totalCostUsd);
+    });
 
-    // Fixture session 11111111 has cwd "/Users/test/proj" with no worktree
-    // marker, so its repoRoot is that same path (see deriveRepoIdentity) —
-    // same fixture /api/overview's own repo-filter test above uses.
-    const scoped = await app.request("/api/trends?days=30&repo=%2FUsers%2Ftest%2Fproj");
-    expect(scoped.status).toBe(200);
-    const scopedBody = (await scoped.json()) as {
-      summary: { current: { sessionCount: number } };
-      anomalies: { topSessions: Array<{ repoKey: string }> };
-    };
-    expect(scopedBody.summary.current.sessionCount).toBeGreaterThan(0);
-    expect(scopedBody.summary.current.sessionCount).toBeLessThanOrEqual(
-      allBody.summary.current.sessionCount,
-    );
-    for (const session of scopedBody.anomalies.topSessions) {
-      expect(session.repoKey).toBe("/Users/test/proj");
-    }
+    it("`repo` narrows the report to one repo's sessions, same key semantics as /api/overview", async () => {
+      const app = createApp();
+      const all = await app.request("/api/trends?days=30");
+      const allBody = (await all.json()) as { summary: { current: { sessionCount: number } } };
+
+      // Fixture session 11111111 has cwd "/Users/test/proj" with no worktree
+      // marker, so its repoRoot is that same path (see deriveRepoIdentity) —
+      // same fixture /api/overview's own repo-filter test above uses.
+      const scoped = await app.request("/api/trends?days=30&repo=%2FUsers%2Ftest%2Fproj");
+      expect(scoped.status).toBe(200);
+      const scopedBody = (await scoped.json()) as {
+        summary: { current: { sessionCount: number } };
+        anomalies: { topSessions: Array<{ repoKey: string }> };
+      };
+      expect(scopedBody.summary.current.sessionCount).toBeGreaterThan(0);
+      expect(scopedBody.summary.current.sessionCount).toBeLessThanOrEqual(
+        allBody.summary.current.sessionCount,
+      );
+      for (const session of scopedBody.anomalies.topSessions) {
+        expect(session.repoKey).toBe("/Users/test/proj");
+      }
+    });
   });
 });
 
