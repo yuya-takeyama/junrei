@@ -101,8 +101,6 @@ Opus 5.5, Opus 5 and Opus 4.8 share one tier (5.5 is 20% cheaper), so every
 opus-tier rule below applies to all three; the `opus` alias resolves to
 whichever Opus the running harness pins — the recorded model in Junrei, not
 the alias, is the source of truth.
-Sonnet 5's $2/$10 is introductory pricing through 2026-08-31 ($3/$15 after,
-0.3x Fable).
 
 On a fat main context, cache writes can be the single largest line item —
 multipliers and a measured example are in `references/claude-code.md`.
