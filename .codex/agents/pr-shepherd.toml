@@ -2,7 +2,7 @@
 # Codex counterpart of .claude/agents/pr-shepherd.md
 name = "pr-shepherd"
 description = "Shepherd a prepared working tree through commit, rebase, push, draft PR, and CI watch (merge only when explicitly authorized). Executes the given plan; never redesigns it."
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "low"
 
 developer_instructions = """

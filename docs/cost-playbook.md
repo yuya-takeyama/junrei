@@ -172,7 +172,7 @@ control flow in code, not prose). B5's repo map is deterministic (no LLM) —
 - **D4** — Workflow vs manual spawn, same phase graph? Implement one 3-phase PR
   both ways in one worktree; compare main-loop cost.
 - **D3** — Is Codex cheaper at equal scope? Run one identical task (aqua bump)
-  on Fable-main vs Codex Terra; compare $ and correctness.
+  on Fable-main vs Codex Sol; compare $ and correctness.
 
 ## 5. Method note — the coupled loop
 

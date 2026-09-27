@@ -1,6 +1,6 @@
 ---
 name: cost-efficient-delegation
-description: Cost-efficient model delegation playbook for Claude Code and Codex. Use BEFORE spawning subagents or workflows, when starting research/exploration/multi-step implementation, or when discussing cost or model selection. Routes Claude Fable/Opus/Sonnet/Haiku per call, and Codex GPT-5.6 Sol/Terra/Luna via predefined .codex/agents roles plus per-call overrides. Loading it for delegation work commits the main loop to plan/integrate/review only.
+description: Cost-efficient model delegation playbook for Claude Code and Codex. Use BEFORE spawning subagents or workflows, when starting research/exploration/multi-step implementation, or when discussing cost or model selection. Routes Claude Fable/Opus/Sonnet/Haiku per call, and Codex GPT-6 Astra/Sol/Luna via predefined .codex/agents roles plus per-call overrides. Loading it for delegation work commits the main loop to plan/integrate/review only.
 ---
 
 # Cost-Efficient Model Delegation
@@ -114,13 +114,19 @@ inventory go to sonnet (14-day baseline 98.7% success / $1.85); exploration and
 scouting go to haiku ($0.23). Whether opus→sonnet review loses catch-rate is not yet verified,
 so keep adversarial review on opus until it is.
 
-### Codex GPT-5.6 family
+### Codex GPT-6 family
 
 | Model | Input | Output | vs Sol | Role |
 |---|---:|---:|---:|---|
-| GPT-5.6 Sol (`gpt-5.6-sol`) | $4 | $20 | 1.0x | Orchestrator and hardest reasoning |
-| GPT-5.6 Terra (`gpt-5.6-terra`) | $2 | $12 | 0.6x | Default implementation/research worker |
-| GPT-5.6 Luna (`gpt-5.6-luna`) | $0.20 | $1.20 | 0.06x | Fast scout and mechanical worker |
+| GPT-6 Astra (`gpt-6-astra`) | $10 | $50 | 5.0x | Per-call escalation only, when Sol at xhigh is not enough |
+| GPT-6 Sol (`gpt-6-sol`) | $2 | $10 | 1.0x | Orchestrator; implementation, research, expert and review roles |
+| GPT-6 Luna (`gpt-6-luna`) | $0.10 | $0.50 | 0.05x | Fast scout and mechanical worker |
+
+GPT-6 has no middle tier: Sol covers everything between Luna's mechanical
+work and Astra, and roles differentiate by reasoning effort instead of model.
+Astra is never a role default — reach for it with a per-call override, and
+only after Sol at xhigh failed for reasoning-related causes or the task is
+known to need it.
 
 Subagents spend many tokens reading context and returning results. Four broad
 workers on the orchestrator model can erase the benefit of parallelism even

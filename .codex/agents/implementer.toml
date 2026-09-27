@@ -2,7 +2,7 @@
 # Default worker tier: see .claude/skills/cost-efficient-delegation/references/codex.md
 name = "implementer"
 description = "Implementation worker: feature implementation from a clear spec, test scaffolding, routine test repair. Runs the repo quality gates before reporting."
-model = "gpt-5.6-terra"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 
 developer_instructions = """

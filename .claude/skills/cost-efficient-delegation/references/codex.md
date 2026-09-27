@@ -39,10 +39,12 @@ Role mechanics:
    fork **rejects** `agent_type` and the model overrides with an error.
    `"none"` + a self-contained prompt is the default choice; a numeric
    last-N-turns value only when recent context is genuinely required.
-2. **Routing needs the V2 spawn surface.** `gpt-5.6-sol` and
-   `gpt-5.6-terra` force multi-agent V2 on; **`gpt-5.6-luna` forces V1**, so
-   a Luna parent session can select neither roles nor overrides. Other
-   models use V1 unless `features.multi_agent_v2.enabled = true` is set.
+2. **Routing needs the V2 spawn surface.** Which GPT-6 models force
+   multi-agent V2 on is not documented (for GPT-5.6, Sol/Terra forced V2 and
+   Luna forced V1). Check the live `spawn_agent` schema for `agent_type`
+   and the override params; if they are absent, set
+   `features.multi_agent_v2.enabled = true`, and never assume a Luna parent
+   can route.
 
 Call shapes:
 
@@ -58,7 +60,7 @@ spawn_agent {
 # One-off routing → per-call override
 spawn_agent {
   task_name: "classify flaky-test log",
-  model: "gpt-5.6-luna",
+  model: "gpt-6-luna",
   reasoning_effort: "low",
   fork_turns: "none",
   message: "<self-contained: full contract — no role instructions apply>"
@@ -70,12 +72,12 @@ Junrei afterwards (session detail → Subagent tree, or `get_subagent_tree`) —
 the observed model, not the role name or the override you passed, is the
 source of truth.
 
-## Writing the spawn message — GPT-5.6 prompting essentials
+## Writing the spawn message — prompting essentials
 
 Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
 "latest model" guide):
 
-- **Outcome, not steps.** GPT-5.6 infers the intended level of work from
+- **Outcome, not steps.** The model infers the intended level of work from
   context — give goal, domain context, hard constraints, success criteria,
   and output format; do not script every step. Say explicitly what the
   worker should do when it hits ambiguity (decide and note it, or stop and
@@ -100,7 +102,7 @@ Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
   intros, generic reassurance). This is how "return conclusions, not raw
   context" is enforced on the worker side.
 - **Tool-heavy bounded stages: spell out the routing.** Parallel or
-  dependent calls alone do not justify GPT-5.6's programmatic tool calling
+  dependent calls alone do not justify the model's programmatic tool calling
   — reserve it for bounded stages that filter/join/aggregate results, and
   state which stage, which tools, the output schema, and stop/retry limits;
   generic "use tools efficiently" lines do nothing. Keep direct calls
@@ -112,16 +114,18 @@ Distilled from OpenAI's GPT-5.6 model guidance (developers.openai.com,
 |---|---|---|---|
 | `scout` | luna | low | Read-only exploration, find-where-X, summaries, status (read-only sandbox) |
 | `mechanic` | luna | low | Mechanical edits, formatting, lint fixes from an exact spec |
-| `researcher` | terra | medium | Web research, docs synthesis, log analysis |
-| `implementer` | terra | high | Feature implementation with a clear spec; test scaffolding/repair |
-| `preview-verifier` | terra | medium | UI verification in the dev preview; verdict only, never edits |
+| `researcher` | sol | medium | Web research, docs synthesis, log analysis |
+| `implementer` | sol | high | Feature implementation with a clear spec; test scaffolding/repair |
+| `preview-verifier` | sol | medium | UI verification in the dev preview; verdict only, never edits |
 | `pr-shepherd` | luna | low | Commit → rebase → push → draft PR → CI watch (→ authorized merge) |
 | `expert` | sol | xhigh | Escalation: hard implementation, tricky debugging |
 | `reviewer` | sol | high | Adversarial review from fresh context (read-only sandbox) |
 
-Escalate by re-spawning the failed bounded subtask as `expert` — do not move
-the whole workflow to Sol, and do not retry the same prompt on the same role
-expecting a different outcome.
+Escalate by re-spawning the failed bounded subtask as `expert` (same model,
+xhigh effort). If `expert` also fails for reasoning-related causes, re-spawn
+that subtask once more as `expert` with a `model: "gpt-6-astra"` override and
+state why in the spawn message. Never move the whole workflow to Astra, and
+do not retry the same prompt on the same role expecting a different outcome.
 
 ## Fallback when neither roles nor overrides are selectable
 
@@ -134,8 +138,8 @@ cheaper tier can be claimed:
 2. Keep the task bounded: one objective, relevant paths, constraints,
    verification, text-only result contract.
 3. Prefer a cheaper parent for routine standalone work: when the user
-   authorizes a separate task/session, start it as `gpt-5.6-luna` or
-   `gpt-5.6-terra` instead of spawning under Sol.
+   authorizes a separate task/session, start it as `gpt-6-luna` instead of
+   spawning under Sol.
 4. Report the actual recorded child model (from Junrei) when cost is material
    — never claim a tier the call could not control.
 
@@ -146,7 +150,7 @@ Minimal role file (`.codex/agents/<name>.toml`):
 ```toml
 name = "scout"
 description = "Read-only scout for exploration and status lookups."
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "low"
 sandbox_mode = "read-only"   # optional overlay; omit to inherit
 
@@ -162,9 +166,10 @@ message.
 
 ## Session-level setup for humans
 
-- Start routine worker sessions with `codex --model gpt-5.6-terra` or
-  `codex --model gpt-5.6-luna`; reserve `gpt-5.6-sol` for orchestration and
-  the hardest tasks. Remember: a Luna parent can select neither roles nor
-  overrides (V1).
+- Start orchestrator and routine worker sessions with `codex --model
+  gpt-6-sol`, and purely mechanical standalone sessions with
+  `codex --model gpt-6-luna` (do not count on a Luna parent being able to
+  route). Reserve `gpt-6-astra` for a session whose core task genuinely
+  needs it.
 - `[profiles.*]` in config.toml do not re-apply to children; children inherit
   the parent's live-turn model unless a role pins one.
