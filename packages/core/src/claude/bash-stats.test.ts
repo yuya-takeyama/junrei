@@ -191,9 +191,9 @@ describe("computeBashStats", () => {
             count: 3,
             examples: ["pnpm test"],
             occurrences: [
-              { thread: "main", line: 6, resultChars: 46 },
-              { thread: "main", line: 8, resultChars: 37 },
-              { thread: "main", line: 10, resultChars: 37 },
+              { thread: "main", line: 6, resultChars: 46, command: "pnpm test" },
+              { thread: "main", line: 8, resultChars: 37, command: "pnpm test" },
+              { thread: "main", line: 10, resultChars: 37, command: "pnpm test" },
             ],
           },
         ]);
@@ -334,10 +334,10 @@ describe("computeBashStats", () => {
       // 3 from main + 1 from the subagent thread.
       expect(pnpmTest?.count).toBe(4);
       expect(pnpmTest?.occurrences).toEqual([
-        { thread: "main", line: 6, resultChars: 46 },
-        { thread: "main", line: 8, resultChars: 37 },
-        { thread: "main", line: 10, resultChars: 37 },
-        { thread: "sub1", line: 2, resultChars: 13 },
+        { thread: "main", line: 6, resultChars: 46, command: "pnpm test" },
+        { thread: "main", line: 8, resultChars: 37, command: "pnpm test" },
+        { thread: "main", line: 10, resultChars: 37, command: "pnpm test" },
+        { thread: "sub1", line: 2, resultChars: 13, command: "pnpm test" },
       ]);
     });
 
