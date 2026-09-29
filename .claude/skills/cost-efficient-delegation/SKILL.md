@@ -94,7 +94,7 @@ against Junrei's pricing snapshot at
 | Claude Fable 5.1 / 5 (`fable`) | $10 | $50 | 1.0x |
 | Claude Opus 5.5 (`opus`) | $4 | $20 | 0.4x |
 | Claude Opus 5 / 4.8 | $5 | $25 | 0.5x |
-| Claude Sonnet 5 (`sonnet`) | $2 | $10 | 0.2x |
+| Claude Sonnet 5.5 / 5 (`sonnet`) | $2 | $10 | 0.2x |
 | Claude Haiku 4.5 (`haiku`) | $1 | $5 | 0.1x |
 
 Opus 5.5, Opus 5 and Opus 4.8 share one tier (5.5 is 20% cheaper), so every

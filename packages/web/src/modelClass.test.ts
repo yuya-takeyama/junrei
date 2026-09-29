@@ -10,6 +10,7 @@ describe("classifyModel", () => {
     expect(classifyModel("claude-haiku-4-5")).toBe("h");
     expect(classifyModel("claude-fable-5-1")).toBe("f");
     expect(classifyModel("claude-opus-5-5")).toBe("f");
+    expect(classifyModel("claude-sonnet-5-5")).toBe("s");
   });
 
   it("gives each GPT-5.6 codename its own accent", () => {
@@ -56,6 +57,7 @@ describe("modelShortLabel", () => {
     expect(modelShortLabel("gpt-5.6-luna")).toBe("5.6 luna");
     expect(modelShortLabel("claude-fable-5-1")).toBe("fable 5.1");
     expect(modelShortLabel("claude-opus-5-5")).toBe("opus 5.5");
+    expect(modelShortLabel("claude-sonnet-5-5")).toBe("sonnet 5.5");
     expect(modelShortLabel("gpt-6-astra")).toBe("6 astra");
     expect(modelShortLabel("gpt-6-sol")).toBe("6 sol");
     expect(modelShortLabel("gpt-6-luna")).toBe("6 luna");

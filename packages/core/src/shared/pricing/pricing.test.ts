@@ -150,6 +150,26 @@ describe("findModelPricing (Claude Opus 5)", () => {
   });
 });
 
+describe("findModelPricing (Claude Sonnet 5.5)", () => {
+  it("resolves claude-sonnet-5-5 at the Sonnet-tier rates", () => {
+    const pricing = findModelPricing("claude-sonnet-5-5");
+    expect(pricing).toBeDefined();
+    // $2 in / $10 out per MTok, cache write $2.50 (5m) / $4 (1h), cache read
+    // $0.20 — same rates as Sonnet 5.
+    expect(pricing?.input_cost_per_token).toBe(0.000002);
+    expect(pricing?.output_cost_per_token).toBe(0.00001);
+    expect(pricing?.cache_creation_input_token_cost).toBe(0.0000025);
+    expect(pricing?.cache_read_input_token_cost).toBe(2e-7);
+    expect(pricing?.cache_creation_input_token_cost_above_1hr).toBe(0.000004);
+  });
+
+  it("resolves Bedrock-style Sonnet 5.5 ids to the same entry", () => {
+    expect(findModelPricing("us.anthropic.claude-sonnet-5-5")).toEqual(
+      findModelPricing("claude-sonnet-5-5"),
+    );
+  });
+});
+
 describe("findModelPricing (Bedrock-style Claude model ids)", () => {
   it.each([
     ["us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"],
