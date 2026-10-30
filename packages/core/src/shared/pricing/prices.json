@@ -93,6 +93,15 @@
         "cache_creation_input_token_cost_above_200k_tokens": 0.0000075,
         "cache_read_input_token_cost_above_200k_tokens": 6e-7,
         "cache_creation_input_token_cost_above_1hr": 0.000006
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000003,
+        "output_cost_per_token": 0.000015,
+        "cache_creation_input_token_cost": 0.00000375,
+        "cache_read_input_token_cost": 3e-7,
+        "cache_creation_input_token_cost_above_1hr": 0.000006
       }
     ],
     "claude-sonnet-4-5-20250929": [
@@ -107,6 +116,15 @@
         "output_cost_per_token_above_200k_tokens": 0.0000225,
         "cache_creation_input_token_cost_above_200k_tokens": 0.0000075,
         "cache_read_input_token_cost_above_200k_tokens": 6e-7,
+        "cache_creation_input_token_cost_above_1hr": 0.000006
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000003,
+        "output_cost_per_token": 0.000015,
+        "cache_creation_input_token_cost": 0.00000375,
+        "cache_read_input_token_cost": 3e-7,
         "cache_creation_input_token_cost_above_1hr": 0.000006
       }
     ],
@@ -536,6 +554,12 @@
         "input_cost_per_token": 0.00003,
         "output_cost_per_token": 0.00018,
         "cache_read_input_token_cost": 0.000003
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.00003,
+        "output_cost_per_token": 0.00018
       }
     ],
     "gpt-5.5-pro-2026-04-23": [
@@ -545,6 +569,12 @@
         "input_cost_per_token": 0.00003,
         "output_cost_per_token": 0.00018,
         "cache_read_input_token_cost": 0.000003
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.00003,
+        "output_cost_per_token": 0.00018
       }
     ],
     "gpt-5.4": [
@@ -572,6 +602,12 @@
         "input_cost_per_token": 0.00003,
         "output_cost_per_token": 0.00018,
         "cache_read_input_token_cost": 0.000003
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.00003,
+        "output_cost_per_token": 0.00018
       }
     ],
     "gpt-5.4-pro-2026-03-05": [
@@ -581,6 +617,12 @@
         "input_cost_per_token": 0.00003,
         "output_cost_per_token": 0.00018,
         "cache_read_input_token_cost": 0.000003
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.00003,
+        "output_cost_per_token": 0.00018
       }
     ],
     "gpt-5.4-mini": [
@@ -761,6 +803,14 @@
         "cache_creation_input_token_cost": 3e-7,
         "cache_read_input_token_cost": 3e-8,
         "cache_creation_input_token_cost_above_1hr": 5e-7
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 2.5e-7,
+        "output_cost_per_token": 0.00000125,
+        "cache_creation_input_token_cost": 3e-7,
+        "cache_read_input_token_cost": 3e-8
       }
     ],
     "claude-3.5-sonnet": [
@@ -769,6 +819,12 @@
         "fetched_at": "2026-07-26T20:56:36.781Z",
         "input_cost_per_token": 0.000003,
         "output_cost_per_token": 0.000015
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.00000375,
+        "output_cost_per_token": 0.00001875
       }
     ],
     "claude-3.7-sonnet": [
@@ -788,6 +844,14 @@
         "cache_creation_input_token_cost": 0.00001875,
         "cache_read_input_token_cost": 0.0000015,
         "cache_creation_input_token_cost_above_1hr": 0.00003
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000015,
+        "output_cost_per_token": 0.000075,
+        "cache_creation_input_token_cost": 0.00001875,
+        "cache_read_input_token_cost": 0.0000015
       }
     ],
     "claude-sonnet-4.6": [
@@ -814,6 +878,14 @@
         "cache_creation_input_token_cost": 0.00000625,
         "cache_read_input_token_cost": 5e-7,
         "cache_creation_input_token_cost_above_1hr": 0.00001
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000005,
+        "output_cost_per_token": 0.000025,
+        "cache_creation_input_token_cost": 0.00000625,
+        "cache_read_input_token_cost": 5e-7
       }
     ],
     "claude-haiku-4.5": [
@@ -825,6 +897,14 @@
         "cache_creation_input_token_cost": 0.00000125,
         "cache_read_input_token_cost": 1e-7,
         "cache_creation_input_token_cost_above_1hr": 0.000002
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000001,
+        "output_cost_per_token": 0.000005,
+        "cache_creation_input_token_cost": 0.00000125,
+        "cache_read_input_token_cost": 1e-7
       }
     ],
     "claude-opus-4.7": [
@@ -1266,6 +1346,15 @@
         "cache_creation_input_token_cost": 0.0000025,
         "cache_read_input_token_cost": 2e-7,
         "cache_creation_input_token_cost_above_1hr": 0.000004
+      },
+      {
+        "valid_from": "2026-10-30",
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000002,
+        "output_cost_per_token": 0.00001,
+        "cache_creation_input_token_cost": 0.0000025,
+        "cache_read_input_token_cost": 1e-7,
+        "cache_creation_input_token_cost_above_1hr": 0.000004
       }
     ],
     "claude-sonnet-5.5": [
@@ -1287,6 +1376,36 @@
         "output_cost_per_token": 0.00001,
         "cache_creation_input_token_cost": 0.0000025,
         "cache_read_input_token_cost": 1e-7
+      }
+    ],
+    "gpt-5.5-cyber-preview": [
+      {
+        "valid_from": null,
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.0000125,
+        "output_cost_per_token": 0.000075,
+        "cache_read_input_token_cost": 0.00000125
+      }
+    ],
+    "claude-haiku-5-5": [
+      {
+        "valid_from": null,
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 1e-7,
+        "output_cost_per_token": 5e-7,
+        "cache_creation_input_token_cost": 1.25e-7,
+        "cache_read_input_token_cost": 1e-8,
+        "cache_creation_input_token_cost_above_1hr": 2e-7
+      }
+    ],
+    "gpt-6.1-terra": [
+      {
+        "valid_from": null,
+        "fetched_at": "2026-10-30T05:35:19.000Z",
+        "input_cost_per_token": 0.000001,
+        "output_cost_per_token": 0.000005,
+        "cache_creation_input_token_cost": 0.00000125,
+        "cache_read_input_token_cost": 5e-8
       }
     ]
   }
