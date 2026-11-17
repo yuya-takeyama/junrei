@@ -16,11 +16,11 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
     "@hono/mcp": "^0.3.0",
-    "@hono/node-server": "^2.0.10",
+    "@hono/node-server": "^2.0.12",
     "@junrei/capture-proxy": "workspace:*",
     "@junrei/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "hono": "^4.11.9",
+    "hono": "^4.12.34",
     "zod": "^4.4.3"
   },
   "devDependencies": {
